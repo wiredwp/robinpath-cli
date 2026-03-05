@@ -61,48 +61,40 @@
     $RpPath = "$InstallDir\rp.exe"
     $TempPath = "$InstallDir\robinpath-new.exe"
 
-    # Download with progress bar
+    # Download with progress bar (streamed)
     $DownloadUrl = $Asset.browser_download_url
     $TotalBytes = $Asset.size
     $TotalMB = [math]::Round($TotalBytes / 1MB, 1)
     $BarWidth = 20
     try {
-        $WebClient = New-Object System.Net.WebClient
-        $Done = $false
-        $LastPct = -1
-        $DownloadError = $null
+        $HttpClient = New-Object System.Net.Http.HttpClient
+        $Response = $HttpClient.GetAsync($DownloadUrl, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).Result
+        $Response.EnsureSuccessStatusCode() | Out-Null
+        $Stream = $Response.Content.ReadAsStreamAsync().Result
+        $FileStream = [System.IO.File]::Create($TempPath)
+        $Buffer = New-Object byte[] 65536
+        $Downloaded = 0
+        $LastDraw = 0
 
-        Register-ObjectEvent -InputObject $WebClient -EventName DownloadProgressChanged -Action {
-            $pct = $Event.SourceEventArgs.ProgressPercentage
-            if ($pct -ne $script:LastPct) {
-                $script:LastPct = $pct
-                $filled = [math]::Floor($pct / 100 * $script:BarWidth)
-                $empty = $script:BarWidth - $filled
-                $bar = ("=" * $filled) + ("-" * $empty)
-                $mb = [math]::Round($Event.SourceEventArgs.BytesReceived / 1MB, 1)
-                Write-Host "`r Downloading [$bar] ${mb}/${script:TotalMB} MB  " -NoNewline
+        while (($Read = $Stream.Read($Buffer, 0, $Buffer.Length)) -gt 0) {
+            $FileStream.Write($Buffer, 0, $Read)
+            $Downloaded += $Read
+
+            # Update bar every 500KB
+            if (($Downloaded - $LastDraw) -ge 524288) {
+                $LastDraw = $Downloaded
+                $Pct = [math]::Min($Downloaded / $TotalBytes, 1)
+                $Filled = [math]::Floor($Pct * $BarWidth)
+                $Empty = $BarWidth - $Filled
+                $Bar = ("=" * $Filled) + ("-" * $Empty)
+                $CurrentMB = [math]::Round($Downloaded / 1MB, 1)
+                Write-Host "`r Downloading [$Bar] ${CurrentMB}/${TotalMB} MB  " -NoNewline
             }
-        } | Out-Null
-
-        Register-ObjectEvent -InputObject $WebClient -EventName DownloadFileCompleted -Action {
-            if ($Event.SourceEventArgs.Error) {
-                $script:DownloadError = $Event.SourceEventArgs.Error
-            }
-            $script:Done = $true
-        } | Out-Null
-
-        $WebClient.DownloadFileAsync([Uri]$DownloadUrl, $TempPath)
-
-        while (-not $Done) {
-            Start-Sleep -Milliseconds 100
         }
 
-        $WebClient.Dispose()
-        Get-EventSubscriber | Unregister-Event
-
-        if ($DownloadError) {
-            throw $DownloadError
-        }
+        $FileStream.Close()
+        $Stream.Close()
+        $HttpClient.Dispose()
 
         Write-Host "`r Downloading [$("=" * $BarWidth)] ${TotalMB}/${TotalMB} MB  "
     } catch {
