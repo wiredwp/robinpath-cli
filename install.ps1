@@ -67,6 +67,7 @@
     $TotalMB = [math]::Round($TotalBytes / 1MB, 1)
     $BarWidth = 20
     try {
+        Add-Type -AssemblyName System.Net.Http
         $HttpClient = New-Object System.Net.Http.HttpClient
         $Response = $HttpClient.GetAsync($DownloadUrl, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).Result
         $Response.EnsureSuccessStatusCode() | Out-Null
