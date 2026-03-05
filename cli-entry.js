@@ -12,6 +12,9 @@ import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErrorWithContext } from '@wiredwp/robinpath';
 
+// Injected by esbuild at build time via --define, fallback for dev mode
+const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.30.0';
+
 // ============================================================================
 // Global flags
 // ============================================================================
@@ -76,8 +79,8 @@ async function checkForUpdates() {
         const res = await fetch('https://api.github.com/repos/nabivogedu/robinpath-cli/releases/latest');
         const data = await res.json();
         const latest = data.tag_name.replace('v', '');
-        if (latest !== ROBINPATH_VERSION) {
-            console.log(`\n${color.yellow('⚡')} New version available: ${color.green('v' + latest)} (you have v${ROBINPATH_VERSION})`);
+        if (latest !== CLI_VERSION) {
+            console.log(`\n${color.yellow('⚡')} New version available: ${color.green('v' + latest)} (you have v${CLI_VERSION})`);
             console.log(`   Run ${color.cyan('robinpath update')} to upgrade\n`);
         }
     } catch {
@@ -90,12 +93,12 @@ async function checkForUpdates() {
  */
 function handleUpdate() {
     const isWindows = platform() === 'win32';
-    log(`Updating RobinPath...`);
+    const env = { ...process.env, ROBINPATH_CURRENT_VERSION: CLI_VERSION };
     try {
         if (isWindows) {
-            execSync('powershell -NoProfile -Command "irm https://dev.robinpath.com/install.ps1 | iex"', { stdio: 'inherit' });
+            execSync('powershell -NoProfile -Command "irm https://dev.robinpath.com/install.ps1 | iex"', { stdio: 'inherit', env });
         } else {
-            execSync('curl -fsSL https://dev.robinpath.com/install.sh | sh', { stdio: 'inherit' });
+            execSync('curl -fsSL https://dev.robinpath.com/install.sh | sh', { stdio: 'inherit', env });
         }
     } catch (err) {
         console.error(color.red('Update failed:') + ` ${err.message}`);
@@ -117,7 +120,7 @@ function handleInstall() {
 
     // Already installed in the right place?
     if (resolve(src) === resolve(dest)) {
-        log(`robinpath v${ROBINPATH_VERSION} is already installed.`);
+        log(`robinpath v${CLI_VERSION} is already installed.`);
         return;
     }
 
@@ -167,7 +170,7 @@ function handleInstall() {
     }
 
     log('');
-    log(`Installed robinpath v${ROBINPATH_VERSION}`);
+    log(`Installed robinpath v${CLI_VERSION}`);
     log(`Location: ${dest}`);
     log(`Alias:    ${rpDest} (use "rp" as shorthand)`);
     log('');
@@ -1863,7 +1866,7 @@ async function handleDoctor() {
     let issues = 0;
 
     // CLI version
-    log(color.green('  ✓') + ` CLI version ${ROBINPATH_VERSION}`);
+    log(color.green('  ✓') + ` CLI version ${CLI_VERSION} (lang ${ROBINPATH_VERSION})`);
 
     // Install location
     const installDir = getInstallDir();
@@ -2736,7 +2739,7 @@ async function runWatchIteration(filePath) {
 // ============================================================================
 
 function showMainHelp() {
-    console.log(`RobinPath v${ROBINPATH_VERSION} — Scripting language for automation and data processing
+    console.log(`RobinPath v${CLI_VERSION} — Scripting language for automation and data processing
 
 USAGE:
   robinpath [command] [flags] [file]
@@ -3301,7 +3304,7 @@ async function startREPL() {
         historySize: 1000,
     });
 
-    log(`RobinPath v${ROBINPATH_VERSION}`);
+    log(`RobinPath v${CLI_VERSION}`);
     log('Type "help" for commands, "exit" to quit');
     log('');
 
@@ -3501,7 +3504,7 @@ async function main() {
 
     // Handle flags (can appear anywhere)
     if (args.includes('--version') || args.includes('-v')) {
-        console.log(`${cliName} v${ROBINPATH_VERSION}`);
+        console.log(`${cliName} v${CLI_VERSION} (lang v${ROBINPATH_VERSION})`);
         return;
     }
 
@@ -3604,7 +3607,7 @@ async function main() {
         return;
     }
     if (command === 'update') {
-        handleUpdate();
+        await handleUpdate();
         return;
     }
 
