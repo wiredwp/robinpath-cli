@@ -9,24 +9,18 @@
     $BinaryName = "robinpath-windows-x64.exe"
 
     Write-Host ""
-    Write-Host "  ╭─────────────────────────────╮" -ForegroundColor DarkCyan
-    Write-Host "  │                             │" -ForegroundColor DarkCyan
-    Write-Host "  │   " -ForegroundColor DarkCyan -NoNewline
-    Write-Host "RobinPath Installer" -ForegroundColor Cyan -NoNewline
-    Write-Host "   │" -ForegroundColor DarkCyan
-    Write-Host "  │                             │" -ForegroundColor DarkCyan
-    Write-Host "  ╰─────────────────────────────╯" -ForegroundColor DarkCyan
+    Write-Host "  RobinPath" -ForegroundColor Cyan -NoNewline
+    Write-Host " Installer" -ForegroundColor White
     Write-Host ""
 
     # Get latest release
-    Write-Host "  [1/4] " -ForegroundColor DarkGray -NoNewline
-    Write-Host "Fetching latest release..." -ForegroundColor White
+    Write-Host "  > " -ForegroundColor DarkCyan -NoNewline
+    Write-Host "Fetching latest release" -ForegroundColor Gray
     try {
         $Release = Invoke-RestMethod "https://api.github.com/repos/$Repo/releases/latest"
     } catch {
-        Write-Host ""
-        Write-Host "  ✗ No releases found." -ForegroundColor Red
-        Write-Host "    Visit https://github.com/$Repo/releases" -ForegroundColor DarkGray
+        Write-Host "  error: " -ForegroundColor Red -NoNewline
+        Write-Host "Could not reach GitHub. Check your connection."
         Write-Host ""
         return
     }
@@ -37,25 +31,30 @@
     # Skip if already on latest version
     $CurrentVersion = $env:ROBINPATH_CURRENT_VERSION
     if ($CurrentVersion -and $CurrentVersion -eq $LatestClean) {
-        Write-Host ""
-        Write-Host "  ✓ Already up to date (v$CurrentVersion)" -ForegroundColor Green
+        Write-Host "  success: " -ForegroundColor Green -NoNewline
+        Write-Host "Already on the latest version (v$CurrentVersion)."
         Write-Host ""
         return
+    }
+
+    if ($CurrentVersion) {
+        Write-Host "  > " -ForegroundColor DarkCyan -NoNewline
+        Write-Host "Upgrading v$CurrentVersion -> $Version"
     }
 
     $Asset = $Release.assets | Where-Object { $_.name -eq $BinaryName } | Select-Object -First 1
 
     if (-not $Asset) {
-        Write-Host ""
-        Write-Host "  ✗ Binary not found in $Version" -ForegroundColor Red
-        Write-Host "    Visit https://github.com/$Repo/releases" -ForegroundColor DarkGray
+        Write-Host "  error: " -ForegroundColor Red -NoNewline
+        Write-Host "No binary found for Windows x64 in $Version."
+        Write-Host "         Visit https://github.com/$Repo/releases" -ForegroundColor DarkGray
         Write-Host ""
         return
     }
 
     $SizeMB = [math]::Round($Asset.size / 1MB, 1)
-    Write-Host "  [2/4] " -ForegroundColor DarkGray -NoNewline
-    Write-Host "Downloading $Version " -ForegroundColor White -NoNewline
+    Write-Host "  > " -ForegroundColor DarkCyan -NoNewline
+    Write-Host "Downloading $Version " -NoNewline
     Write-Host "($SizeMB MB)" -ForegroundColor DarkGray
 
     # Create install directory
@@ -67,21 +66,21 @@
     $RpPath = "$InstallDir\rp.exe"
     $TempPath = "$InstallDir\robinpath-new.exe"
 
-    # Download with progress
+    # Download
     $DownloadUrl = $Asset.browser_download_url
     try {
         $WebClient = New-Object System.Net.WebClient
         $WebClient.DownloadFile($DownloadUrl, $TempPath)
     } catch {
-        Write-Host ""
-        Write-Host "  ✗ Download failed: $_" -ForegroundColor Red
+        Write-Host "  error: " -ForegroundColor Red -NoNewline
+        Write-Host "Download failed. $_"
         Write-Host ""
         return
     }
 
     # Replace the existing binary
-    Write-Host "  [3/4] " -ForegroundColor DarkGray -NoNewline
-    Write-Host "Installing..." -ForegroundColor White
+    Write-Host "  > " -ForegroundColor DarkCyan -NoNewline
+    Write-Host "Installing to $InstallDir" -ForegroundColor Gray
     try {
         if (Test-Path $ExePath) {
             $OldPath = "$InstallDir\robinpath-old.exe"
@@ -96,43 +95,44 @@
             try { Remove-Item $OldPath -Force } catch { }
         }
     } catch {
-        Write-Host ""
-        Write-Host "  ✗ Could not replace binary: $_" -ForegroundColor Red
+        Write-Host "  error: " -ForegroundColor Red -NoNewline
+        Write-Host "Could not replace binary. $_"
         Write-Host ""
         return
     }
 
     # Verify
-    Write-Host "  [4/4] " -ForegroundColor DarkGray -NoNewline
-    Write-Host "Verifying..." -ForegroundColor White
     try {
         $InstalledVersion = & $ExePath --version 2>&1
     } catch {
-        Write-Host ""
-        Write-Host "  ✗ Binary downloaded but failed to execute." -ForegroundColor Red
+        Write-Host "  error: " -ForegroundColor Red -NoNewline
+        Write-Host "Binary downloaded but failed to execute."
         Write-Host ""
         return
     }
 
-    Write-Host ""
-    Write-Host "  ✓ Installed $InstalledVersion" -ForegroundColor Green
-
     # Add to PATH if not already there
     $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $AddedPath = $false
 
     if ($UserPath -notlike "*$InstallDir*") {
         $NewPath = "$InstallDir;$UserPath"
         [Environment]::SetEnvironmentVariable("Path", $NewPath, "User")
         $env:Path = "$InstallDir;$env:Path"
-
-        Write-Host "  ✓ Added to PATH" -ForegroundColor Green
-        Write-Host ""
-        Write-Host "  Restart your terminal, then run:" -ForegroundColor DarkGray
-        Write-Host "    robinpath --version" -ForegroundColor Cyan
-    } else {
-        Write-Host ""
-        Write-Host "  Run:" -ForegroundColor DarkGray
-        Write-Host "    robinpath --version" -ForegroundColor Cyan
+        $AddedPath = $true
     }
+
+    Write-Host ""
+    Write-Host "  success: " -ForegroundColor Green -NoNewline
+    Write-Host "$InstalledVersion installed."
+    Write-Host ""
+
+    if ($AddedPath) {
+        Write-Host "  Restart your terminal, then run:" -ForegroundColor DarkGray
+    } else {
+        Write-Host "  To get started, run:" -ForegroundColor DarkGray
+    }
+    Write-Host ""
+    Write-Host "    robinpath --help" -ForegroundColor White
     Write-Host ""
 }
