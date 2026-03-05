@@ -5,18 +5,21 @@ set -e
 
 REPO="nabivogedu/robinpath-cli"
 INSTALL_DIR="$HOME/.robinpath/bin"
+START_TIME=$(date +%s)
 
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
-DCYAN='\033[0;36m'
 DIM='\033[0;90m'
 WHITE='\033[1;37m'
 NC='\033[0m'
 
-echo ""
-echo "  ${CYAN}RobinPath${NC} Installer"
+# Cargo-style right-aligned verb
+step() {
+    printf "%12s ${NC}%s\n" "${1}" "${2}"
+}
+
 echo ""
 
 # Detect OS and architecture
@@ -27,8 +30,8 @@ case "$OS" in
     linux)  PLATFORM="linux" ;;
     darwin) PLATFORM="macos" ;;
     *)
-        echo "  ${RED}error:${NC} Unsupported OS: $OS"
-        echo "         Visit https://github.com/$REPO/releases"
+        step "${RED}error" "Unsupported OS: $OS"
+        echo "               Visit https://github.com/$REPO/releases"
         echo ""
         exit 1
         ;;
@@ -38,7 +41,7 @@ case "$ARCH" in
     x86_64|amd64) ARCH_SUFFIX="x64" ;;
     arm64|aarch64) ARCH_SUFFIX="arm64" ;;
     *)
-        echo "  ${RED}error:${NC} Unsupported architecture: $ARCH"
+        step "${RED}error" "Unsupported architecture: $ARCH"
         echo ""
         exit 1
         ;;
@@ -47,9 +50,9 @@ esac
 BINARY_NAME="robinpath-${PLATFORM}-${ARCH_SUFFIX}"
 
 # Fetch latest release
-echo "  ${DCYAN}>${NC} Fetching latest release"
+step "${CYAN}Fetching" "latest release..."
 RELEASE_JSON=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null) || {
-    echo "  ${RED}error:${NC} Could not reach GitHub. Check your connection."
+    step "${RED}error" "Could not reach GitHub. Check your connection."
     echo ""
     exit 1
 }
@@ -60,37 +63,37 @@ LATEST_CLEAN=$(echo "$VERSION" | sed 's/^v//')
 
 # Skip if already on latest version
 if [ -n "$ROBINPATH_CURRENT_VERSION" ] && [ "$ROBINPATH_CURRENT_VERSION" = "$LATEST_CLEAN" ]; then
-    echo "  ${GREEN}success:${NC} Already on the latest version (v$ROBINPATH_CURRENT_VERSION)."
+    step "${GREEN}Up to date" "robinpath v$ROBINPATH_CURRENT_VERSION"
     echo ""
     exit 0
 fi
 
 if [ -n "$ROBINPATH_CURRENT_VERSION" ]; then
-    echo "  ${DCYAN}>${NC} Upgrading v$ROBINPATH_CURRENT_VERSION -> $VERSION"
+    step "${CYAN}Upgrading" "v$ROBINPATH_CURRENT_VERSION -> $VERSION"
 fi
 
 if [ -z "$DOWNLOAD_URL" ]; then
-    echo "  ${RED}error:${NC} No binary found for $PLATFORM/$ARCH_SUFFIX in $VERSION."
-    echo "         ${DIM}Visit https://github.com/$REPO/releases${NC}"
+    step "${RED}error" "No binary for $PLATFORM/$ARCH_SUFFIX in $VERSION."
+    echo "               ${DIM}Visit https://github.com/$REPO/releases${NC}"
     echo ""
     exit 1
 fi
 
-# Download
-echo "  ${DCYAN}>${NC} Downloading $VERSION ${DIM}($PLATFORM $ARCH_SUFFIX)${NC}"
+# Download with progress bar
+step "${CYAN}Downloading" "$VERSION ${DIM}($PLATFORM $ARCH_SUFFIX)${NC}"
 mkdir -p "$INSTALL_DIR"
-curl -fsSL "$DOWNLOAD_URL" -o "$INSTALL_DIR/robinpath"
-chmod +x "$INSTALL_DIR/robinpath"
+curl -f# "$DOWNLOAD_URL" -o "$INSTALL_DIR/robinpath" 2>&1
 
-# Install alias
-echo "  ${DCYAN}>${NC} Installing to $INSTALL_DIR"
+# Install
+chmod +x "$INSTALL_DIR/robinpath"
+step "${CYAN}Installing" "$INSTALL_DIR"
 ln -sf "$INSTALL_DIR/robinpath" "$INSTALL_DIR/rp"
 
 # Verify
 if "$INSTALL_DIR/robinpath" --version > /dev/null 2>&1; then
     INSTALLED_VERSION=$("$INSTALL_DIR/robinpath" --version)
 else
-    echo "  ${RED}error:${NC} Binary downloaded but failed to execute."
+    step "${RED}error" "Binary downloaded but failed to execute."
     echo ""
     exit 1
 fi
@@ -128,8 +131,9 @@ if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
     fi
 fi
 
-echo ""
-echo "  ${GREEN}success:${NC} $INSTALLED_VERSION installed."
+END_TIME=$(date +%s)
+ELAPSED=$((END_TIME - START_TIME))
+step "${GREEN}Installed" "$INSTALLED_VERSION in ${ELAPSED}s"
 echo ""
 
 if [ "$ADDED_PATH" = "true" ]; then
@@ -143,6 +147,5 @@ else
     echo "  ${DIM}To get started, run:${NC}"
 fi
 
-echo ""
 echo "    ${WHITE}robinpath --help${NC}"
 echo ""

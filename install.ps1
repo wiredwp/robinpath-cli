@@ -7,20 +7,23 @@
     $Repo = "nabivogedu/robinpath-cli"
     $InstallDir = "$env:USERPROFILE\.robinpath\bin"
     $BinaryName = "robinpath-windows-x64.exe"
+    $StartTime = Get-Date
+
+    # Right-aligned verb helper (Cargo-style)
+    function Step($Verb, $Message, $Color) {
+        $pad = " " * (12 - $Verb.Length)
+        Write-Host "$pad$Verb" -ForegroundColor $Color -NoNewline
+        Write-Host " $Message"
+    }
 
     Write-Host ""
-    Write-Host "  RobinPath" -ForegroundColor Cyan -NoNewline
-    Write-Host " Installer" -ForegroundColor White
-    Write-Host ""
 
-    # Get latest release
-    Write-Host "  > " -ForegroundColor DarkCyan -NoNewline
-    Write-Host "Fetching latest release" -ForegroundColor Gray
+    # Fetching
+    Step "Fetching" "latest release..." "Cyan"
     try {
         $Release = Invoke-RestMethod "https://api.github.com/repos/$Repo/releases/latest"
     } catch {
-        Write-Host "  error: " -ForegroundColor Red -NoNewline
-        Write-Host "Could not reach GitHub. Check your connection."
+        Step "error" "Could not reach GitHub. Check your connection." "Red"
         Write-Host ""
         return
     }
@@ -31,31 +34,23 @@
     # Skip if already on latest version
     $CurrentVersion = $env:ROBINPATH_CURRENT_VERSION
     if ($CurrentVersion -and $CurrentVersion -eq $LatestClean) {
-        Write-Host "  success: " -ForegroundColor Green -NoNewline
-        Write-Host "Already on the latest version (v$CurrentVersion)."
+        Step "Up to date" "robinpath v$CurrentVersion" "Green"
         Write-Host ""
         return
     }
 
     if ($CurrentVersion) {
-        Write-Host "  > " -ForegroundColor DarkCyan -NoNewline
-        Write-Host "Upgrading v$CurrentVersion -> $Version"
+        Step "Upgrading" "v$CurrentVersion -> $Version" "Cyan"
     }
 
     $Asset = $Release.assets | Where-Object { $_.name -eq $BinaryName } | Select-Object -First 1
 
     if (-not $Asset) {
-        Write-Host "  error: " -ForegroundColor Red -NoNewline
-        Write-Host "No binary found for Windows x64 in $Version."
-        Write-Host "         Visit https://github.com/$Repo/releases" -ForegroundColor DarkGray
+        Step "error" "No binary for Windows x64 in $Version." "Red"
+        Write-Host "               Visit https://github.com/$Repo/releases" -ForegroundColor DarkGray
         Write-Host ""
         return
     }
-
-    $SizeMB = [math]::Round($Asset.size / 1MB, 1)
-    Write-Host "  > " -ForegroundColor DarkCyan -NoNewline
-    Write-Host "Downloading $Version " -NoNewline
-    Write-Host "($SizeMB MB)" -ForegroundColor DarkGray
 
     # Create install directory
     if (-not (Test-Path $InstallDir)) {
@@ -66,21 +61,59 @@
     $RpPath = "$InstallDir\rp.exe"
     $TempPath = "$InstallDir\robinpath-new.exe"
 
-    # Download
+    # Download with progress bar
     $DownloadUrl = $Asset.browser_download_url
+    $TotalBytes = $Asset.size
+    $TotalMB = [math]::Round($TotalBytes / 1MB, 1)
+    $BarWidth = 20
     try {
         $WebClient = New-Object System.Net.WebClient
-        $WebClient.DownloadFile($DownloadUrl, $TempPath)
+        $Done = $false
+        $LastPct = -1
+        $DownloadError = $null
+
+        Register-ObjectEvent -InputObject $WebClient -EventName DownloadProgressChanged -Action {
+            $pct = $Event.SourceEventArgs.ProgressPercentage
+            if ($pct -ne $script:LastPct) {
+                $script:LastPct = $pct
+                $filled = [math]::Floor($pct / 100 * $script:BarWidth)
+                $empty = $script:BarWidth - $filled
+                $bar = ("=" * $filled) + ("-" * $empty)
+                $mb = [math]::Round($Event.SourceEventArgs.BytesReceived / 1MB, 1)
+                Write-Host "`r Downloading [$bar] ${mb}/${script:TotalMB} MB  " -NoNewline
+            }
+        } | Out-Null
+
+        Register-ObjectEvent -InputObject $WebClient -EventName DownloadFileCompleted -Action {
+            if ($Event.SourceEventArgs.Error) {
+                $script:DownloadError = $Event.SourceEventArgs.Error
+            }
+            $script:Done = $true
+        } | Out-Null
+
+        $WebClient.DownloadFileAsync([Uri]$DownloadUrl, $TempPath)
+
+        while (-not $Done) {
+            Start-Sleep -Milliseconds 100
+        }
+
+        $WebClient.Dispose()
+        Get-EventSubscriber | Unregister-Event
+
+        if ($DownloadError) {
+            throw $DownloadError
+        }
+
+        Write-Host "`r Downloading [$("=" * $BarWidth)] ${TotalMB}/${TotalMB} MB  "
     } catch {
-        Write-Host "  error: " -ForegroundColor Red -NoNewline
-        Write-Host "Download failed. $_"
+        Write-Host ""
+        Step "error" "Download failed. $_" "Red"
         Write-Host ""
         return
     }
 
-    # Replace the existing binary
-    Write-Host "  > " -ForegroundColor DarkCyan -NoNewline
-    Write-Host "Installing to $InstallDir" -ForegroundColor Gray
+    # Install
+    Step "Installing" "$InstallDir" "Cyan"
     try {
         if (Test-Path $ExePath) {
             $OldPath = "$InstallDir\robinpath-old.exe"
@@ -95,8 +128,7 @@
             try { Remove-Item $OldPath -Force } catch { }
         }
     } catch {
-        Write-Host "  error: " -ForegroundColor Red -NoNewline
-        Write-Host "Could not replace binary. $_"
+        Step "error" "Could not replace binary. $_" "Red"
         Write-Host ""
         return
     }
@@ -105,8 +137,7 @@
     try {
         $InstalledVersion = & $ExePath --version 2>&1
     } catch {
-        Write-Host "  error: " -ForegroundColor Red -NoNewline
-        Write-Host "Binary downloaded but failed to execute."
+        Step "error" "Binary downloaded but failed to execute." "Red"
         Write-Host ""
         return
     }
@@ -122,9 +153,8 @@
         $AddedPath = $true
     }
 
-    Write-Host ""
-    Write-Host "  success: " -ForegroundColor Green -NoNewline
-    Write-Host "$InstalledVersion installed."
+    $Elapsed = [math]::Round(((Get-Date) - $StartTime).TotalSeconds, 1)
+    Step "Installed" "$InstalledVersion in ${Elapsed}s" "Green"
     Write-Host ""
 
     if ($AddedPath) {
@@ -132,7 +162,6 @@
     } else {
         Write-Host "  To get started, run:" -ForegroundColor DarkGray
     }
-    Write-Host ""
     Write-Host "    robinpath --help" -ForegroundColor White
     Write-Host ""
 }
