@@ -7,7 +7,16 @@
       "Bash(grep:*)",
       "Bash(node:*)",
       "Bash(do echo:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Read(//c/Users/Nabivogedu/Desktop/Test Robinpath Cli/**)",
+      "Bash(robinpath:*)",
+      "WebFetch(domain:repo.robinpath.com)",
+      "Bash(tar tzf:*)",
+      "Bash(npm:*)",
+      "Bash(ls:*)",
+      "Bash(npx wrangler:*)",
+      "Read(//c//**)",
+      "Bash(done)"
     ]
   }
 }

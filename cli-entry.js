@@ -13,7 +13,7 @@ import { createHash } from 'node:crypto';
 import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErrorWithContext } from '@wiredwp/robinpath';
 
 // Injected by esbuild at build time via --define, fallback for dev mode
-const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.41.0';
+const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.42.0';
 
 // ============================================================================
 // Global flags
@@ -764,7 +764,7 @@ async function handlePublish(args) {
 
     try {
         execSync(
-            `tar czf "${toTarPath(tmpFile)}" --exclude=node_modules --exclude=.git --exclude=dist -C "${toTarPath(parentDir)}" "${dirName}"`,
+            `tar czf "${toTarPath(tmpFile)}" --exclude=node_modules --exclude=.git --exclude="*.tar.gz" -C "${toTarPath(parentDir)}" "${dirName}"`,
             { stdio: 'pipe' }
         );
     } catch (err) {
@@ -775,7 +775,7 @@ async function handlePublish(args) {
 
     // Read tarball and check size
     const tarball = readFileSync(tmpFile);
-    const maxSize = 5 * 1024 * 1024; // 5MB
+    const maxSize = 50 * 1024 * 1024; // 50MB
     if (tarball.length > maxSize) {
         unlinkSync(tmpFile);
         console.error(color.red('Error:') + ` Package is too large (${(tarball.length / 1024 / 1024).toFixed(1)}MB). Max size is 5MB.`);
@@ -3612,7 +3612,7 @@ async function main() {
         await handleInfo(args.slice(1));
         return;
     }
-    if (command === 'modules') {
+    if (command === 'modules' || command === 'module') {
         const sub = args[1];
         if (!sub || sub === 'list') {
             await handleModulesList();
