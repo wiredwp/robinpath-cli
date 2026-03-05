@@ -8,6 +8,8 @@ import { readFileSync, existsSync, mkdirSync, copyFileSync, rmSync, writeFileSyn
 import { resolve, extname, join, relative, dirname, basename } from 'node:path';
 import { execSync } from 'node:child_process';
 import { homedir, platform, tmpdir } from 'node:os';
+import { pathToFileURL } from 'node:url';
+import { createHash } from 'node:crypto';
 import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErrorWithContext } from '@wiredwp/robinpath';
 
 // ============================================================================
@@ -53,6 +55,17 @@ function getInstallDir() {
  */
 function getRobinPathHome() {
     return join(homedir(), '.robinpath');
+}
+
+const MODULES_DIR = join(homedir(), '.robinpath', 'modules');
+const MODULES_MANIFEST = join(MODULES_DIR, 'modules.json');
+const CACHE_DIR = join(homedir(), '.robinpath', 'cache');
+
+/** Convert Windows path to POSIX for tar commands */
+function toTarPath(p) {
+    if (process.platform !== 'win32') return p;
+    // C:\Users\foo → /c/Users/foo
+    return p.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, d) => '/' + d.toLowerCase());
 }
 
 /**
@@ -246,7 +259,7 @@ function displayError(error, script) {
  * Execute a script and exit with proper code
  */
 async function runScript(script, filePath) {
-    const rp = new RobinPath();
+    const rp = await createRobinPath();
     const startTime = FLAG_VERBOSE ? performance.now() : 0;
 
     try {
@@ -342,6 +355,138 @@ async function platformFetch(path, opts = {}) {
     const url = `${PLATFORM_URL}${path}`;
     const res = await fetch(url, { ...opts, headers });
     return res;
+}
+
+// ============================================================================
+// Module management utilities
+// ============================================================================
+
+function readModulesManifest() {
+    try {
+        if (!existsSync(MODULES_MANIFEST)) return {};
+        return JSON.parse(readFileSync(MODULES_MANIFEST, 'utf-8'));
+    } catch {
+        return {};
+    }
+}
+
+function writeModulesManifest(manifest) {
+    if (!existsSync(MODULES_DIR)) {
+        mkdirSync(MODULES_DIR, { recursive: true });
+    }
+    writeFileSync(MODULES_MANIFEST, JSON.stringify(manifest, null, 2), 'utf-8');
+}
+
+function getModulePath(packageName) {
+    // @robinpath/slack → ~/.robinpath/modules/@robinpath/slack
+    return join(MODULES_DIR, ...packageName.split('/'));
+}
+
+function parsePackageSpec(spec) {
+    if (!spec) return null;
+    // Handle @scope/name@version or @scope/name or name@version or name
+    let fullName, version = null;
+
+    if (spec.startsWith('@')) {
+        // Scoped: @scope/name@version
+        const lastAt = spec.lastIndexOf('@');
+        if (lastAt > 0 && spec.indexOf('/') < lastAt) {
+            fullName = spec.slice(0, lastAt);
+            version = spec.slice(lastAt + 1);
+        } else {
+            fullName = spec;
+        }
+    } else {
+        // Unscoped: name@version
+        const atIdx = spec.indexOf('@');
+        if (atIdx > 0) {
+            fullName = spec.slice(0, atIdx);
+            version = spec.slice(atIdx + 1);
+        } else {
+            fullName = spec;
+        }
+    }
+
+    // Parse scope and name
+    let scope, name;
+    if (fullName.startsWith('@') && fullName.includes('/')) {
+        const parts = fullName.slice(1).split('/');
+        scope = parts[0];
+        name = parts.slice(1).join('/');
+    } else {
+        scope = null;
+        name = fullName;
+    }
+
+    return { scope, name, fullName, version };
+}
+
+/**
+ * Load all installed modules from ~/.robinpath/modules/ into a RobinPath instance
+ */
+async function loadInstalledModules(rp) {
+    const manifest = readModulesManifest();
+    const entries = Object.entries(manifest);
+    if (entries.length === 0) return;
+
+    for (const [packageName, info] of entries) {
+        try {
+            const modDir = getModulePath(packageName);
+            // Read package.json to find entry point
+            let entryPoint = 'dist/index.js';
+            const pkgJsonPath = join(modDir, 'package.json');
+            if (existsSync(pkgJsonPath)) {
+                try {
+                    const pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
+                    if (pkg.main) entryPoint = pkg.main;
+                } catch { /* use default */ }
+            }
+
+            const modulePath = join(modDir, entryPoint);
+            if (!existsSync(modulePath)) {
+                if (FLAG_VERBOSE) logVerbose(`Module ${packageName}: entry not found at ${entryPoint}, skipping`);
+                continue;
+            }
+
+            const mod = await import(pathToFileURL(modulePath).href);
+            const adapter = mod.default;
+
+            if (!adapter || !adapter.name || !adapter.functions) {
+                if (FLAG_VERBOSE) logVerbose(`Module ${packageName}: invalid ModuleAdapter, skipping`);
+                continue;
+            }
+
+            // Register module using public API
+            rp.registerModule(adapter.name, adapter.functions);
+            if (adapter.functionMetadata) {
+                rp.registerModuleMeta(adapter.name, adapter.functionMetadata);
+            }
+            if (adapter.moduleMetadata) {
+                rp.registerModuleInfo(adapter.name, adapter.moduleMetadata);
+            }
+
+            // If global, also register functions without module prefix
+            if (adapter.global === true) {
+                for (const [funcName, handler] of Object.entries(adapter.functions)) {
+                    rp.registerBuiltin(funcName, handler);
+                }
+            }
+
+            if (FLAG_VERBOSE) logVerbose(`Loaded module: ${packageName}@${info.version}`);
+        } catch (err) {
+            // Never fatal — warn and continue
+            console.error(color.yellow('Warning:') + ` Failed to load module ${packageName}: ${err.message}`);
+        }
+    }
+}
+
+/**
+ * Create a RobinPath instance with all installed modules loaded
+ */
+async function createRobinPath(opts) {
+    const rp = new RobinPath(opts);
+    await loadInstalledModules(rp);
+    return rp;
 }
 
 function openBrowser(url) {
@@ -542,7 +687,8 @@ async function handleWhoami() {
  */
 async function handlePublish(args) {
     const token = requireAuth();
-    const targetArg = args.find(a => !a.startsWith('-')) || '.';
+    const isDryRun = args.includes('--dry-run');
+    const targetArg = args.find(a => !a.startsWith('-') && !a.startsWith('--org')) || '.';
     const targetDir = resolve(targetArg);
 
     // Read package.json
@@ -569,6 +715,29 @@ async function handlePublish(args) {
         process.exit(2);
     }
 
+    // Auto version bump
+    if (args.includes('--patch') || args.includes('--minor') || args.includes('--major')) {
+        const [major, minor, patch] = pkg.version.split('.').map(Number);
+        if (args.includes('--major')) pkg.version = `${major + 1}.0.0`;
+        else if (args.includes('--minor')) pkg.version = `${major}.${minor + 1}.0`;
+        else pkg.version = `${major}.${minor}.${patch + 1}`;
+        writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf-8');
+        log(`Bumped version to ${color.cyan(pkg.version)}`);
+    }
+
+    // Determine visibility
+    let visibility = 'public';
+    if (args.includes('--private')) {
+        visibility = 'private';
+    } else if (args.includes('--public')) {
+        visibility = 'public';
+    } else {
+        const orgIdx = args.indexOf('--org');
+        if (orgIdx !== -1 && args[orgIdx + 1]) {
+            visibility = `org:${args[orgIdx + 1]}`;
+        }
+    }
+
     // Parse scope and name
     let scope, name;
     if (pkg.name.startsWith('@') && pkg.name.includes('/')) {
@@ -588,11 +757,11 @@ async function handlePublish(args) {
     const parentDir = dirname(targetDir);
     const dirName = basename(targetDir);
 
-    log(`Packing @${scope}/${name}@${pkg.version}...`);
+    log(`Packing @${scope}/${name}@${pkg.version} (${visibility})...`);
 
     try {
         execSync(
-            `tar czf "${tmpFile}" --exclude=node_modules --exclude=.git --exclude=dist -C "${parentDir}" "${dirName}"`,
+            `tar czf "${toTarPath(tmpFile)}" --exclude=node_modules --exclude=.git --exclude=dist -C "${toTarPath(parentDir)}" "${dirName}"`,
             { stdio: 'pipe' }
         );
     } catch (err) {
@@ -612,12 +781,21 @@ async function handlePublish(args) {
 
     log(color.dim(`Package size: ${(tarball.length / 1024).toFixed(1)}KB`));
 
+    // Dry run — stop here
+    if (isDryRun) {
+        unlinkSync(tmpFile);
+        log('');
+        log(color.yellow('Dry run') + ` — would publish @${scope}/${name}@${pkg.version} as ${visibility}`);
+        return;
+    }
+
     // Upload
     try {
         const headers = {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/gzip',
             'X-Package-Version': pkg.version,
+            'X-Package-Visibility': visibility,
         };
         if (pkg.description) headers['X-Package-Description'] = pkg.description;
         if (pkg.keywords?.length) headers['X-Package-Keywords'] = pkg.keywords.join(',');
@@ -630,7 +808,7 @@ async function handlePublish(args) {
         });
 
         if (res.ok) {
-            log(color.green('Published') + ` @${scope}/${name}@${pkg.version}`);
+            log(color.green('Published') + ` @${scope}/${name}@${pkg.version} (${visibility})`);
         } else {
             const body = await res.json().catch(() => ({}));
             const msg = body?.error?.message || `HTTP ${res.status}`;
@@ -703,6 +881,1350 @@ async function handleSync() {
         log(color.dim(`${modules.length} module${modules.length !== 1 ? 's' : ''}`));
     } catch (err) {
         console.error(color.red('Error:') + ` Failed to list modules: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// ============================================================================
+// Module management commands
+// ============================================================================
+
+/**
+ * robinpath add <pkg>[@version] — Install a module from the registry
+ */
+async function handleAdd(args) {
+    const spec = args.find(a => !a.startsWith('-'));
+    if (!spec) {
+        console.error(color.red('Error:') + ' Usage: robinpath add <module>[@version]');
+        console.error('  Example: robinpath add @robinpath/slack');
+        process.exit(2);
+    }
+
+    const parsed = parsePackageSpec(spec);
+    if (!parsed || !parsed.name) {
+        console.error(color.red('Error:') + ` Invalid package name: ${spec}`);
+        process.exit(2);
+    }
+
+    const { scope, name, fullName, version } = parsed;
+    if (!scope) {
+        console.error(color.red('Error:') + ' Module must be scoped (e.g. @robinpath/slack)');
+        process.exit(2);
+    }
+
+    const token = requireAuth();
+
+    // Check if already installed
+    const manifest = readModulesManifest();
+    if (manifest[fullName] && !args.includes('--force')) {
+        const current = manifest[fullName].version;
+        if (version && version === current) {
+            log(`${fullName}@${current} is already installed.`);
+            return;
+        }
+        if (!version) {
+            log(color.dim(`Reinstalling ${fullName} (currently ${current})...`));
+        }
+    }
+
+    // Download tarball from registry
+    const versionQuery = version ? `?version=${encodeURIComponent(version)}` : '';
+    log(`Installing ${fullName}${version ? '@' + version : ''}...`);
+
+    let tarballBuffer;
+    try {
+        const res = await fetch(`${PLATFORM_URL}/v1/registry/${scope}/${name}/download${versionQuery}`, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (!res.ok) {
+            if (res.status === 404) {
+                console.error(color.red('Error:') + ` Module not found: ${fullName}`);
+            } else if (res.status === 401 || res.status === 403) {
+                console.error(color.red('Error:') + ' Access denied. You may not have permission to install this module.');
+            } else {
+                const body = await res.json().catch(() => ({}));
+                console.error(color.red('Error:') + ` Failed to download: ${body?.error?.message || 'HTTP ' + res.status}`);
+            }
+            process.exit(1);
+        }
+
+        tarballBuffer = Buffer.from(await res.arrayBuffer());
+    } catch (err) {
+        console.error(color.red('Error:') + ` Could not reach registry: ${err.message}`);
+        process.exit(1);
+    }
+
+    // Compute integrity hash
+    const integrity = 'sha256-' + createHash('sha256').update(tarballBuffer).digest('hex');
+
+    // Cache tarball
+    if (!existsSync(CACHE_DIR)) {
+        mkdirSync(CACHE_DIR, { recursive: true });
+    }
+    const cacheFile = join(CACHE_DIR, `${scope}-${name}-${version || 'latest'}.tar.gz`);
+    writeFileSync(cacheFile, tarballBuffer);
+
+    // Extract to modules dir
+    const modDir = getModulePath(fullName);
+    if (existsSync(modDir)) {
+        rmSync(modDir, { recursive: true, force: true });
+    }
+    mkdirSync(modDir, { recursive: true });
+
+    // Write tarball to temp, extract
+    const tmpFile = join(tmpdir(), `robinpath-add-${Date.now()}.tar.gz`);
+    writeFileSync(tmpFile, tarballBuffer);
+
+    try {
+        execSync(`tar xzf "${toTarPath(tmpFile)}" --strip-components=1 -C "${toTarPath(modDir)}"`, { stdio: 'pipe' });
+    } catch (err) {
+        // Clean up on failure
+        rmSync(modDir, { recursive: true, force: true });
+        try { unlinkSync(tmpFile); } catch { /* ignore */ }
+        console.error(color.red('Error:') + ` Failed to extract module: ${err.message}`);
+        process.exit(1);
+    }
+
+    try { unlinkSync(tmpFile); } catch { /* ignore */ }
+
+    // Read extracted package.json for version info
+    let installedVersion = version || 'unknown';
+    const pkgJsonPath = join(modDir, 'package.json');
+    if (existsSync(pkgJsonPath)) {
+        try {
+            const pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
+            installedVersion = pkg.version || installedVersion;
+        } catch { /* ignore */ }
+    }
+
+    // Check for module dependencies
+    if (existsSync(pkgJsonPath)) {
+        try {
+            const pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
+            const depends = pkg.robinpath?.depends || [];
+            for (const dep of depends) {
+                if (!manifest[dep]) {
+                    log(color.dim(`  Installing dependency: ${dep}`));
+                    await handleAdd([dep]);
+                }
+            }
+        } catch { /* ignore dependency errors */ }
+    }
+
+    // Update manifest
+    const updatedManifest = readModulesManifest();
+    updatedManifest[fullName] = {
+        version: installedVersion,
+        integrity,
+        installedAt: new Date().toISOString(),
+    };
+    writeModulesManifest(updatedManifest);
+
+    // Update robinpath.json if it exists in cwd
+    const projectFile = resolve('robinpath.json');
+    if (existsSync(projectFile)) {
+        try {
+            const config = JSON.parse(readFileSync(projectFile, 'utf-8'));
+            if (!config.modules) config.modules = {};
+            config.modules[fullName] = `^${installedVersion}`;
+            writeFileSync(projectFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+        } catch { /* ignore project file errors */ }
+    }
+
+    log(color.green('Installed') + ` ${fullName}@${installedVersion}`);
+}
+
+/**
+ * robinpath remove <pkg> — Uninstall a module
+ */
+async function handleRemove(args) {
+    const spec = args.find(a => !a.startsWith('-'));
+    if (!spec) {
+        console.error(color.red('Error:') + ' Usage: robinpath remove <module>');
+        console.error('  Example: robinpath remove @robinpath/slack');
+        process.exit(2);
+    }
+
+    const parsed = parsePackageSpec(spec);
+    if (!parsed || !parsed.fullName) {
+        console.error(color.red('Error:') + ` Invalid package name: ${spec}`);
+        process.exit(2);
+    }
+
+    const { fullName } = parsed;
+    const manifest = readModulesManifest();
+
+    if (!manifest[fullName]) {
+        console.error(color.red('Error:') + ` Module not installed: ${fullName}`);
+        process.exit(1);
+    }
+
+    // Remove module directory
+    const modDir = getModulePath(fullName);
+    if (existsSync(modDir)) {
+        rmSync(modDir, { recursive: true, force: true });
+    }
+
+    // Clean up empty parent scope directory
+    const scopeDir = dirname(modDir);
+    try {
+        const remaining = readdirSync(scopeDir);
+        if (remaining.length === 0) {
+            rmSync(scopeDir, { recursive: true, force: true });
+        }
+    } catch { /* ignore */ }
+
+    // Update manifest
+    delete manifest[fullName];
+    writeModulesManifest(manifest);
+
+    // Update robinpath.json if it exists in cwd
+    const projectFile = resolve('robinpath.json');
+    if (existsSync(projectFile)) {
+        try {
+            const config = JSON.parse(readFileSync(projectFile, 'utf-8'));
+            if (config.modules && config.modules[fullName]) {
+                delete config.modules[fullName];
+                writeFileSync(projectFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+            }
+        } catch { /* ignore project file errors */ }
+    }
+
+    log(color.green('Removed') + ` ${fullName}`);
+}
+
+/**
+ * robinpath upgrade <pkg> — Upgrade a single module to the latest version
+ */
+async function handleUpgrade(args) {
+    const spec = args.find(a => !a.startsWith('-'));
+    if (!spec) {
+        console.error(color.red('Error:') + ' Usage: robinpath upgrade <module>');
+        console.error('  Example: robinpath upgrade @robinpath/slack');
+        process.exit(2);
+    }
+
+    const parsed = parsePackageSpec(spec);
+    if (!parsed || !parsed.fullName || !parsed.scope) {
+        console.error(color.red('Error:') + ` Invalid package name: ${spec}`);
+        process.exit(2);
+    }
+
+    const { fullName, scope, name } = parsed;
+    const manifest = readModulesManifest();
+
+    if (!manifest[fullName]) {
+        console.error(color.red('Error:') + ` Module not installed: ${fullName}. Use ${color.cyan('robinpath add ' + fullName)} first.`);
+        process.exit(1);
+    }
+
+    const currentVersion = manifest[fullName].version;
+    log(`Checking for updates to ${fullName}@${currentVersion}...`);
+
+    // Check latest version from registry
+    try {
+        const token = requireAuth();
+        const res = await fetch(`${PLATFORM_URL}/v1/registry/${scope}/${name}`, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (!res.ok) {
+            console.error(color.red('Error:') + ` Could not check registry (HTTP ${res.status})`);
+            process.exit(1);
+        }
+
+        const body = await res.json();
+        const data = body.data || body;
+        const latestVersion = data.latestVersion || data.version;
+
+        if (latestVersion === currentVersion) {
+            log(color.green('Already up to date') + ` ${fullName}@${currentVersion}`);
+            return;
+        }
+
+        log(`Upgrading ${fullName}: ${currentVersion} → ${latestVersion}`);
+        await handleAdd([fullName, '--force']);
+    } catch (err) {
+        console.error(color.red('Error:') + ` Upgrade failed: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+/**
+ * robinpath modules list — List installed modules
+ */
+async function handleModulesList() {
+    const manifest = readModulesManifest();
+    const entries = Object.entries(manifest);
+
+    if (entries.length === 0) {
+        log('No modules installed.');
+        log(`Run ${color.cyan('robinpath add <module>')} to install your first module.`);
+        return;
+    }
+
+    log(color.bold('  Name'.padEnd(40) + 'Version'.padEnd(14) + 'Installed'));
+    log(color.dim('  ' + '─'.repeat(62)));
+
+    for (const [name, info] of entries) {
+        const date = info.installedAt ? info.installedAt.split('T')[0] : '-';
+        log(`  ${name.padEnd(38)}${(info.version || '-').padEnd(14)}${date}`);
+    }
+
+    log('');
+    log(color.dim(`${entries.length} module${entries.length !== 1 ? 's' : ''} installed`));
+}
+
+/**
+ * robinpath modules upgrade — Upgrade all installed modules
+ */
+async function handleModulesUpgradeAll() {
+    const manifest = readModulesManifest();
+    const entries = Object.entries(manifest);
+
+    if (entries.length === 0) {
+        log('No modules installed.');
+        return;
+    }
+
+    log(`Checking ${entries.length} module${entries.length !== 1 ? 's' : ''} for updates...\n`);
+
+    let upgraded = 0;
+    let upToDate = 0;
+    let failed = 0;
+
+    for (const [fullName, info] of entries) {
+        const parsed = parsePackageSpec(fullName);
+        if (!parsed || !parsed.scope) {
+            failed++;
+            continue;
+        }
+
+        try {
+            const token = getAuthToken();
+            if (!token) {
+                console.error(color.red('Error:') + ' Not logged in. Run ' + color.cyan('robinpath login'));
+                process.exit(1);
+            }
+
+            const res = await fetch(`${PLATFORM_URL}/v1/registry/${parsed.scope}/${parsed.name}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+
+            if (!res.ok) {
+                log(color.yellow('Skip') + `  ${fullName} (registry error)`);
+                failed++;
+                continue;
+            }
+
+            const body = await res.json();
+            const data = body.data || body;
+            const latestVersion = data.latestVersion || data.version;
+
+            if (latestVersion === info.version) {
+                log(color.green('  ✓') + `  ${fullName}@${info.version} (up to date)`);
+                upToDate++;
+            } else {
+                log(color.cyan('  ↑') + `  ${fullName}: ${info.version} → ${latestVersion}`);
+                await handleAdd([fullName, '--force']);
+                upgraded++;
+            }
+        } catch (err) {
+            log(color.yellow('Skip') + `  ${fullName} (${err.message})`);
+            failed++;
+        }
+    }
+
+    log('');
+    const parts = [];
+    if (upgraded > 0) parts.push(color.green(`${upgraded} upgraded`));
+    if (upToDate > 0) parts.push(`${upToDate} up to date`);
+    if (failed > 0) parts.push(color.yellow(`${failed} failed`));
+    log(parts.join(', '));
+}
+
+/**
+ * robinpath modules init — Scaffold a new RobinPath module
+ */
+async function handleModulesInit() {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    const ask = (q, def) => new Promise(resolve => {
+        const prompt = def ? `${q} (${def}): ` : `${q}: `;
+        rl.question(prompt, answer => resolve(answer.trim() || def || ''));
+    });
+
+    log('');
+    log(color.bold('  Create a new RobinPath module'));
+    log(color.dim('  ' + '─'.repeat(35)));
+    log('');
+
+    const moduleName = await ask('  Module name');
+    if (!moduleName) {
+        console.error(color.red('Error:') + ' Module name is required');
+        rl.close();
+        process.exit(2);
+    }
+
+    const displayName = await ask('  Display name', moduleName.charAt(0).toUpperCase() + moduleName.slice(1));
+    const description = await ask('  Description', `${displayName} integration for RobinPath`);
+
+    log('');
+    log(color.dim('  Categories: api, messaging, crm, ai, database, storage, analytics, dev-tools, utilities'));
+    const category = await ask('  Category', 'utilities');
+
+    // Auto-fill author from auth
+    const auth = readAuth();
+    const defaultAuthor = auth?.email || '';
+    const author = await ask('  Author', defaultAuthor);
+    const license = await ask('  License', 'MIT');
+
+    const defaultScope = auth?.email?.split('@')[0] || 'robinpath';
+    const scope = await ask('  Scope', defaultScope);
+
+    rl.close();
+
+    const fullName = `@${scope}/${moduleName}`;
+    const pascalName = moduleName.replace(/(^|[-_])(\w)/g, (_, __, c) => c.toUpperCase());
+    const targetDir = resolve(moduleName);
+
+    log('');
+    log(`Creating ${color.cyan(fullName)}...`);
+
+    if (existsSync(targetDir)) {
+        console.error(color.red('Error:') + ` Directory already exists: ${moduleName}/`);
+        process.exit(1);
+    }
+
+    // Create directories
+    mkdirSync(join(targetDir, 'src'), { recursive: true });
+    mkdirSync(join(targetDir, 'tests'), { recursive: true });
+
+    // package.json
+    writeFileSync(join(targetDir, 'package.json'), JSON.stringify({
+        name: fullName,
+        version: '0.1.0',
+        description,
+        author,
+        license,
+        type: 'module',
+        main: 'dist/index.js',
+        types: 'dist/index.d.ts',
+        exports: { '.': { import: './dist/index.js', types: './dist/index.d.ts' } },
+        files: ['dist'],
+        scripts: { build: 'tsc', test: `robinpath test tests/` },
+        robinpath: { category, displayName },
+        peerDependencies: { '@wiredwp/robinpath': '>=0.30.0' },
+        devDependencies: { '@wiredwp/robinpath': '^0.30.1', typescript: '^5.6.0' },
+    }, null, 2) + '\n', 'utf-8');
+
+    // src/index.ts
+    writeFileSync(join(targetDir, 'src', 'index.ts'), `import type { ModuleAdapter } from "@wiredwp/robinpath";
+import {
+  ${pascalName}Functions,
+  ${pascalName}FunctionMetadata,
+  ${pascalName}ModuleMetadata,
+} from "./${moduleName}.js";
+
+const ${pascalName}Module: ModuleAdapter = {
+  name: "${moduleName}",
+  functions: ${pascalName}Functions,
+  functionMetadata: ${pascalName}FunctionMetadata,
+  moduleMetadata: ${pascalName}ModuleMetadata,
+  global: false,
+};
+
+export default ${pascalName}Module;
+export { ${pascalName}Module };
+`, 'utf-8');
+
+    // src/<name>.ts
+    writeFileSync(join(targetDir, 'src', `${moduleName}.ts`), `import type {
+  BuiltinHandler,
+  FunctionMetadata,
+  ModuleMetadata,
+} from "@wiredwp/robinpath";
+
+// ─── Functions ─────────────────────────────────────────
+
+const hello: BuiltinHandler = (args) => {
+  const name = String(args[0] ?? "world");
+  return \`Hello from ${moduleName}: \${name}\`;
+};
+
+const configure: BuiltinHandler = (args) => {
+  const apiKey = String(args[0] ?? "");
+  if (!apiKey) throw new Error("API key is required");
+  return { configured: true };
+};
+
+// ─── Exports ───────────────────────────────────────────
+
+export const ${pascalName}Functions: Record<string, BuiltinHandler> = {
+  hello,
+  configure,
+};
+
+export const ${pascalName}FunctionMetadata: Record<string, FunctionMetadata> = {
+  hello: {
+    description: "Say hello",
+    parameters: [
+      {
+        name: "name",
+        dataType: "string",
+        description: "Name to greet",
+        formInputType: "text",
+        required: false,
+        defaultValue: "world",
+      },
+    ],
+    returnType: "string",
+    returnDescription: "Greeting message",
+    example: '${moduleName}.hello "Alice"',
+  },
+  configure: {
+    description: "Configure API credentials",
+    parameters: [
+      {
+        name: "apiKey",
+        dataType: "string",
+        description: "Your API key",
+        formInputType: "password",
+        required: true,
+      },
+    ],
+    returnType: "object",
+    returnDescription: "{ configured: true }",
+    example: '${moduleName}.configure "your-api-key"',
+  },
+};
+
+export const ${pascalName}ModuleMetadata: ModuleMetadata = {
+  description: "${description}",
+  methods: ["hello", "configure"],
+  author: "${author}",
+  category: "${category}",
+};
+`, 'utf-8');
+
+    // tsconfig.json
+    writeFileSync(join(targetDir, 'tsconfig.json'), JSON.stringify({
+        compilerOptions: {
+            target: 'ES2022',
+            module: 'ES2022',
+            moduleResolution: 'node16',
+            declaration: true,
+            declarationMap: true,
+            sourceMap: true,
+            outDir: 'dist',
+            rootDir: 'src',
+            strict: true,
+            esModuleInterop: true,
+            skipLibCheck: true,
+        },
+        include: ['src'],
+    }, null, 2) + '\n', 'utf-8');
+
+    // tests/<name>.test.rp
+    writeFileSync(join(targetDir, 'tests', `${moduleName}.test.rp`), `# ${displayName} module tests
+# Run: robinpath test tests/
+
+@desc "hello returns greeting"
+do
+  ${moduleName}.hello "Alice" into $result
+  test.assertContains $result "Alice"
+enddo
+
+@desc "hello defaults to world"
+do
+  ${moduleName}.hello into $result
+  test.assertContains $result "world"
+enddo
+`, 'utf-8');
+
+    // README.md
+    writeFileSync(join(targetDir, 'README.md'), `# ${fullName}
+
+${description}
+
+## Install
+
+\`\`\`bash
+robinpath add ${fullName}
+\`\`\`
+
+## Usage
+
+\`\`\`robinpath
+# Configure credentials
+${moduleName}.configure "your-api-key"
+
+# Say hello
+${moduleName}.hello "Alice"
+log $
+\`\`\`
+
+## Functions
+
+| Function | Description |
+|----------|-------------|
+| \`configure\` | Configure API credentials |
+| \`hello\` | Say hello |
+
+## Development
+
+\`\`\`bash
+npm install
+npm run build
+robinpath test tests/
+\`\`\`
+
+## License
+
+${license}
+`, 'utf-8');
+
+    // .gitignore
+    writeFileSync(join(targetDir, '.gitignore'), `node_modules/
+dist/
+*.tgz
+`, 'utf-8');
+
+    log('');
+    log(color.green('Generated:'));
+    log(`  ${moduleName}/`);
+    log(`  ├── package.json`);
+    log(`  ├── src/`);
+    log(`  │   ├── index.ts`);
+    log(`  │   └── ${moduleName}.ts`);
+    log(`  ├── tests/`);
+    log(`  │   └── ${moduleName}.test.rp`);
+    log(`  ├── tsconfig.json`);
+    log(`  ├── README.md`);
+    log(`  └── .gitignore`);
+    log('');
+    log(color.bold('Next steps:'));
+    log(`  1. cd ${moduleName}`);
+    log(`  2. Edit src/${moduleName}.ts — add your functions`);
+    log(`  3. npm install && npm run build`);
+    log(`  4. robinpath publish`);
+    log('');
+}
+
+/**
+ * robinpath pack — Create tarball locally without publishing
+ */
+async function handlePack(args) {
+    const targetArg = args.find(a => !a.startsWith('-')) || '.';
+    const targetDir = resolve(targetArg);
+
+    const pkgPath = join(targetDir, 'package.json');
+    if (!existsSync(pkgPath)) {
+        console.error(color.red('Error:') + ` No package.json found in ${targetDir}`);
+        process.exit(2);
+    }
+
+    let pkg;
+    try {
+        pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+    } catch (err) {
+        console.error(color.red('Error:') + ` Invalid package.json: ${err.message}`);
+        process.exit(2);
+    }
+
+    if (!pkg.name || !pkg.version) {
+        console.error(color.red('Error:') + ' package.json must have "name" and "version" fields');
+        process.exit(2);
+    }
+
+    const safeName = pkg.name.replace(/^@/, '').replace(/\//g, '-');
+    const outputFile = `${safeName}-${pkg.version}.tar.gz`;
+    const outputPath = resolve(outputFile);
+    const parentDir = dirname(targetDir);
+    const dirName = basename(targetDir);
+
+    log(`Packing ${pkg.name}@${pkg.version}...`);
+
+    try {
+        execSync(
+            `tar czf "${toTarPath(outputPath)}" --exclude=node_modules --exclude=.git --exclude=dist --exclude="*.tar.gz" -C "${toTarPath(parentDir)}" "${dirName}"`,
+            { stdio: 'pipe' }
+        );
+    } catch (err) {
+        // tar may exit 1 with "file changed as we read it" — check if tarball was created
+        if (!existsSync(outputPath)) {
+            console.error(color.red('Error:') + ` Failed to create tarball: ${err.message}`);
+            process.exit(1);
+        }
+    }
+
+    const size = statSync(outputPath).size;
+    log(color.green('Created') + ` ${outputFile} (${(size / 1024).toFixed(1)}KB)`);
+}
+
+/**
+ * robinpath search <query> — Search the module registry
+ */
+async function handleSearch(args) {
+    const query = args.filter(a => !a.startsWith('-')).join(' ');
+    if (!query) {
+        console.error(color.red('Error:') + ' Usage: robinpath search <query>');
+        console.error('  Example: robinpath search slack');
+        process.exit(2);
+    }
+
+    const category = args.find(a => a.startsWith('--category='))?.split('=')[1];
+    const token = getAuthToken();
+
+    log(`Searching for "${query}"...\n`);
+
+    try {
+        let url = `${PLATFORM_URL}/v1/registry/search?q=${encodeURIComponent(query)}`;
+        if (category) url += `&category=${encodeURIComponent(category)}`;
+
+        const headers = {};
+        if (token) headers.Authorization = `Bearer ${token}`;
+
+        const res = await fetch(url, { headers });
+        if (!res.ok) {
+            console.error(color.red('Error:') + ` Search failed (HTTP ${res.status})`);
+            process.exit(1);
+        }
+
+        const body = await res.json();
+        const modules = body.data || body.modules || [];
+
+        if (modules.length === 0) {
+            log('No modules found.');
+            return;
+        }
+
+        log(color.bold('  Name'.padEnd(35) + 'Version'.padEnd(10) + 'Description'));
+        log(color.dim('  ' + '─'.repeat(72)));
+
+        for (const mod of modules) {
+            const modName = (mod.scope ? `@${mod.scope}/${mod.name}` : mod.name) || mod.id || '?';
+            const ver = mod.version || mod.latestVersion || '-';
+            const desc = (mod.description || '').slice(0, 35);
+            log(`  ${modName.padEnd(33)}${ver.padEnd(10)}${color.dim(desc)}`);
+        }
+
+        log('');
+        log(color.dim(`${modules.length} result${modules.length !== 1 ? 's' : ''}`));
+    } catch (err) {
+        console.error(color.red('Error:') + ` Search failed: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+/**
+ * robinpath info <pkg> — Show module details
+ */
+async function handleInfo(args) {
+    const spec = args.find(a => !a.startsWith('-'));
+    if (!spec) {
+        console.error(color.red('Error:') + ' Usage: robinpath info <module>');
+        console.error('  Example: robinpath info @robinpath/slack');
+        process.exit(2);
+    }
+
+    const parsed = parsePackageSpec(spec);
+    if (!parsed || !parsed.scope) {
+        console.error(color.red('Error:') + ` Invalid package name: ${spec}`);
+        process.exit(2);
+    }
+
+    const { scope, name, fullName } = parsed;
+    const token = getAuthToken();
+
+    try {
+        const headers = {};
+        if (token) headers.Authorization = `Bearer ${token}`;
+
+        const res = await fetch(`${PLATFORM_URL}/v1/registry/${scope}/${name}`, { headers });
+        if (!res.ok) {
+            if (res.status === 404) {
+                console.error(color.red('Error:') + ` Module not found: ${fullName}`);
+            } else {
+                console.error(color.red('Error:') + ` Failed to fetch info (HTTP ${res.status})`);
+            }
+            process.exit(1);
+        }
+
+        const body = await res.json();
+        const data = body.data || body;
+
+        log('');
+        log(`  ${color.bold(fullName)} ${color.cyan('v' + (data.latestVersion || data.version || '-'))}`);
+        if (data.description) log(`  ${data.description}`);
+        log('');
+        if (data.author) log(`  Author:      ${data.author}`);
+        if (data.license) log(`  License:     ${data.license}`);
+        if (data.category) log(`  Category:    ${data.category}`);
+        const downloads = data.downloads ?? data.downloadCount;
+        if (downloads !== undefined) log(`  Downloads:   ${downloads}`);
+        const visibility = data.visibility || (data.isPublic === false ? 'private' : 'public');
+        log(`  Visibility:  ${visibility}`);
+        if (data.keywords?.length) log(`  Keywords:    ${data.keywords.join(', ')}`);
+        log('');
+
+        // Show installed status
+        const manifest = readModulesManifest();
+        if (manifest[fullName]) {
+            log(`  ${color.green('Installed')} v${manifest[fullName].version}`);
+        } else {
+            log(`  ${color.cyan('robinpath add ' + fullName)}`);
+        }
+        log('');
+    } catch (err) {
+        console.error(color.red('Error:') + ` Failed to fetch info: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// ============================================================================
+// Project & Environment commands
+// ============================================================================
+
+/**
+ * robinpath init — Create a robinpath.json project config
+ */
+async function handleInit(args) {
+    const projectFile = resolve('robinpath.json');
+    if (existsSync(projectFile) && !args.includes('--force')) {
+        console.error(color.red('Error:') + ' robinpath.json already exists. Use --force to overwrite.');
+        process.exit(1);
+    }
+
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    const ask = (q, def) => new Promise(resolve => {
+        const prompt = def ? `${q} (${def}): ` : `${q}: `;
+        rl.question(prompt, answer => resolve(answer.trim() || def || ''));
+    });
+
+    log('');
+    log(color.bold('  Create a new RobinPath project'));
+    log(color.dim('  ' + '─'.repeat(35)));
+    log('');
+
+    const dirName = basename(process.cwd());
+    const projectName = await ask('  Project name', dirName);
+    const description = await ask('  Description', '');
+    const auth = readAuth();
+    const author = await ask('  Author', auth?.email || '');
+    const mainFile = await ask('  Entry file', 'main.rp');
+
+    rl.close();
+
+    const config = {
+        name: projectName,
+        version: '1.0.0',
+        description,
+        author,
+        main: mainFile,
+        modules: {},
+        env: {},
+    };
+
+    writeFileSync(projectFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+
+    // Create main.rp if it doesn't exist
+    const mainPath = resolve(mainFile);
+    if (!existsSync(mainPath)) {
+        writeFileSync(mainPath, `# ${projectName}
+# Run: robinpath ${mainFile}
+
+log "Hello from RobinPath!"
+`, 'utf-8');
+    }
+
+    // Create .env if it doesn't exist
+    if (!existsSync(resolve('.env'))) {
+        writeFileSync(resolve('.env'), `# Add your secrets here
+# SLACK_TOKEN=xoxb-...
+# OPENAI_KEY=sk-...
+`, 'utf-8');
+    }
+
+    // Create .gitignore if it doesn't exist
+    if (!existsSync(resolve('.gitignore'))) {
+        writeFileSync(resolve('.gitignore'), `.env
+.robinpath/
+node_modules/
+`, 'utf-8');
+    }
+
+    log('');
+    log(color.green('Created project:'));
+    log(`  robinpath.json`);
+    if (!existsSync(mainPath)) log(`  ${mainFile}`);
+    log(`  .env`);
+    log(`  .gitignore`);
+    log('');
+    log(`Run: ${color.cyan('robinpath ' + mainFile)}`);
+    log('');
+}
+
+/**
+ * robinpath install — Install all modules from robinpath.json
+ */
+async function handleProjectInstall() {
+    const projectFile = resolve('robinpath.json');
+    if (!existsSync(projectFile)) {
+        // Fall back to system install if no robinpath.json
+        handleInstall();
+        return;
+    }
+
+    let config;
+    try {
+        config = JSON.parse(readFileSync(projectFile, 'utf-8'));
+    } catch (err) {
+        console.error(color.red('Error:') + ` Invalid robinpath.json: ${err.message}`);
+        process.exit(2);
+    }
+
+    const modules = config.modules || {};
+    const entries = Object.entries(modules);
+
+    if (entries.length === 0) {
+        log('No modules specified in robinpath.json.');
+        log(`Use ${color.cyan('robinpath add <module>')} to add modules.`);
+        return;
+    }
+
+    log(`Installing ${entries.length} module${entries.length !== 1 ? 's' : ''} from robinpath.json...\n`);
+
+    const manifest = readModulesManifest();
+    let installed = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const [name, versionSpec] of entries) {
+        // Check if already installed with matching version
+        if (manifest[name]) {
+            const current = manifest[name].version;
+            // Simple check: if version spec starts with ^ or ~, accept if installed
+            if (versionSpec.startsWith('^') || versionSpec.startsWith('~')) {
+                log(color.green('  ✓') + `  ${name}@${current} (already installed)`);
+                skipped++;
+                continue;
+            }
+            if (current === versionSpec) {
+                log(color.green('  ✓') + `  ${name}@${current} (already installed)`);
+                skipped++;
+                continue;
+            }
+        }
+
+        try {
+            // Extract exact version from spec (strip ^ or ~)
+            const version = versionSpec.replace(/^[\^~]/, '');
+            await handleAdd([`${name}@${version}`]);
+            installed++;
+        } catch (err) {
+            log(color.red('  ✗') + `  ${name}: ${err.message}`);
+            failed++;
+        }
+    }
+
+    // Generate lock file
+    const lockFile = resolve('robinpath-lock.json');
+    const updatedManifest = readModulesManifest();
+    const lockData = {};
+    for (const [name] of entries) {
+        if (updatedManifest[name]) {
+            lockData[name] = {
+                version: updatedManifest[name].version,
+                integrity: updatedManifest[name].integrity,
+            };
+        }
+    }
+    writeFileSync(lockFile, JSON.stringify(lockData, null, 2) + '\n', 'utf-8');
+
+    log('');
+    const parts = [];
+    if (installed > 0) parts.push(color.green(`${installed} installed`));
+    if (skipped > 0) parts.push(`${skipped} already installed`);
+    if (failed > 0) parts.push(color.red(`${failed} failed`));
+    log(parts.join(', '));
+    log(color.dim('Lock file written: robinpath-lock.json'));
+}
+
+/**
+ * robinpath doctor — Diagnose environment
+ */
+async function handleDoctor() {
+    log('');
+    log(color.bold('  RobinPath Doctor'));
+    log(color.dim('  ' + '─'.repeat(35)));
+    log('');
+
+    let issues = 0;
+
+    // CLI version
+    log(color.green('  ✓') + ` CLI version ${ROBINPATH_VERSION}`);
+
+    // Install location
+    const installDir = getInstallDir();
+    const isWindows = platform() === 'win32';
+    const binaryName = isWindows ? 'robinpath.exe' : 'robinpath';
+    if (existsSync(join(installDir, binaryName))) {
+        log(color.green('  ✓') + ` Installed: ${installDir}`);
+    } else {
+        log(color.yellow('  !') + ` Not installed to PATH. Run ${color.cyan('robinpath install')}`);
+        issues++;
+    }
+
+    // Auth
+    const auth = readAuth();
+    const token = getAuthToken();
+    if (token) {
+        log(color.green('  ✓') + ` Logged in as ${auth.email || auth.name || 'unknown'}`);
+        if (auth.expiresAt) {
+            const remaining = Math.floor((auth.expiresAt * 1000 - Date.now()) / (1000 * 60 * 60 * 24));
+            if (remaining < 7) {
+                log(color.yellow('  !') + ` Session expires in ${remaining} day${remaining !== 1 ? 's' : ''}`);
+                issues++;
+            }
+        }
+    } else {
+        log(color.yellow('  !') + ` Not logged in. Run ${color.cyan('robinpath login')}`);
+        issues++;
+    }
+
+    // Modules directory
+    const manifest = readModulesManifest();
+    const moduleCount = Object.keys(manifest).length;
+    if (moduleCount > 0) {
+        log(color.green('  ✓') + ` ${moduleCount} module${moduleCount !== 1 ? 's' : ''} installed`);
+
+        // Check each module is valid
+        for (const [name, info] of Object.entries(manifest)) {
+            const modDir = getModulePath(name);
+            const pkgPath = join(modDir, 'package.json');
+            if (!existsSync(modDir)) {
+                log(color.red('  ✗') + `   ${name}: directory missing`);
+                issues++;
+            } else if (!existsSync(pkgPath)) {
+                log(color.red('  ✗') + `   ${name}: package.json missing`);
+                issues++;
+            } else {
+                // Check entry point exists
+                let entryPoint = 'dist/index.js';
+                try {
+                    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+                    if (pkg.main) entryPoint = pkg.main;
+                } catch { /* use default */ }
+                if (!existsSync(join(modDir, entryPoint))) {
+                    log(color.red('  ✗') + `   ${name}: entry point ${entryPoint} missing`);
+                    issues++;
+                }
+            }
+        }
+    } else {
+        log(color.dim('  -') + ` No modules installed`);
+    }
+
+    // Project config
+    const projectFile = resolve('robinpath.json');
+    if (existsSync(projectFile)) {
+        try {
+            const config = JSON.parse(readFileSync(projectFile, 'utf-8'));
+            log(color.green('  ✓') + ` Project: ${config.name || 'unnamed'} v${config.version || '?'}`);
+
+            // Check if project modules are all installed
+            const projectModules = Object.keys(config.modules || {});
+            for (const mod of projectModules) {
+                if (!manifest[mod]) {
+                    log(color.red('  ✗') + `   Missing module: ${mod} (run ${color.cyan('robinpath install')})`);
+                    issues++;
+                }
+            }
+        } catch {
+            log(color.red('  ✗') + ' Invalid robinpath.json');
+            issues++;
+        }
+    }
+
+    // Cache
+    if (existsSync(CACHE_DIR)) {
+        try {
+            const cacheFiles = readdirSync(CACHE_DIR);
+            const cacheSize = cacheFiles.reduce((total, f) => {
+                try { return total + statSync(join(CACHE_DIR, f)).size; } catch { return total; }
+            }, 0);
+            log(color.dim('  -') + ` Cache: ${cacheFiles.length} files (${(cacheSize / 1024).toFixed(0)}KB)`);
+        } catch { /* ignore */ }
+    }
+
+    log('');
+    if (issues === 0) {
+        log(color.green('  No issues found.'));
+    } else {
+        log(color.yellow(`  ${issues} issue${issues !== 1 ? 's' : ''} found.`));
+    }
+    log('');
+}
+
+/**
+ * robinpath env set|list|remove — Manage environment secrets
+ */
+async function handleEnv(args) {
+    const envPath = join(getRobinPathHome(), 'env');
+    const sub = args[0];
+
+    function readEnvFile() {
+        try {
+            if (!existsSync(envPath)) return {};
+            const lines = readFileSync(envPath, 'utf-8').split('\n');
+            const env = {};
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed || trimmed.startsWith('#')) continue;
+                const eqIdx = trimmed.indexOf('=');
+                if (eqIdx > 0) {
+                    env[trimmed.slice(0, eqIdx)] = trimmed.slice(eqIdx + 1);
+                }
+            }
+            return env;
+        } catch {
+            return {};
+        }
+    }
+
+    function writeEnvFile(env) {
+        const dir = getRobinPathHome();
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        const content = Object.entries(env).map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
+        writeFileSync(envPath, content, 'utf-8');
+        if (platform() !== 'win32') {
+            try { chmodSync(envPath, 0o600); } catch { /* ignore */ }
+        }
+    }
+
+    if (sub === 'set') {
+        const key = args[1];
+        const value = args.slice(2).join(' ');
+        if (!key) {
+            console.error(color.red('Error:') + ' Usage: robinpath env set <KEY> <value>');
+            process.exit(2);
+        }
+        const env = readEnvFile();
+        env[key] = value;
+        writeEnvFile(env);
+        log(color.green('Set') + ` ${key}`);
+    } else if (sub === 'list') {
+        const env = readEnvFile();
+        const entries = Object.entries(env);
+        if (entries.length === 0) {
+            log('No environment variables set.');
+            log(`Use ${color.cyan('robinpath env set <KEY> <value>')} to add one.`);
+            return;
+        }
+        log('');
+        log(color.bold('  Environment variables:'));
+        log(color.dim('  ' + '─'.repeat(40)));
+        for (const [key, value] of entries) {
+            const masked = value.length > 4 ? value.slice(0, 2) + '•'.repeat(Math.min(value.length - 4, 20)) + value.slice(-2) : '••••';
+            log(`  ${key.padEnd(25)} ${color.dim(masked)}`);
+        }
+        log('');
+        log(color.dim(`${entries.length} variable${entries.length !== 1 ? 's' : ''}`));
+        log('');
+    } else if (sub === 'remove' || sub === 'delete') {
+        const key = args[1];
+        if (!key) {
+            console.error(color.red('Error:') + ' Usage: robinpath env remove <KEY>');
+            process.exit(2);
+        }
+        const env = readEnvFile();
+        if (!env[key]) {
+            console.error(color.red('Error:') + ` Variable not found: ${key}`);
+            process.exit(1);
+        }
+        delete env[key];
+        writeEnvFile(env);
+        log(color.green('Removed') + ` ${key}`);
+    } else {
+        console.error(color.red('Error:') + ' Usage: robinpath env <set|list|remove>');
+        console.error('  robinpath env set SLACK_TOKEN xoxb-...');
+        console.error('  robinpath env list');
+        console.error('  robinpath env remove SLACK_TOKEN');
+        process.exit(2);
+    }
+}
+
+/**
+ * robinpath cache clean|list — Manage download cache
+ */
+async function handleCache(args) {
+    const sub = args[0];
+
+    if (sub === 'list') {
+        if (!existsSync(CACHE_DIR)) {
+            log('Cache is empty.');
+            return;
+        }
+        try {
+            const files = readdirSync(CACHE_DIR);
+            if (files.length === 0) {
+                log('Cache is empty.');
+                return;
+            }
+            log('');
+            log(color.bold('  Cached packages:'));
+            log(color.dim('  ' + '─'.repeat(50)));
+            let totalSize = 0;
+            for (const file of files) {
+                const size = statSync(join(CACHE_DIR, file)).size;
+                totalSize += size;
+                log(`  ${file.padEnd(45)} ${color.dim((size / 1024).toFixed(1) + 'KB')}`);
+            }
+            log('');
+            log(color.dim(`${files.length} file${files.length !== 1 ? 's' : ''}, ${(totalSize / 1024).toFixed(0)}KB total`));
+            log('');
+        } catch (err) {
+            console.error(color.red('Error:') + ` Failed to list cache: ${err.message}`);
+            process.exit(1);
+        }
+    } else if (sub === 'clean') {
+        if (!existsSync(CACHE_DIR)) {
+            log('Cache is already empty.');
+            return;
+        }
+        try {
+            const files = readdirSync(CACHE_DIR);
+            let totalSize = 0;
+            for (const file of files) {
+                totalSize += statSync(join(CACHE_DIR, file)).size;
+            }
+            rmSync(CACHE_DIR, { recursive: true, force: true });
+            log(color.green('Cleared') + ` ${files.length} cached file${files.length !== 1 ? 's' : ''} (${(totalSize / 1024).toFixed(0)}KB freed)`);
+        } catch (err) {
+            console.error(color.red('Error:') + ` Failed to clean cache: ${err.message}`);
+            process.exit(1);
+        }
+    } else {
+        console.error(color.red('Error:') + ' Usage: robinpath cache <list|clean>');
+        process.exit(2);
+    }
+}
+
+/**
+ * robinpath audit — Check installed modules for issues
+ */
+async function handleAudit() {
+    const manifest = readModulesManifest();
+    const entries = Object.entries(manifest);
+
+    if (entries.length === 0) {
+        log('No modules installed. Nothing to audit.');
+        return;
+    }
+
+    log(`Auditing ${entries.length} module${entries.length !== 1 ? 's' : ''}...\n`);
+
+    let warnings = 0;
+    let ok = 0;
+    const token = getAuthToken();
+
+    for (const [fullName, info] of entries) {
+        const parsed = parsePackageSpec(fullName);
+        if (!parsed || !parsed.scope) {
+            log(color.yellow('  !') + `  ${fullName}: invalid package name`);
+            warnings++;
+            continue;
+        }
+
+        try {
+            const headers = {};
+            if (token) headers.Authorization = `Bearer ${token}`;
+
+            const res = await fetch(`${PLATFORM_URL}/v1/registry/${parsed.scope}/${parsed.name}`, { headers });
+
+            if (!res.ok) {
+                log(color.yellow('  !') + `  ${fullName}: could not check registry`);
+                warnings++;
+                continue;
+            }
+
+            const body = await res.json();
+            const data = body.data || body;
+
+            // Check if deprecated
+            if (data.deprecated) {
+                log(color.red('  ✗') + `  ${fullName}@${info.version} — ${color.red('deprecated')}: ${data.deprecated}`);
+                warnings++;
+                continue;
+            }
+
+            // Check if outdated
+            const latest = data.latestVersion || data.version;
+            if (latest && latest !== info.version) {
+                log(color.yellow('  !') + `  ${fullName}@${info.version} → ${latest} available`);
+                warnings++;
+            } else {
+                log(color.green('  ✓') + `  ${fullName}@${info.version}`);
+                ok++;
+            }
+        } catch (err) {
+            log(color.yellow('  !') + `  ${fullName}: ${err.message}`);
+            warnings++;
+        }
+    }
+
+    log('');
+    if (warnings === 0) {
+        log(color.green(`No issues found. ${ok} module${ok !== 1 ? 's' : ''} OK.`));
+    } else {
+        log(`${color.yellow(warnings + ' warning' + (warnings !== 1 ? 's' : ''))}` +
+            (ok > 0 ? `, ${ok} OK` : ''));
+    }
+    log('');
+}
+
+/**
+ * robinpath deprecate <pkg> "reason" — Mark a module as deprecated
+ */
+async function handleDeprecate(args) {
+    const spec = args.find(a => !a.startsWith('-'));
+    if (!spec) {
+        console.error(color.red('Error:') + ' Usage: robinpath deprecate <module> "reason"');
+        process.exit(2);
+    }
+
+    const parsed = parsePackageSpec(spec);
+    if (!parsed || !parsed.scope) {
+        console.error(color.red('Error:') + ` Invalid package name: ${spec}`);
+        process.exit(2);
+    }
+
+    const reason = args.filter(a => a !== spec && !a.startsWith('-')).join(' ') || 'This module is deprecated';
+    const { scope, name, fullName } = parsed;
+    const token = requireAuth();
+
+    log(`Deprecating ${fullName}...`);
+
+    try {
+        const res = await fetch(`${PLATFORM_URL}/v1/registry/${scope}/${name}/deprecate`, {
+            method: 'POST',
+            headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ message: reason }),
+        });
+
+        if (res.ok) {
+            log(color.yellow('Deprecated') + ` ${fullName}: ${reason}`);
+        } else {
+            const body = await res.json().catch(() => ({}));
+            console.error(color.red('Error:') + ` Failed to deprecate: ${body?.error?.message || 'HTTP ' + res.status}`);
+            process.exit(1);
+        }
+    } catch (err) {
+        console.error(color.red('Error:') + ` Failed to deprecate: ${err.message}`);
         process.exit(1);
     }
 }
@@ -792,7 +2314,7 @@ async function handleAST(args) {
     }
 
     const script = readFileSync(filePath, 'utf-8');
-    const rp = new RobinPath();
+    const rp = await createRobinPath();
     const startTime = FLAG_VERBOSE ? performance.now() : 0;
 
     try {
@@ -1099,7 +2621,7 @@ async function handleTest(args) {
     for (const filePath of testFiles) {
         const relPath = relative(process.cwd(), filePath);
         const script = readFileSync(filePath, 'utf-8');
-        const rp = new RobinPath();
+        const rp = await createRobinPath();
 
         try {
             await rp.executeScript(script);
@@ -1199,7 +2721,7 @@ async function runWatchIteration(filePath) {
     log(color.dim('─'.repeat(50)));
 
     const script = readFileSync(filePath, 'utf-8');
-    const rp = new RobinPath();
+    const rp = await createRobinPath();
     try {
         await rp.executeScript(script);
     } catch (error) {
@@ -1226,13 +2748,37 @@ COMMANDS:
   check <file>       Check syntax without executing (--json for machine output)
   ast <file>         Dump AST as JSON (--compact for minified)
   test [dir|file]    Run *.test.rp test files (--json for machine output)
-  install            Install robinpath to system PATH
+
+MODULE MANAGEMENT:
+  add <pkg>[@ver]    Install a module from the registry
+  remove <pkg>       Uninstall a module
+  upgrade <pkg>      Upgrade a single module to latest
+  search <query>     Search the module registry
+  info <pkg>         Show module details
+  modules list       List installed modules
+  modules upgrade    Upgrade all installed modules
+  modules init       Scaffold a new module (interactive wizard)
+  audit              Check installed modules for issues
+
+PROJECT:
+  init               Create a robinpath.json project
+  install            Install all modules from robinpath.json
+  doctor             Diagnose environment and modules
+  env <set|list|rm>  Manage environment secrets
+  cache <list|clean> Manage download cache
+
+SYSTEM:
+  install            Install robinpath to system PATH (if no robinpath.json)
   uninstall          Remove robinpath from system
   update             Update robinpath to the latest version
+
+CLOUD:
   login              Sign in to RobinPath Cloud via browser
   logout             Remove stored credentials
   whoami             Show current user and account info
   publish [dir]      Publish a module to the registry
+  pack [dir]         Create tarball without publishing
+  deprecate <pkg>    Mark a module as deprecated
   sync               List your published modules
 
 FLAGS:
@@ -1295,6 +2841,7 @@ TEST WRITING:
 
 CONFIGURATION:
   Install dir:  ~/.robinpath/bin/
+  Modules dir:  ~/.robinpath/modules/
   History file: ~/.robinpath/history
   Auth file:    ~/.robinpath/auth.json
 
@@ -1457,7 +3004,7 @@ DESCRIPTION:
         publish: `robinpath publish — Publish a module to the registry
 
 USAGE:
-  robinpath publish [dir]
+  robinpath publish [dir] [flags]
 
 DESCRIPTION:
   Pack the target directory (default: current dir) as a tarball and upload
@@ -1467,9 +3014,21 @@ DESCRIPTION:
   Maximum package size: 5MB.
   Excluded from tarball: node_modules, .git, dist
 
+FLAGS:
+  --public             Publish as public (default)
+  --private            Publish as private (only you can install)
+  --org <name>         Publish to an organization
+  --patch              Auto-bump patch version before publish
+  --minor              Auto-bump minor version before publish
+  --major              Auto-bump major version before publish
+  --dry-run            Validate and show what would be published
+
 EXAMPLES:
-  robinpath publish                   Publish current directory
-  robinpath publish ./packages/uuid   Publish a specific package`,
+  robinpath publish                        Publish current directory
+  robinpath publish --private              Publish as private
+  robinpath publish --org mycompany        Publish to org
+  robinpath publish --patch                Bump 0.1.0 → 0.1.1 and publish
+  robinpath publish --dry-run              Preview without uploading`,
 
         sync: `robinpath sync — List your published modules
 
@@ -1479,6 +3038,169 @@ USAGE:
 DESCRIPTION:
   Fetches your published modules from the registry and displays
   them in a table with name, version, downloads, and visibility.`,
+
+        add: `robinpath add — Install a module from the registry
+
+USAGE:
+  robinpath add <module>[@version]
+
+DESCRIPTION:
+  Downloads and installs a module to ~/.robinpath/modules/.
+  Installed modules are automatically available in all scripts.
+
+FLAGS:
+  --force            Reinstall even if already installed
+
+EXAMPLES:
+  robinpath add @robinpath/slack          Install latest version
+  robinpath add @robinpath/slack@0.2.0    Install specific version`,
+
+        remove: `robinpath remove — Uninstall a module
+
+USAGE:
+  robinpath remove <module>
+
+DESCRIPTION:
+  Removes an installed module from ~/.robinpath/modules/ and
+  updates the local manifest.
+
+EXAMPLES:
+  robinpath remove @robinpath/slack`,
+
+        upgrade: `robinpath upgrade — Upgrade a module to the latest version
+
+USAGE:
+  robinpath upgrade <module>
+
+DESCRIPTION:
+  Checks the registry for a newer version and installs it.
+
+EXAMPLES:
+  robinpath upgrade @robinpath/slack`,
+
+        modules: `robinpath modules — Module management subcommands
+
+USAGE:
+  robinpath modules <subcommand>
+
+SUBCOMMANDS:
+  list               List all installed modules
+  upgrade            Upgrade all installed modules to latest
+  init               Scaffold a new RobinPath module (interactive wizard)
+
+EXAMPLES:
+  robinpath modules list
+  robinpath modules upgrade
+  robinpath modules init`,
+
+        pack: `robinpath pack — Create a tarball without publishing
+
+USAGE:
+  robinpath pack [dir]
+
+DESCRIPTION:
+  Creates a .tar.gz archive of the module, same as publish would,
+  but saves it to the current directory instead of uploading.
+
+EXAMPLES:
+  robinpath pack
+  robinpath pack ./my-module`,
+
+        search: `robinpath search — Search the module registry
+
+USAGE:
+  robinpath search <query> [--category=<cat>]
+
+DESCRIPTION:
+  Searches the RobinPath module registry and displays matching modules.
+
+EXAMPLES:
+  robinpath search slack
+  robinpath search crm --category=crm`,
+
+        info: `robinpath info — Show module details
+
+USAGE:
+  robinpath info <module>
+
+DESCRIPTION:
+  Displays detailed information about a module from the registry,
+  including version, author, license, downloads, and install status.
+
+EXAMPLES:
+  robinpath info @robinpath/slack`,
+
+        init: `robinpath init — Create a new RobinPath project
+
+USAGE:
+  robinpath init [--force]
+
+DESCRIPTION:
+  Creates a robinpath.json project config file in the current directory,
+  along with a main.rp entry file, .env, and .gitignore.
+
+EXAMPLES:
+  robinpath init`,
+
+        doctor: `robinpath doctor — Diagnose environment
+
+USAGE:
+  robinpath doctor
+
+DESCRIPTION:
+  Checks CLI installation, authentication status, installed modules,
+  project config, and cache. Reports any issues found.`,
+
+        env: `robinpath env — Manage environment secrets
+
+USAGE:
+  robinpath env set <KEY> <value>
+  robinpath env list
+  robinpath env remove <KEY>
+
+DESCRIPTION:
+  Manages environment variables stored in ~/.robinpath/env.
+  Values are masked when listed.
+
+EXAMPLES:
+  robinpath env set SLACK_TOKEN xoxb-1234
+  robinpath env list
+  robinpath env remove SLACK_TOKEN`,
+
+        cache: `robinpath cache — Manage download cache
+
+USAGE:
+  robinpath cache list
+  robinpath cache clean
+
+DESCRIPTION:
+  Manages the module download cache at ~/.robinpath/cache/.
+  Cached tarballs speed up reinstalls and enable offline installs.
+
+EXAMPLES:
+  robinpath cache list
+  robinpath cache clean`,
+
+        audit: `robinpath audit — Check installed modules for issues
+
+USAGE:
+  robinpath audit
+
+DESCRIPTION:
+  Checks each installed module against the registry for deprecation
+  warnings and available updates.`,
+
+        deprecate: `robinpath deprecate — Mark a module as deprecated
+
+USAGE:
+  robinpath deprecate <module> "reason"
+
+DESCRIPTION:
+  Marks a published module as deprecated. Users who have it installed
+  will see a warning when running 'robinpath audit'.
+
+EXAMPLES:
+  robinpath deprecate @myorg/old-module "Use @myorg/new-module instead"`,
     };
 
     const page = helpPages[command];
@@ -1486,7 +3208,7 @@ DESCRIPTION:
         console.log(page);
     } else {
         console.error(color.red('Error:') + ` Unknown command: ${command}`);
-        console.error('Available commands: fmt, check, ast, test, install, uninstall, login, logout, whoami, publish, sync');
+        console.error('Available: add, remove, upgrade, search, info, modules, init, doctor, env, cache, audit, deprecate, pack, fmt, check, ast, test, install, uninstall, login, logout, whoami, publish, sync');
         process.exit(2);
     }
 }
@@ -1547,7 +3269,7 @@ function appendHistory(line) {
 }
 
 async function startREPL() {
-    const rp = new RobinPath({ threadControl: true });
+    const rp = await createRobinPath({ threadControl: true });
     rp.createThread('default');
 
     const sessionLines = []; // Track session lines for .save
@@ -1802,9 +3524,79 @@ async function main() {
         return;
     }
 
-    // install / uninstall
+    // Module management: add, remove, upgrade, search, info, modules
+    if (command === 'add') {
+        await handleAdd(args.slice(1));
+        return;
+    }
+    if (command === 'remove') {
+        await handleRemove(args.slice(1));
+        return;
+    }
+    if (command === 'upgrade') {
+        await handleUpgrade(args.slice(1));
+        return;
+    }
+    if (command === 'search') {
+        await handleSearch(args.slice(1));
+        return;
+    }
+    if (command === 'info') {
+        await handleInfo(args.slice(1));
+        return;
+    }
+    if (command === 'modules') {
+        const sub = args[1];
+        if (!sub || sub === 'list') {
+            await handleModulesList();
+        } else if (sub === 'upgrade') {
+            await handleModulesUpgradeAll();
+        } else if (sub === 'init') {
+            await handleModulesInit();
+        } else {
+            console.error(color.red('Error:') + ` Unknown subcommand: modules ${sub}`);
+            console.error('Available: modules list, modules upgrade, modules init');
+            process.exit(2);
+        }
+        return;
+    }
+    if (command === 'pack') {
+        await handlePack(args.slice(1));
+        return;
+    }
+    if (command === 'audit') {
+        await handleAudit();
+        return;
+    }
+    if (command === 'deprecate') {
+        await handleDeprecate(args.slice(1));
+        return;
+    }
+    if (command === 'env') {
+        await handleEnv(args.slice(1));
+        return;
+    }
+    if (command === 'cache') {
+        await handleCache(args.slice(1));
+        return;
+    }
+    if (command === 'doctor') {
+        await handleDoctor();
+        return;
+    }
+    if (command === 'init') {
+        await handleInit(args.slice(1));
+        return;
+    }
+
+    // install — project install (if robinpath.json exists) or system install
     if (command === 'install') {
-        handleInstall();
+        const hasProjectFile = existsSync(resolve('robinpath.json'));
+        if (hasProjectFile) {
+            await handleProjectInstall();
+        } else {
+            handleInstall();
+        }
         return;
     }
     if (command === 'uninstall') {
