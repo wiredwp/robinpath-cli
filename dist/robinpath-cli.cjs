@@ -18360,7 +18360,7 @@ var nativeModules = [
 ];
 
 // cli-entry.js
-var CLI_VERSION = true ? "1.42.0" : "1.42.0";
+var CLI_VERSION = true ? "1.43.0" : "1.42.0";
 var FLAG_QUIET = false;
 var FLAG_VERBOSE = false;
 function log(...args) {
