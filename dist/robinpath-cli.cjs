@@ -1,10 +1,35 @@
+var __create = Object.create;
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  mod
+));
+
 // cli-entry.js
 var import_node_readline = require("node:readline");
-var import_node_http = require("node:http");
-var import_node_fs = require("node:fs");
-var import_node_path = require("node:path");
-var import_node_child_process = require("node:child_process");
-var import_node_os = require("node:os");
+var import_node_http2 = require("node:http");
+var import_node_fs3 = require("node:fs");
+var import_node_path4 = require("node:path");
+var import_node_child_process2 = require("node:child_process");
+var import_node_os3 = require("node:os");
+var import_node_url = require("node:url");
+var import_node_crypto2 = require("node:crypto");
 
 // node_modules/@wiredwp/robinpath/dist/index.js
 var L = class {
@@ -13867,7 +13892,4475 @@ Example:
   }
 };
 
+// modules/file.js
+var import_promises = require("node:fs/promises");
+var import_node_fs = require("node:fs");
+var import_node_path = require("node:path");
+var import_node_os = require("node:os");
+
+// modules/_helpers.js
+function toStr(val, fallback = "") {
+  return val == null ? fallback : String(val);
+}
+function toNum(val, fallback = 0) {
+  const n = Number(val);
+  return Number.isNaN(n) ? fallback : n;
+}
+function requireArgs(funcName, args, min) {
+  if (!args || args.length < min) {
+    throw new Error(`${funcName} requires at least ${min} argument(s)`);
+  }
+}
+
+// modules/file.js
+var FileFunctions = {
+  read: async (args) => {
+    requireArgs("file.read", args, 1);
+    const filePath = (0, import_node_path.resolve)(toStr(args[0]));
+    const encoding = toStr(args[1], "utf-8");
+    return await (0, import_promises.readFile)(filePath, { encoding });
+  },
+  readBinary: async (args) => {
+    requireArgs("file.readBinary", args, 1);
+    const filePath = (0, import_node_path.resolve)(toStr(args[0]));
+    const buf = await (0, import_promises.readFile)(filePath);
+    return buf.toString("base64");
+  },
+  write: async (args) => {
+    requireArgs("file.write", args, 2);
+    const filePath = (0, import_node_path.resolve)(toStr(args[0]));
+    const content = toStr(args[1]);
+    const encoding = toStr(args[2], "utf-8");
+    await (0, import_promises.writeFile)(filePath, content, { encoding });
+    return true;
+  },
+  writeBinary: async (args) => {
+    requireArgs("file.writeBinary", args, 2);
+    const filePath = (0, import_node_path.resolve)(toStr(args[0]));
+    const base64Data = toStr(args[1]);
+    await (0, import_promises.writeFile)(filePath, Buffer.from(base64Data, "base64"));
+    return true;
+  },
+  append: async (args) => {
+    requireArgs("file.append", args, 2);
+    const filePath = (0, import_node_path.resolve)(toStr(args[0]));
+    const content = toStr(args[1]);
+    await (0, import_promises.appendFile)(filePath, content, "utf-8");
+    return true;
+  },
+  delete: async (args) => {
+    requireArgs("file.delete", args, 1);
+    const filePath = (0, import_node_path.resolve)(toStr(args[0]));
+    await (0, import_promises.rm)(filePath, { recursive: true, force: true });
+    return true;
+  },
+  exists: (args) => {
+    requireArgs("file.exists", args, 1);
+    return (0, import_node_fs.existsSync)((0, import_node_path.resolve)(toStr(args[0])));
+  },
+  copy: async (args) => {
+    requireArgs("file.copy", args, 2);
+    const src = (0, import_node_path.resolve)(toStr(args[0]));
+    const dest = (0, import_node_path.resolve)(toStr(args[1]));
+    await (0, import_promises.cp)(src, dest, { recursive: true });
+    return true;
+  },
+  move: async (args) => {
+    requireArgs("file.move", args, 2);
+    const src = (0, import_node_path.resolve)(toStr(args[0]));
+    const dest = (0, import_node_path.resolve)(toStr(args[1]));
+    await (0, import_promises.rename)(src, dest);
+    return true;
+  },
+  rename: async (args) => {
+    requireArgs("file.rename", args, 2);
+    const src = (0, import_node_path.resolve)(toStr(args[0]));
+    const dest = (0, import_node_path.resolve)(toStr(args[1]));
+    await (0, import_promises.rename)(src, dest);
+    return true;
+  },
+  list: async (args) => {
+    requireArgs("file.list", args, 1);
+    const dirPath = (0, import_node_path.resolve)(toStr(args[0]));
+    const recursive = args[1] === true || args[1] === "true";
+    const entries = await (0, import_promises.readdir)(dirPath, { withFileTypes: true, recursive });
+    return entries.map((e) => ({
+      name: e.name,
+      isFile: e.isFile(),
+      isDirectory: e.isDirectory(),
+      path: e.parentPath ? (0, import_node_path.join)(e.parentPath, e.name) : (0, import_node_path.join)(dirPath, e.name)
+    }));
+  },
+  stat: async (args) => {
+    requireArgs("file.stat", args, 1);
+    const filePath = (0, import_node_path.resolve)(toStr(args[0]));
+    const s = await (0, import_promises.stat)(filePath);
+    return {
+      size: s.size,
+      isFile: s.isFile(),
+      isDirectory: s.isDirectory(),
+      isSymlink: s.isSymbolicLink(),
+      created: s.birthtime.toISOString(),
+      modified: s.mtime.toISOString(),
+      accessed: s.atime.toISOString(),
+      permissions: s.mode.toString(8)
+    };
+  },
+  mkdir: async (args) => {
+    requireArgs("file.mkdir", args, 1);
+    const dirPath = (0, import_node_path.resolve)(toStr(args[0]));
+    await (0, import_promises.mkdir)(dirPath, { recursive: true });
+    return true;
+  },
+  readJSON: async (args) => {
+    requireArgs("file.readJSON", args, 1);
+    const filePath = (0, import_node_path.resolve)(toStr(args[0]));
+    const content = await (0, import_promises.readFile)(filePath, "utf-8");
+    return JSON.parse(content);
+  },
+  writeJSON: async (args) => {
+    requireArgs("file.writeJSON", args, 2);
+    const filePath = (0, import_node_path.resolve)(toStr(args[0]));
+    const data = args[1];
+    const indent = args[2] != null ? Number(args[2]) : 2;
+    await (0, import_promises.writeFile)(filePath, JSON.stringify(data, null, indent) + "\n", "utf-8");
+    return true;
+  },
+  size: async (args) => {
+    requireArgs("file.size", args, 1);
+    const filePath = (0, import_node_path.resolve)(toStr(args[0]));
+    const s = await (0, import_promises.stat)(filePath);
+    return s.size;
+  },
+  isFile: (args) => {
+    requireArgs("file.isFile", args, 1);
+    const filePath = (0, import_node_path.resolve)(toStr(args[0]));
+    try {
+      return (0, import_node_fs.statSync)(filePath).isFile();
+    } catch {
+      return false;
+    }
+  },
+  isDir: (args) => {
+    requireArgs("file.isDir", args, 1);
+    const filePath = (0, import_node_path.resolve)(toStr(args[0]));
+    try {
+      return (0, import_node_fs.statSync)(filePath).isDirectory();
+    } catch {
+      return false;
+    }
+  },
+  lines: async (args) => {
+    requireArgs("file.lines", args, 1);
+    const filePath = (0, import_node_path.resolve)(toStr(args[0]));
+    const content = await (0, import_promises.readFile)(filePath, "utf-8");
+    return content.split(/\r?\n/);
+  },
+  lineCount: async (args) => {
+    requireArgs("file.lineCount", args, 1);
+    const filePath = (0, import_node_path.resolve)(toStr(args[0]));
+    const content = await (0, import_promises.readFile)(filePath, "utf-8");
+    return content.split(/\r?\n/).length;
+  },
+  temp: (args) => {
+    const prefix = toStr(args[0], "rp_");
+    const name = prefix + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+    return (0, import_node_path.join)((0, import_node_os.tmpdir)(), name);
+  },
+  cwd: () => {
+    return process.cwd();
+  }
+};
+var FileFunctionMetadata = {
+  read: {
+    description: "Read file contents as a string",
+    parameters: [
+      { name: "path", dataType: "string", description: "File path to read", formInputType: "text", required: true },
+      { name: "encoding", dataType: "string", description: "Encoding (default: utf-8)", formInputType: "text", required: false, defaultValue: "utf-8" }
+    ],
+    returnType: "string",
+    returnDescription: "File contents",
+    example: 'file.read "data.txt"'
+  },
+  readBinary: {
+    description: "Read file as base64-encoded string",
+    parameters: [
+      { name: "path", dataType: "string", description: "File path to read", formInputType: "text", required: true }
+    ],
+    returnType: "string",
+    returnDescription: "Base64-encoded file contents",
+    example: 'file.readBinary "image.png"'
+  },
+  write: {
+    description: "Write string content to a file",
+    parameters: [
+      { name: "path", dataType: "string", description: "File path", formInputType: "text", required: true },
+      { name: "content", dataType: "string", description: "Content to write", formInputType: "textarea", required: true },
+      { name: "encoding", dataType: "string", description: "Encoding (default: utf-8)", formInputType: "text", required: false, defaultValue: "utf-8" }
+    ],
+    returnType: "boolean",
+    returnDescription: "true on success",
+    example: 'file.write "out.txt" "Hello"'
+  },
+  writeBinary: {
+    description: "Write base64 data to a binary file",
+    parameters: [
+      { name: "path", dataType: "string", description: "File path", formInputType: "text", required: true },
+      { name: "base64Data", dataType: "string", description: "Base64-encoded data", formInputType: "textarea", required: true }
+    ],
+    returnType: "boolean",
+    returnDescription: "true on success",
+    example: 'file.writeBinary "out.bin" $data'
+  },
+  append: {
+    description: "Append content to a file",
+    parameters: [
+      { name: "path", dataType: "string", description: "File path", formInputType: "text", required: true },
+      { name: "content", dataType: "string", description: "Content to append", formInputType: "textarea", required: true }
+    ],
+    returnType: "boolean",
+    returnDescription: "true on success",
+    example: 'file.append "log.txt" "new line"'
+  },
+  delete: {
+    description: "Delete a file or directory (recursive)",
+    parameters: [
+      { name: "path", dataType: "string", description: "Path to delete", formInputType: "text", required: true }
+    ],
+    returnType: "boolean",
+    returnDescription: "true on success",
+    example: 'file.delete "temp/"'
+  },
+  exists: {
+    description: "Check if a file or directory exists",
+    parameters: [
+      { name: "path", dataType: "string", description: "Path to check", formInputType: "text", required: true }
+    ],
+    returnType: "boolean",
+    returnDescription: "true if exists",
+    example: 'file.exists "config.json"'
+  },
+  copy: {
+    description: "Copy a file or directory",
+    parameters: [
+      { name: "source", dataType: "string", description: "Source path", formInputType: "text", required: true },
+      { name: "destination", dataType: "string", description: "Destination path", formInputType: "text", required: true }
+    ],
+    returnType: "boolean",
+    returnDescription: "true on success",
+    example: 'file.copy "a.txt" "b.txt"'
+  },
+  move: {
+    description: "Move/rename a file or directory",
+    parameters: [
+      { name: "source", dataType: "string", description: "Source path", formInputType: "text", required: true },
+      { name: "destination", dataType: "string", description: "Destination path", formInputType: "text", required: true }
+    ],
+    returnType: "boolean",
+    returnDescription: "true on success",
+    example: 'file.move "old.txt" "new.txt"'
+  },
+  rename: {
+    description: "Rename a file or directory",
+    parameters: [
+      { name: "source", dataType: "string", description: "Current name", formInputType: "text", required: true },
+      { name: "destination", dataType: "string", description: "New name", formInputType: "text", required: true }
+    ],
+    returnType: "boolean",
+    returnDescription: "true on success",
+    example: 'file.rename "old.txt" "new.txt"'
+  },
+  list: {
+    description: "List files and directories in a path",
+    parameters: [
+      { name: "directory", dataType: "string", description: "Directory to list", formInputType: "text", required: true },
+      { name: "recursive", dataType: "boolean", description: "List recursively (default: false)", formInputType: "checkbox", required: false, defaultValue: false }
+    ],
+    returnType: "array",
+    returnDescription: "Array of {name, isFile, isDirectory, path}",
+    example: 'file.list "src/"'
+  },
+  stat: {
+    description: "Get file/directory metadata",
+    parameters: [
+      { name: "path", dataType: "string", description: "Path to inspect", formInputType: "text", required: true }
+    ],
+    returnType: "object",
+    returnDescription: "Object with size, isFile, isDirectory, created, modified",
+    example: 'file.stat "data.txt"'
+  },
+  mkdir: {
+    description: "Create a directory (recursive)",
+    parameters: [
+      { name: "path", dataType: "string", description: "Directory path", formInputType: "text", required: true }
+    ],
+    returnType: "boolean",
+    returnDescription: "true on success",
+    example: 'file.mkdir "output/data"'
+  },
+  readJSON: {
+    description: "Read and parse a JSON file",
+    parameters: [
+      { name: "path", dataType: "string", description: "Path to JSON file", formInputType: "text", required: true }
+    ],
+    returnType: "object",
+    returnDescription: "Parsed JSON object",
+    example: 'file.readJSON "config.json"'
+  },
+  writeJSON: {
+    description: "Write an object as JSON to a file",
+    parameters: [
+      { name: "path", dataType: "string", description: "File path", formInputType: "text", required: true },
+      { name: "data", dataType: "object", description: "Object to write", formInputType: "json", required: true },
+      { name: "indent", dataType: "number", description: "Indentation (default: 2)", formInputType: "number", required: false, defaultValue: 2 }
+    ],
+    returnType: "boolean",
+    returnDescription: "true on success",
+    example: 'file.writeJSON "out.json" $data'
+  },
+  size: {
+    description: "Get file size in bytes",
+    parameters: [
+      { name: "path", dataType: "string", description: "File path", formInputType: "text", required: true }
+    ],
+    returnType: "number",
+    returnDescription: "Size in bytes",
+    example: 'file.size "data.bin"'
+  },
+  isFile: {
+    description: "Check if path is a file",
+    parameters: [
+      { name: "path", dataType: "string", description: "Path to check", formInputType: "text", required: true }
+    ],
+    returnType: "boolean",
+    returnDescription: "true if file",
+    example: 'file.isFile "data.txt"'
+  },
+  isDir: {
+    description: "Check if path is a directory",
+    parameters: [
+      { name: "path", dataType: "string", description: "Path to check", formInputType: "text", required: true }
+    ],
+    returnType: "boolean",
+    returnDescription: "true if directory",
+    example: 'file.isDir "src/"'
+  },
+  lines: {
+    description: "Read file and split into array of lines",
+    parameters: [
+      { name: "path", dataType: "string", description: "File path", formInputType: "text", required: true }
+    ],
+    returnType: "array",
+    returnDescription: "Array of lines",
+    example: 'file.lines "data.txt"'
+  },
+  lineCount: {
+    description: "Count number of lines in a file",
+    parameters: [
+      { name: "path", dataType: "string", description: "File path", formInputType: "text", required: true }
+    ],
+    returnType: "number",
+    returnDescription: "Number of lines",
+    example: 'file.lineCount "data.txt"'
+  },
+  temp: {
+    description: "Generate a temporary file path",
+    parameters: [
+      { name: "prefix", dataType: "string", description: "Filename prefix (default: rp_)", formInputType: "text", required: false, defaultValue: "rp_" }
+    ],
+    returnType: "string",
+    returnDescription: "Temporary file path",
+    example: 'file.temp "myapp_"'
+  },
+  cwd: {
+    description: "Get current working directory",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "Current working directory path",
+    example: "file.cwd"
+  }
+};
+var FileModuleMetadata = {
+  description: "File system operations: read, write, copy, move, delete, list, and more",
+  methods: Object.keys(FileFunctions)
+};
+var file_default = {
+  name: "file",
+  functions: FileFunctions,
+  functionMetadata: FileFunctionMetadata,
+  moduleMetadata: FileModuleMetadata,
+  global: false
+};
+
+// modules/path.js
+var import_node_path2 = require("node:path");
+var PathFunctions = {
+  join: (args) => {
+    return (0, import_node_path2.join)(...args.map((a) => toStr(a)));
+  },
+  resolve: (args) => {
+    return (0, import_node_path2.resolve)(...args.map((a) => toStr(a)));
+  },
+  dirname: (args) => {
+    requireArgs("path.dirname", args, 1);
+    return (0, import_node_path2.dirname)(toStr(args[0]));
+  },
+  basename: (args) => {
+    requireArgs("path.basename", args, 1);
+    const ext = args[1] != null ? toStr(args[1]) : void 0;
+    return (0, import_node_path2.basename)(toStr(args[0]), ext);
+  },
+  extname: (args) => {
+    requireArgs("path.extname", args, 1);
+    return (0, import_node_path2.extname)(toStr(args[0]));
+  },
+  parse: (args) => {
+    requireArgs("path.parse", args, 1);
+    return (0, import_node_path2.parse)(toStr(args[0]));
+  },
+  format: (args) => {
+    requireArgs("path.format", args, 1);
+    const obj = args[0];
+    if (typeof obj !== "object" || obj === null) {
+      throw new Error("path.format requires an object with root/dir/base/name/ext");
+    }
+    return (0, import_node_path2.format)(obj);
+  },
+  relative: (args) => {
+    requireArgs("path.relative", args, 2);
+    return (0, import_node_path2.relative)(toStr(args[0]), toStr(args[1]));
+  },
+  normalize: (args) => {
+    requireArgs("path.normalize", args, 1);
+    return (0, import_node_path2.normalize)(toStr(args[0]));
+  },
+  isAbsolute: (args) => {
+    requireArgs("path.isAbsolute", args, 1);
+    return (0, import_node_path2.isAbsolute)(toStr(args[0]));
+  },
+  sep: () => import_node_path2.sep,
+  delimiter: () => import_node_path2.delimiter,
+  toNamespacedPath: (args) => {
+    requireArgs("path.toNamespacedPath", args, 1);
+    if (process.platform === "win32") {
+      return "\\\\?\\" + (0, import_node_path2.resolve)(toStr(args[0]));
+    }
+    return (0, import_node_path2.resolve)(toStr(args[0]));
+  }
+};
+var PathFunctionMetadata = {
+  join: {
+    description: "Join path segments together",
+    parameters: [{ name: "segments", dataType: "string", description: "Path segments", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Joined path",
+    example: 'path.join "src" "modules" "test.js"'
+  },
+  resolve: {
+    description: "Resolve path segments to an absolute path",
+    parameters: [{ name: "segments", dataType: "string", description: "Path segments", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Absolute path",
+    example: 'path.resolve "src" "file.js"'
+  },
+  dirname: {
+    description: "Get directory name of a path",
+    parameters: [{ name: "path", dataType: "string", description: "File path", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Directory name",
+    example: 'path.dirname "/home/user/file.txt"'
+  },
+  basename: {
+    description: "Get the last portion of a path",
+    parameters: [
+      { name: "path", dataType: "string", description: "File path", formInputType: "text", required: true },
+      { name: "ext", dataType: "string", description: "Extension to strip", formInputType: "text", required: false }
+    ],
+    returnType: "string",
+    returnDescription: "Base name",
+    example: 'path.basename "/home/user/file.txt"'
+  },
+  extname: {
+    description: "Get file extension",
+    parameters: [{ name: "path", dataType: "string", description: "File path", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: 'Extension (e.g. ".txt")',
+    example: 'path.extname "file.txt"'
+  },
+  parse: {
+    description: "Parse a path into components",
+    parameters: [{ name: "path", dataType: "string", description: "File path", formInputType: "text", required: true }],
+    returnType: "object",
+    returnDescription: "Object with root, dir, base, name, ext",
+    example: 'path.parse "/home/user/file.txt"'
+  },
+  format: {
+    description: "Format a path object into a string",
+    parameters: [{ name: "pathObject", dataType: "object", description: "Object with root/dir/base/name/ext", formInputType: "json", required: true }],
+    returnType: "string",
+    returnDescription: "Formatted path string",
+    example: "path.format $obj"
+  },
+  relative: {
+    description: "Get relative path from one path to another",
+    parameters: [
+      { name: "from", dataType: "string", description: "Base path", formInputType: "text", required: true },
+      { name: "to", dataType: "string", description: "Target path", formInputType: "text", required: true }
+    ],
+    returnType: "string",
+    returnDescription: "Relative path",
+    example: 'path.relative "/home" "/home/user/file.txt"'
+  },
+  normalize: {
+    description: "Normalize a path (resolve . and ..)",
+    parameters: [{ name: "path", dataType: "string", description: "Path to normalize", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Normalized path",
+    example: 'path.normalize "/home/user/../file.txt"'
+  },
+  isAbsolute: {
+    description: "Check if a path is absolute",
+    parameters: [{ name: "path", dataType: "string", description: "Path to check", formInputType: "text", required: true }],
+    returnType: "boolean",
+    returnDescription: "true if absolute",
+    example: 'path.isAbsolute "/home/user"'
+  },
+  sep: {
+    description: "Get the platform-specific path separator",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "Path separator (/ or \\)",
+    example: "path.sep"
+  },
+  delimiter: {
+    description: "Get the platform-specific path delimiter",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "Path delimiter (: or ;)",
+    example: "path.delimiter"
+  },
+  toNamespacedPath: {
+    description: "Convert to namespaced path (Windows \\\\?\\ prefix)",
+    parameters: [{ name: "path", dataType: "string", description: "Path to convert", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Namespaced path",
+    example: 'path.toNamespacedPath "C:\\Users"'
+  }
+};
+var PathModuleMetadata = {
+  description: "Path manipulation: join, resolve, parse, format, and platform-aware utilities",
+  methods: Object.keys(PathFunctions)
+};
+var path_default = {
+  name: "path",
+  functions: PathFunctions,
+  functionMetadata: PathFunctionMetadata,
+  moduleMetadata: PathModuleMetadata,
+  global: false
+};
+
+// modules/process.js
+var ProcessFunctions = {
+  env: (args) => {
+    if (args.length === 0) return { ...process.env };
+    const key = toStr(args[0]);
+    if (args.length >= 2) {
+      process.env[key] = toStr(args[1]);
+      return true;
+    }
+    return process.env[key] ?? null;
+  },
+  argv: () => {
+    return process.argv.slice(2);
+  },
+  exit: (args) => {
+    const code = args.length > 0 ? toNum(args[0], 0) : 0;
+    process.exit(code);
+  },
+  cwd: () => {
+    return process.cwd();
+  },
+  chdir: (args) => {
+    if (args.length < 1) throw new Error("process.chdir requires a directory path");
+    process.chdir(toStr(args[0]));
+    return process.cwd();
+  },
+  pid: () => {
+    return process.pid;
+  },
+  ppid: () => {
+    return process.ppid;
+  },
+  platform: () => {
+    return process.platform;
+  },
+  arch: () => {
+    return process.arch;
+  },
+  version: () => {
+    return process.version;
+  },
+  versions: () => {
+    return { ...process.versions };
+  },
+  memoryUsage: () => {
+    const mem = process.memoryUsage();
+    return {
+      rss: mem.rss,
+      heapTotal: mem.heapTotal,
+      heapUsed: mem.heapUsed,
+      external: mem.external,
+      arrayBuffers: mem.arrayBuffers
+    };
+  },
+  uptime: () => {
+    return process.uptime();
+  },
+  hrtime: () => {
+    const [s, ns] = process.hrtime();
+    return s * 1e9 + ns;
+  },
+  title: (args) => {
+    if (args.length > 0) {
+      process.title = toStr(args[0]);
+    }
+    return process.title;
+  },
+  execPath: () => {
+    return process.execPath;
+  },
+  cpuUsage: () => {
+    const usage = process.cpuUsage();
+    return { user: usage.user, system: usage.system };
+  },
+  resourceUsage: () => {
+    if (typeof process.resourceUsage === "function") {
+      return process.resourceUsage();
+    }
+    return null;
+  }
+};
+var ProcessFunctionMetadata = {
+  env: {
+    description: "Get or set environment variables",
+    parameters: [
+      { name: "key", dataType: "string", description: "Variable name (omit to get all)", formInputType: "text", required: false },
+      { name: "value", dataType: "string", description: "Value to set (omit to get)", formInputType: "text", required: false }
+    ],
+    returnType: "any",
+    returnDescription: "Variable value, all variables, or true on set",
+    example: 'process.env "PATH"'
+  },
+  argv: {
+    description: "Get command-line arguments",
+    parameters: [],
+    returnType: "array",
+    returnDescription: "Array of argument strings",
+    example: "process.argv"
+  },
+  exit: {
+    description: "Exit the process with a code",
+    parameters: [{ name: "code", dataType: "number", description: "Exit code (default: 0)", formInputType: "number", required: false, defaultValue: 0 }],
+    returnType: "null",
+    returnDescription: "Does not return",
+    example: "process.exit 1"
+  },
+  cwd: {
+    description: "Get current working directory",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "Current working directory",
+    example: "process.cwd"
+  },
+  chdir: {
+    description: "Change current working directory",
+    parameters: [{ name: "directory", dataType: "string", description: "Directory to change to", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "New working directory",
+    example: 'process.chdir "/home/user"'
+  },
+  pid: {
+    description: "Get process ID",
+    parameters: [],
+    returnType: "number",
+    returnDescription: "Process ID",
+    example: "process.pid"
+  },
+  ppid: {
+    description: "Get parent process ID",
+    parameters: [],
+    returnType: "number",
+    returnDescription: "Parent process ID",
+    example: "process.ppid"
+  },
+  platform: {
+    description: "Get operating system platform",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "Platform (win32, darwin, linux)",
+    example: "process.platform"
+  },
+  arch: {
+    description: "Get CPU architecture",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "Architecture (x64, arm64, etc.)",
+    example: "process.arch"
+  },
+  version: {
+    description: "Get Node.js version",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "Version string",
+    example: "process.version"
+  },
+  versions: {
+    description: "Get version strings of Node.js and its dependencies",
+    parameters: [],
+    returnType: "object",
+    returnDescription: "Object with version strings",
+    example: "process.versions"
+  },
+  memoryUsage: {
+    description: "Get memory usage statistics",
+    parameters: [],
+    returnType: "object",
+    returnDescription: "Object with rss, heapTotal, heapUsed, external",
+    example: "process.memoryUsage"
+  },
+  uptime: {
+    description: "Get process uptime in seconds",
+    parameters: [],
+    returnType: "number",
+    returnDescription: "Uptime in seconds",
+    example: "process.uptime"
+  },
+  hrtime: {
+    description: "Get high-resolution time in nanoseconds",
+    parameters: [],
+    returnType: "number",
+    returnDescription: "Time in nanoseconds",
+    example: "process.hrtime"
+  },
+  title: {
+    description: "Get or set process title",
+    parameters: [{ name: "title", dataType: "string", description: "New title (omit to get)", formInputType: "text", required: false }],
+    returnType: "string",
+    returnDescription: "Process title",
+    example: 'process.title "MyApp"'
+  },
+  execPath: {
+    description: "Get path to the Node.js executable",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "Executable path",
+    example: "process.execPath"
+  },
+  cpuUsage: {
+    description: "Get CPU usage (user and system microseconds)",
+    parameters: [],
+    returnType: "object",
+    returnDescription: "Object with user and system CPU time",
+    example: "process.cpuUsage"
+  },
+  resourceUsage: {
+    description: "Get resource usage statistics",
+    parameters: [],
+    returnType: "object",
+    returnDescription: "Resource usage object",
+    example: "process.resourceUsage"
+  }
+};
+var ProcessModuleMetadata = {
+  description: "Process information and control: env, argv, pid, memory, CPU, and more",
+  methods: Object.keys(ProcessFunctions)
+};
+var process_default = {
+  name: "process",
+  functions: ProcessFunctions,
+  functionMetadata: ProcessFunctionMetadata,
+  moduleMetadata: ProcessModuleMetadata,
+  global: false
+};
+
+// modules/os.js
+var import_node_os2 = require("node:os");
+var OsFunctions = {
+  hostname: () => (0, import_node_os2.hostname)(),
+  cpus: () => {
+    return (0, import_node_os2.cpus)().map((cpu) => ({
+      model: cpu.model,
+      speed: cpu.speed,
+      times: cpu.times
+    }));
+  },
+  cpuCount: () => (0, import_node_os2.cpus)().length,
+  totalmem: () => (0, import_node_os2.totalmem)(),
+  freemem: () => (0, import_node_os2.freemem)(),
+  usedmem: () => (0, import_node_os2.totalmem)() - (0, import_node_os2.freemem)(),
+  memoryInfo: () => {
+    const total = (0, import_node_os2.totalmem)();
+    const free = (0, import_node_os2.freemem)();
+    return {
+      total,
+      free,
+      used: total - free,
+      percentUsed: Math.round((total - free) / total * 1e4) / 100
+    };
+  },
+  networkInterfaces: () => {
+    const ifaces = (0, import_node_os2.networkInterfaces)();
+    const result = {};
+    for (const [name, addrs] of Object.entries(ifaces)) {
+      result[name] = addrs.map((addr) => ({
+        address: addr.address,
+        netmask: addr.netmask,
+        family: addr.family,
+        mac: addr.mac,
+        internal: addr.internal,
+        cidr: addr.cidr
+      }));
+    }
+    return result;
+  },
+  tmpdir: () => (0, import_node_os2.tmpdir)(),
+  homedir: () => (0, import_node_os2.homedir)(),
+  type: () => (0, import_node_os2.type)(),
+  release: () => (0, import_node_os2.release)(),
+  uptime: () => (0, import_node_os2.uptime)(),
+  loadavg: () => (0, import_node_os2.loadavg)(),
+  userInfo: () => {
+    const info = (0, import_node_os2.userInfo)();
+    return {
+      username: info.username,
+      uid: info.uid,
+      gid: info.gid,
+      shell: info.shell,
+      homedir: info.homedir
+    };
+  },
+  platform: () => (0, import_node_os2.platform)(),
+  arch: () => (0, import_node_os2.arch)(),
+  endianness: () => (0, import_node_os2.endianness)(),
+  machine: () => {
+    if (typeof import_node_os2.machine === "function") return (0, import_node_os2.machine)();
+    return (0, import_node_os2.arch)();
+  },
+  version: () => {
+    if (typeof import_node_os2.version === "function") return (0, import_node_os2.version)();
+    return (0, import_node_os2.release)();
+  },
+  eol: () => import_node_os2.EOL
+};
+var OsFunctionMetadata = {
+  hostname: {
+    description: "Get the operating system hostname",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "Hostname",
+    example: "os.hostname"
+  },
+  cpus: {
+    description: "Get CPU information for each core",
+    parameters: [],
+    returnType: "array",
+    returnDescription: "Array of CPU info objects",
+    example: "os.cpus"
+  },
+  cpuCount: {
+    description: "Get number of CPU cores",
+    parameters: [],
+    returnType: "number",
+    returnDescription: "Number of CPU cores",
+    example: "os.cpuCount"
+  },
+  totalmem: {
+    description: "Get total system memory in bytes",
+    parameters: [],
+    returnType: "number",
+    returnDescription: "Total memory in bytes",
+    example: "os.totalmem"
+  },
+  freemem: {
+    description: "Get free system memory in bytes",
+    parameters: [],
+    returnType: "number",
+    returnDescription: "Free memory in bytes",
+    example: "os.freemem"
+  },
+  usedmem: {
+    description: "Get used system memory in bytes",
+    parameters: [],
+    returnType: "number",
+    returnDescription: "Used memory in bytes",
+    example: "os.usedmem"
+  },
+  memoryInfo: {
+    description: "Get detailed memory info (total, free, used, percentUsed)",
+    parameters: [],
+    returnType: "object",
+    returnDescription: "Memory info object",
+    example: "os.memoryInfo"
+  },
+  networkInterfaces: {
+    description: "Get network interface information",
+    parameters: [],
+    returnType: "object",
+    returnDescription: "Object with interface names and address arrays",
+    example: "os.networkInterfaces"
+  },
+  tmpdir: {
+    description: "Get the OS temporary directory",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "Temp directory path",
+    example: "os.tmpdir"
+  },
+  homedir: {
+    description: "Get the current user home directory",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "Home directory path",
+    example: "os.homedir"
+  },
+  type: {
+    description: "Get the operating system name",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "OS name (Linux, Darwin, Windows_NT)",
+    example: "os.type"
+  },
+  release: {
+    description: "Get the OS release version",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "Release string",
+    example: "os.release"
+  },
+  uptime: {
+    description: "Get system uptime in seconds",
+    parameters: [],
+    returnType: "number",
+    returnDescription: "Uptime in seconds",
+    example: "os.uptime"
+  },
+  loadavg: {
+    description: "Get load averages (1, 5, 15 minute)",
+    parameters: [],
+    returnType: "array",
+    returnDescription: "Array of 3 load average numbers",
+    example: "os.loadavg"
+  },
+  userInfo: {
+    description: "Get current user information",
+    parameters: [],
+    returnType: "object",
+    returnDescription: "Object with username, uid, gid, shell, homedir",
+    example: "os.userInfo"
+  },
+  platform: {
+    description: "Get the operating system platform",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "Platform (win32, darwin, linux)",
+    example: "os.platform"
+  },
+  arch: {
+    description: "Get the CPU architecture",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "Architecture (x64, arm64)",
+    example: "os.arch"
+  },
+  endianness: {
+    description: "Get CPU endianness",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "BE or LE",
+    example: "os.endianness"
+  },
+  machine: {
+    description: "Get the machine type",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "Machine type string",
+    example: "os.machine"
+  },
+  version: {
+    description: "Get the OS version string",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "OS version",
+    example: "os.version"
+  },
+  eol: {
+    description: "Get the platform-specific end-of-line marker",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "EOL string (\\n or \\r\\n)",
+    example: "os.eol"
+  }
+};
+var OsModuleMetadata = {
+  description: "Operating system information: hostname, CPUs, memory, network, platform, and more",
+  methods: Object.keys(OsFunctions)
+};
+var os_default = {
+  name: "os",
+  functions: OsFunctions,
+  functionMetadata: OsFunctionMetadata,
+  moduleMetadata: OsModuleMetadata,
+  global: false
+};
+
+// modules/crypto.js
+var import_node_crypto = require("node:crypto");
+var CryptoNativeFunctions = {
+  // --- Hashing ---
+  hash: async (args) => {
+    requireArgs("crypto.hash", args, 2);
+    const algo = toStr(args[0]);
+    const data = toStr(args[1]);
+    const encoding = toStr(args[2], "hex");
+    return (0, import_node_crypto.createHash)(algo).update(data).digest(encoding);
+  },
+  md5: async (args) => {
+    requireArgs("crypto.md5", args, 1);
+    return (0, import_node_crypto.createHash)("md5").update(toStr(args[0])).digest("hex");
+  },
+  sha1: async (args) => {
+    requireArgs("crypto.sha1", args, 1);
+    return (0, import_node_crypto.createHash)("sha1").update(toStr(args[0])).digest("hex");
+  },
+  sha256: async (args) => {
+    requireArgs("crypto.sha256", args, 1);
+    return (0, import_node_crypto.createHash)("sha256").update(toStr(args[0])).digest("hex");
+  },
+  sha512: async (args) => {
+    requireArgs("crypto.sha512", args, 1);
+    return (0, import_node_crypto.createHash)("sha512").update(toStr(args[0])).digest("hex");
+  },
+  // --- HMAC ---
+  hmac: async (args) => {
+    requireArgs("crypto.hmac", args, 3);
+    const algo = toStr(args[0]);
+    const key = toStr(args[1]);
+    const data = toStr(args[2]);
+    const encoding = toStr(args[3], "hex");
+    return (0, import_node_crypto.createHmac)(algo, key).update(data).digest(encoding);
+  },
+  hmacSha256: async (args) => {
+    requireArgs("crypto.hmacSha256", args, 2);
+    return (0, import_node_crypto.createHmac)("sha256", toStr(args[0])).update(toStr(args[1])).digest("hex");
+  },
+  hmacSha512: async (args) => {
+    requireArgs("crypto.hmacSha512", args, 2);
+    return (0, import_node_crypto.createHmac)("sha512", toStr(args[0])).update(toStr(args[1])).digest("hex");
+  },
+  // --- Encryption ---
+  encrypt: async (args) => {
+    requireArgs("crypto.encrypt", args, 3);
+    const algo = toStr(args[0], "aes-256-cbc");
+    const key = toStr(args[1]);
+    const data = toStr(args[2]);
+    const keyBuf = (0, import_node_crypto.createHash)("sha256").update(key).digest();
+    const iv = (0, import_node_crypto.randomBytes)(16);
+    const cipher = (0, import_node_crypto.createCipheriv)(algo, keyBuf, iv);
+    let encrypted = cipher.update(data, "utf-8", "hex");
+    encrypted += cipher.final("hex");
+    return iv.toString("hex") + ":" + encrypted;
+  },
+  decrypt: async (args) => {
+    requireArgs("crypto.decrypt", args, 3);
+    const algo = toStr(args[0], "aes-256-cbc");
+    const key = toStr(args[1]);
+    const encryptedStr = toStr(args[2]);
+    const keyBuf = (0, import_node_crypto.createHash)("sha256").update(key).digest();
+    const parts = encryptedStr.split(":");
+    if (parts.length !== 2) throw new Error("crypto.decrypt: invalid encrypted data format (expected iv:data)");
+    const iv = Buffer.from(parts[0], "hex");
+    const encrypted = parts[1];
+    const decipher = (0, import_node_crypto.createDecipheriv)(algo, keyBuf, iv);
+    let decrypted = decipher.update(encrypted, "hex", "utf-8");
+    decrypted += decipher.final("utf-8");
+    return decrypted;
+  },
+  // --- Random ---
+  randomBytes: async (args) => {
+    const size = toNum(args[0], 32);
+    const encoding = toStr(args[1], "hex");
+    return (0, import_node_crypto.randomBytes)(size).toString(encoding);
+  },
+  randomUUID: () => (0, import_node_crypto.randomUUID)(),
+  randomInt: (args) => {
+    const min = args.length >= 2 ? toNum(args[0], 0) : 0;
+    const max = args.length >= 2 ? toNum(args[1], 100) : toNum(args[0], 100);
+    return (0, import_node_crypto.randomInt)(min, max);
+  },
+  // --- Key Derivation ---
+  pbkdf2: (args) => {
+    requireArgs("crypto.pbkdf2", args, 2);
+    const password = toStr(args[0]);
+    const salt = toStr(args[1], "salt");
+    const iterations = toNum(args[2], 1e5);
+    const keylen = toNum(args[3], 64);
+    const digest = toStr(args[4], "sha512");
+    return new Promise((resolve5, reject) => {
+      (0, import_node_crypto.pbkdf2)(password, salt, iterations, keylen, digest, (err, key) => {
+        if (err) reject(err);
+        else resolve5(key.toString("hex"));
+      });
+    });
+  },
+  scrypt: (args) => {
+    requireArgs("crypto.scrypt", args, 2);
+    const password = toStr(args[0]);
+    const salt = toStr(args[1]);
+    const keylen = toNum(args[2], 64);
+    return new Promise((resolve5, reject) => {
+      (0, import_node_crypto.scrypt)(password, salt, keylen, (err, key) => {
+        if (err) reject(err);
+        else resolve5(key.toString("hex"));
+      });
+    });
+  },
+  // --- Encoding ---
+  base64Encode: (args) => {
+    requireArgs("crypto.base64Encode", args, 1);
+    return Buffer.from(toStr(args[0])).toString("base64");
+  },
+  base64Decode: (args) => {
+    requireArgs("crypto.base64Decode", args, 1);
+    return Buffer.from(toStr(args[0]), "base64").toString("utf-8");
+  },
+  base64UrlEncode: (args) => {
+    requireArgs("crypto.base64UrlEncode", args, 1);
+    return Buffer.from(toStr(args[0])).toString("base64url");
+  },
+  base64UrlDecode: (args) => {
+    requireArgs("crypto.base64UrlDecode", args, 1);
+    return Buffer.from(toStr(args[0]), "base64url").toString("utf-8");
+  },
+  hexEncode: (args) => {
+    requireArgs("crypto.hexEncode", args, 1);
+    return Buffer.from(toStr(args[0])).toString("hex");
+  },
+  hexDecode: (args) => {
+    requireArgs("crypto.hexDecode", args, 1);
+    return Buffer.from(toStr(args[0]), "hex").toString("utf-8");
+  },
+  // --- Info ---
+  ciphers: () => (0, import_node_crypto.getCiphers)(),
+  hashes: () => (0, import_node_crypto.getHashes)()
+};
+var CryptoNativeFunctionMetadata = {
+  hash: {
+    description: "Hash data with any supported algorithm",
+    parameters: [
+      { name: "algorithm", dataType: "string", description: "Hash algorithm (md5, sha256, sha512, etc.)", formInputType: "text", required: true },
+      { name: "data", dataType: "string", description: "Data to hash", formInputType: "text", required: true },
+      { name: "encoding", dataType: "string", description: "Output encoding (hex, base64)", formInputType: "text", required: false, defaultValue: "hex" }
+    ],
+    returnType: "string",
+    returnDescription: "Hash digest",
+    example: 'crypto.hash "sha256" "hello"'
+  },
+  md5: {
+    description: "MD5 hash",
+    parameters: [{ name: "data", dataType: "string", description: "Data to hash", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "MD5 hex digest",
+    example: 'crypto.md5 "hello"'
+  },
+  sha1: {
+    description: "SHA-1 hash",
+    parameters: [{ name: "data", dataType: "string", description: "Data to hash", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "SHA-1 hex digest",
+    example: 'crypto.sha1 "hello"'
+  },
+  sha256: {
+    description: "SHA-256 hash",
+    parameters: [{ name: "data", dataType: "string", description: "Data to hash", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "SHA-256 hex digest",
+    example: 'crypto.sha256 "hello"'
+  },
+  sha512: {
+    description: "SHA-512 hash",
+    parameters: [{ name: "data", dataType: "string", description: "Data to hash", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "SHA-512 hex digest",
+    example: 'crypto.sha512 "hello"'
+  },
+  hmac: {
+    description: "HMAC with any algorithm",
+    parameters: [
+      { name: "algorithm", dataType: "string", description: "Hash algorithm", formInputType: "text", required: true },
+      { name: "key", dataType: "string", description: "Secret key", formInputType: "text", required: true },
+      { name: "data", dataType: "string", description: "Data to sign", formInputType: "text", required: true },
+      { name: "encoding", dataType: "string", description: "Output encoding", formInputType: "text", required: false, defaultValue: "hex" }
+    ],
+    returnType: "string",
+    returnDescription: "HMAC digest",
+    example: 'crypto.hmac "sha256" "secret" "data"'
+  },
+  hmacSha256: {
+    description: "HMAC-SHA256",
+    parameters: [
+      { name: "key", dataType: "string", description: "Secret key", formInputType: "text", required: true },
+      { name: "data", dataType: "string", description: "Data to sign", formInputType: "text", required: true }
+    ],
+    returnType: "string",
+    returnDescription: "HMAC-SHA256 hex digest",
+    example: 'crypto.hmacSha256 "secret" "data"'
+  },
+  hmacSha512: {
+    description: "HMAC-SHA512",
+    parameters: [
+      { name: "key", dataType: "string", description: "Secret key", formInputType: "text", required: true },
+      { name: "data", dataType: "string", description: "Data to sign", formInputType: "text", required: true }
+    ],
+    returnType: "string",
+    returnDescription: "HMAC-SHA512 hex digest",
+    example: 'crypto.hmacSha512 "secret" "data"'
+  },
+  encrypt: {
+    description: "Encrypt data with AES (returns iv:ciphertext)",
+    parameters: [
+      { name: "algorithm", dataType: "string", description: "Cipher algorithm (default: aes-256-cbc)", formInputType: "text", required: false, defaultValue: "aes-256-cbc" },
+      { name: "key", dataType: "string", description: "Encryption key (hashed to 32 bytes)", formInputType: "text", required: true },
+      { name: "data", dataType: "string", description: "Data to encrypt", formInputType: "text", required: true }
+    ],
+    returnType: "string",
+    returnDescription: "iv:encryptedHex string",
+    example: 'crypto.encrypt "aes-256-cbc" "mykey" "secret data"'
+  },
+  decrypt: {
+    description: "Decrypt data from encrypt() output",
+    parameters: [
+      { name: "algorithm", dataType: "string", description: "Cipher algorithm", formInputType: "text", required: false, defaultValue: "aes-256-cbc" },
+      { name: "key", dataType: "string", description: "Encryption key", formInputType: "text", required: true },
+      { name: "encryptedData", dataType: "string", description: "iv:ciphertext from encrypt()", formInputType: "text", required: true }
+    ],
+    returnType: "string",
+    returnDescription: "Decrypted string",
+    example: 'crypto.decrypt "aes-256-cbc" "mykey" $encrypted'
+  },
+  randomBytes: {
+    description: "Generate random bytes",
+    parameters: [
+      { name: "size", dataType: "number", description: "Number of bytes (default: 32)", formInputType: "number", required: false, defaultValue: 32 },
+      { name: "encoding", dataType: "string", description: "Output encoding (hex, base64)", formInputType: "text", required: false, defaultValue: "hex" }
+    ],
+    returnType: "string",
+    returnDescription: "Random bytes as encoded string",
+    example: "crypto.randomBytes 16"
+  },
+  randomUUID: {
+    description: "Generate a random UUID v4",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "UUID v4 string",
+    example: "crypto.randomUUID"
+  },
+  randomInt: {
+    description: "Generate a random integer",
+    parameters: [
+      { name: "min", dataType: "number", description: "Minimum (or max if single arg)", formInputType: "number", required: false, defaultValue: 0 },
+      { name: "max", dataType: "number", description: "Maximum (exclusive)", formInputType: "number", required: false, defaultValue: 100 }
+    ],
+    returnType: "number",
+    returnDescription: "Random integer",
+    example: "crypto.randomInt 1 100"
+  },
+  pbkdf2: {
+    description: "Derive key using PBKDF2",
+    parameters: [
+      { name: "password", dataType: "string", description: "Password", formInputType: "text", required: true },
+      { name: "salt", dataType: "string", description: "Salt", formInputType: "text", required: true },
+      { name: "iterations", dataType: "number", description: "Iterations (default: 100000)", formInputType: "number", required: false, defaultValue: 1e5 },
+      { name: "keylen", dataType: "number", description: "Key length (default: 64)", formInputType: "number", required: false, defaultValue: 64 },
+      { name: "digest", dataType: "string", description: "Digest algorithm (default: sha512)", formInputType: "text", required: false, defaultValue: "sha512" }
+    ],
+    returnType: "string",
+    returnDescription: "Derived key as hex",
+    example: 'crypto.pbkdf2 "password" "salt"'
+  },
+  scrypt: {
+    description: "Derive key using scrypt",
+    parameters: [
+      { name: "password", dataType: "string", description: "Password", formInputType: "text", required: true },
+      { name: "salt", dataType: "string", description: "Salt", formInputType: "text", required: true },
+      { name: "keylen", dataType: "number", description: "Key length (default: 64)", formInputType: "number", required: false, defaultValue: 64 }
+    ],
+    returnType: "string",
+    returnDescription: "Derived key as hex",
+    example: 'crypto.scrypt "password" "salt"'
+  },
+  base64Encode: {
+    description: "Encode string to Base64",
+    parameters: [{ name: "data", dataType: "string", description: "Data to encode", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Base64 encoded string",
+    example: 'crypto.base64Encode "hello"'
+  },
+  base64Decode: {
+    description: "Decode Base64 to string",
+    parameters: [{ name: "data", dataType: "string", description: "Base64 data", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Decoded string",
+    example: 'crypto.base64Decode "aGVsbG8="'
+  },
+  base64UrlEncode: {
+    description: "Encode string to URL-safe Base64",
+    parameters: [{ name: "data", dataType: "string", description: "Data to encode", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Base64url encoded string",
+    example: 'crypto.base64UrlEncode "hello"'
+  },
+  base64UrlDecode: {
+    description: "Decode URL-safe Base64 to string",
+    parameters: [{ name: "data", dataType: "string", description: "Base64url data", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Decoded string",
+    example: 'crypto.base64UrlDecode "aGVsbG8"'
+  },
+  hexEncode: {
+    description: "Encode string to hex",
+    parameters: [{ name: "data", dataType: "string", description: "Data to encode", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Hex encoded string",
+    example: 'crypto.hexEncode "hello"'
+  },
+  hexDecode: {
+    description: "Decode hex to string",
+    parameters: [{ name: "data", dataType: "string", description: "Hex data", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Decoded string",
+    example: 'crypto.hexDecode "68656c6c6f"'
+  },
+  ciphers: {
+    description: "List all supported cipher algorithms",
+    parameters: [],
+    returnType: "array",
+    returnDescription: "Array of cipher names",
+    example: "crypto.ciphers"
+  },
+  hashes: {
+    description: "List all supported hash algorithms",
+    parameters: [],
+    returnType: "array",
+    returnDescription: "Array of hash names",
+    example: "crypto.hashes"
+  }
+};
+var CryptoNativeModuleMetadata = {
+  description: "Cryptographic operations: hashing, HMAC, encryption, key derivation, random generation, and encoding",
+  methods: Object.keys(CryptoNativeFunctions)
+};
+var crypto_default = {
+  name: "crypto",
+  functions: CryptoNativeFunctions,
+  functionMetadata: CryptoNativeFunctionMetadata,
+  moduleMetadata: CryptoNativeModuleMetadata,
+  global: false
+};
+
+// modules/buffer.js
+var BufferFunctions = {
+  alloc: (args) => {
+    const size = toNum(args[0], 0);
+    const fill = args[1] != null ? toNum(args[1], 0) : 0;
+    return Buffer.alloc(size, fill).toString("base64");
+  },
+  from: (args) => {
+    requireArgs("buffer.from", args, 1);
+    const data = args[0];
+    const encoding = toStr(args[1], "utf-8");
+    if (typeof data === "string") {
+      return Buffer.from(data, encoding).toString("base64");
+    }
+    if (Array.isArray(data)) {
+      return Buffer.from(data).toString("base64");
+    }
+    return Buffer.from(String(data)).toString("base64");
+  },
+  toString: (args) => {
+    requireArgs("buffer.toString", args, 1);
+    const base64 = toStr(args[0]);
+    const encoding = toStr(args[1], "utf-8");
+    return Buffer.from(base64, "base64").toString(encoding);
+  },
+  toJSON: (args) => {
+    requireArgs("buffer.toJSON", args, 1);
+    const buf = Buffer.from(toStr(args[0]), "base64");
+    return { type: "Buffer", data: Array.from(buf) };
+  },
+  concat: (args) => {
+    if (!Array.isArray(args[0])) throw new Error("buffer.concat requires an array of base64 buffers");
+    const buffers = args[0].map((b) => Buffer.from(toStr(b), "base64"));
+    return Buffer.concat(buffers).toString("base64");
+  },
+  compare: (args) => {
+    requireArgs("buffer.compare", args, 2);
+    const a = Buffer.from(toStr(args[0]), "base64");
+    const b = Buffer.from(toStr(args[1]), "base64");
+    return Buffer.compare(a, b);
+  },
+  equals: (args) => {
+    requireArgs("buffer.equals", args, 2);
+    const a = Buffer.from(toStr(args[0]), "base64");
+    const b = Buffer.from(toStr(args[1]), "base64");
+    return a.equals(b);
+  },
+  slice: (args) => {
+    requireArgs("buffer.slice", args, 1);
+    const buf = Buffer.from(toStr(args[0]), "base64");
+    const start = toNum(args[1], 0);
+    const end = args[2] != null ? toNum(args[2]) : buf.length;
+    return buf.subarray(start, end).toString("base64");
+  },
+  length: (args) => {
+    requireArgs("buffer.length", args, 1);
+    return Buffer.from(toStr(args[0]), "base64").length;
+  },
+  byteLength: (args) => {
+    requireArgs("buffer.byteLength", args, 1);
+    const data = toStr(args[0]);
+    const encoding = toStr(args[1], "utf-8");
+    return Buffer.byteLength(data, encoding);
+  },
+  isBuffer: (args) => {
+    requireArgs("buffer.isBuffer", args, 1);
+    try {
+      const str = toStr(args[0]);
+      const buf = Buffer.from(str, "base64");
+      return buf.toString("base64") === str;
+    } catch {
+      return false;
+    }
+  },
+  fill: (args) => {
+    requireArgs("buffer.fill", args, 2);
+    const buf = Buffer.from(toStr(args[0]), "base64");
+    const value = toNum(args[1], 0);
+    buf.fill(value);
+    return buf.toString("base64");
+  },
+  indexOf: (args) => {
+    requireArgs("buffer.indexOf", args, 2);
+    const buf = Buffer.from(toStr(args[0]), "base64");
+    const search = toStr(args[1]);
+    return buf.indexOf(search);
+  },
+  copy: (args) => {
+    requireArgs("buffer.copy", args, 1);
+    const buf = Buffer.from(toStr(args[0]), "base64");
+    return Buffer.from(buf).toString("base64");
+  },
+  toHex: (args) => {
+    requireArgs("buffer.toHex", args, 1);
+    return Buffer.from(toStr(args[0]), "base64").toString("hex");
+  },
+  fromHex: (args) => {
+    requireArgs("buffer.fromHex", args, 1);
+    return Buffer.from(toStr(args[0]), "hex").toString("base64");
+  }
+};
+var BufferFunctionMetadata = {
+  alloc: {
+    description: "Allocate a buffer of given size",
+    parameters: [
+      { name: "size", dataType: "number", description: "Size in bytes", formInputType: "number", required: true },
+      { name: "fill", dataType: "number", description: "Fill value (default: 0)", formInputType: "number", required: false, defaultValue: 0 }
+    ],
+    returnType: "string",
+    returnDescription: "Base64-encoded buffer",
+    example: "buffer.alloc 16"
+  },
+  from: {
+    description: "Create a buffer from string or array",
+    parameters: [
+      { name: "data", dataType: "any", description: "Input data", formInputType: "text", required: true },
+      { name: "encoding", dataType: "string", description: "Input encoding (default: utf-8)", formInputType: "text", required: false, defaultValue: "utf-8" }
+    ],
+    returnType: "string",
+    returnDescription: "Base64-encoded buffer",
+    example: 'buffer.from "hello"'
+  },
+  toString: {
+    description: "Convert buffer to string",
+    parameters: [
+      { name: "buffer", dataType: "string", description: "Base64-encoded buffer", formInputType: "text", required: true },
+      { name: "encoding", dataType: "string", description: "Output encoding (default: utf-8)", formInputType: "text", required: false, defaultValue: "utf-8" }
+    ],
+    returnType: "string",
+    returnDescription: "Decoded string",
+    example: "buffer.toString $buf"
+  },
+  toJSON: {
+    description: "Convert buffer to JSON representation",
+    parameters: [{ name: "buffer", dataType: "string", description: "Base64-encoded buffer", formInputType: "text", required: true }],
+    returnType: "object",
+    returnDescription: "{type, data} object",
+    example: "buffer.toJSON $buf"
+  },
+  concat: {
+    description: "Concatenate multiple buffers",
+    parameters: [{ name: "buffers", dataType: "array", description: "Array of base64-encoded buffers", formInputType: "json", required: true }],
+    returnType: "string",
+    returnDescription: "Concatenated base64-encoded buffer",
+    example: "buffer.concat [$buf1, $buf2]"
+  },
+  compare: {
+    description: "Compare two buffers (-1, 0, 1)",
+    parameters: [
+      { name: "a", dataType: "string", description: "First buffer", formInputType: "text", required: true },
+      { name: "b", dataType: "string", description: "Second buffer", formInputType: "text", required: true }
+    ],
+    returnType: "number",
+    returnDescription: "-1, 0, or 1",
+    example: "buffer.compare $buf1 $buf2"
+  },
+  equals: {
+    description: "Check if two buffers are equal",
+    parameters: [
+      { name: "a", dataType: "string", description: "First buffer", formInputType: "text", required: true },
+      { name: "b", dataType: "string", description: "Second buffer", formInputType: "text", required: true }
+    ],
+    returnType: "boolean",
+    returnDescription: "true if equal",
+    example: "buffer.equals $buf1 $buf2"
+  },
+  slice: {
+    description: "Get a slice of a buffer",
+    parameters: [
+      { name: "buffer", dataType: "string", description: "Base64-encoded buffer", formInputType: "text", required: true },
+      { name: "start", dataType: "number", description: "Start index (default: 0)", formInputType: "number", required: false, defaultValue: 0 },
+      { name: "end", dataType: "number", description: "End index (default: length)", formInputType: "number", required: false }
+    ],
+    returnType: "string",
+    returnDescription: "Base64-encoded slice",
+    example: "buffer.slice $buf 0 10"
+  },
+  length: {
+    description: "Get buffer length in bytes",
+    parameters: [{ name: "buffer", dataType: "string", description: "Base64-encoded buffer", formInputType: "text", required: true }],
+    returnType: "number",
+    returnDescription: "Length in bytes",
+    example: "buffer.length $buf"
+  },
+  byteLength: {
+    description: "Get byte length of a string",
+    parameters: [
+      { name: "string", dataType: "string", description: "Input string", formInputType: "text", required: true },
+      { name: "encoding", dataType: "string", description: "Encoding (default: utf-8)", formInputType: "text", required: false, defaultValue: "utf-8" }
+    ],
+    returnType: "number",
+    returnDescription: "Byte length",
+    example: 'buffer.byteLength "hello"'
+  },
+  isBuffer: {
+    description: "Check if value is a valid base64 buffer",
+    parameters: [{ name: "value", dataType: "any", description: "Value to check", formInputType: "text", required: true }],
+    returnType: "boolean",
+    returnDescription: "true if valid buffer",
+    example: "buffer.isBuffer $val"
+  },
+  fill: {
+    description: "Fill buffer with a value",
+    parameters: [
+      { name: "buffer", dataType: "string", description: "Base64-encoded buffer", formInputType: "text", required: true },
+      { name: "value", dataType: "number", description: "Fill value", formInputType: "number", required: true }
+    ],
+    returnType: "string",
+    returnDescription: "Filled base64-encoded buffer",
+    example: "buffer.fill $buf 0"
+  },
+  indexOf: {
+    description: "Find position of a value in buffer",
+    parameters: [
+      { name: "buffer", dataType: "string", description: "Base64-encoded buffer", formInputType: "text", required: true },
+      { name: "search", dataType: "string", description: "Value to find", formInputType: "text", required: true }
+    ],
+    returnType: "number",
+    returnDescription: "Index or -1",
+    example: 'buffer.indexOf $buf "hello"'
+  },
+  copy: {
+    description: "Copy a buffer",
+    parameters: [{ name: "buffer", dataType: "string", description: "Base64-encoded buffer", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Copied base64-encoded buffer",
+    example: "buffer.copy $buf"
+  },
+  toHex: {
+    description: "Convert buffer to hex string",
+    parameters: [{ name: "buffer", dataType: "string", description: "Base64-encoded buffer", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Hex string",
+    example: "buffer.toHex $buf"
+  },
+  fromHex: {
+    description: "Create buffer from hex string",
+    parameters: [{ name: "hex", dataType: "string", description: "Hex string", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Base64-encoded buffer",
+    example: 'buffer.fromHex "68656c6c6f"'
+  }
+};
+var BufferModuleMetadata = {
+  description: "Buffer operations for binary data: alloc, from, concat, compare, slice, encode/decode",
+  methods: Object.keys(BufferFunctions)
+};
+var buffer_default = {
+  name: "buffer",
+  functions: BufferFunctions,
+  functionMetadata: BufferFunctionMetadata,
+  moduleMetadata: BufferModuleMetadata,
+  global: false
+};
+
+// modules/url.js
+var UrlFunctions = {
+  parse: (args) => {
+    requireArgs("url.parse", args, 1);
+    const urlStr = toStr(args[0]);
+    const u = new URL(urlStr);
+    return {
+      href: u.href,
+      protocol: u.protocol,
+      hostname: u.hostname,
+      host: u.host,
+      port: u.port || null,
+      pathname: u.pathname,
+      search: u.search,
+      hash: u.hash,
+      origin: u.origin,
+      username: u.username,
+      password: u.password
+    };
+  },
+  format: (args) => {
+    requireArgs("url.format", args, 1);
+    const obj = args[0];
+    if (typeof obj === "string") return obj;
+    if (typeof obj !== "object" || obj === null) {
+      throw new Error("url.format requires a URL object or string");
+    }
+    const u = new URL(obj.href || `${obj.protocol || "https:"}//${obj.hostname || "localhost"}`);
+    if (obj.port) u.port = String(obj.port);
+    if (obj.pathname) u.pathname = obj.pathname;
+    if (obj.search) u.search = obj.search;
+    if (obj.hash) u.hash = obj.hash;
+    if (obj.username) u.username = obj.username;
+    if (obj.password) u.password = obj.password;
+    return u.href;
+  },
+  resolve: (args) => {
+    requireArgs("url.resolve", args, 2);
+    const base = toStr(args[0]);
+    const relative4 = toStr(args[1]);
+    return new URL(relative4, base).href;
+  },
+  searchParams: (args) => {
+    requireArgs("url.searchParams", args, 1);
+    const urlStr = toStr(args[0]);
+    const u = new URL(urlStr);
+    const result = {};
+    for (const [key, value] of u.searchParams) {
+      result[key] = value;
+    }
+    return result;
+  },
+  buildQuery: (args) => {
+    requireArgs("url.buildQuery", args, 1);
+    const obj = args[0];
+    if (typeof obj !== "object" || obj === null) {
+      throw new Error("url.buildQuery requires an object");
+    }
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(obj)) {
+      params.append(key, String(value));
+    }
+    return params.toString();
+  },
+  encode: (args) => {
+    requireArgs("url.encode", args, 1);
+    return encodeURIComponent(toStr(args[0]));
+  },
+  decode: (args) => {
+    requireArgs("url.decode", args, 1);
+    return decodeURIComponent(toStr(args[0]));
+  },
+  encodeFull: (args) => {
+    requireArgs("url.encodeFull", args, 1);
+    return encodeURI(toStr(args[0]));
+  },
+  decodeFull: (args) => {
+    requireArgs("url.decodeFull", args, 1);
+    return decodeURI(toStr(args[0]));
+  },
+  isValid: (args) => {
+    requireArgs("url.isValid", args, 1);
+    try {
+      new URL(toStr(args[0]));
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  join: (args) => {
+    requireArgs("url.join", args, 2);
+    const base = toStr(args[0]).replace(/\/+$/, "");
+    const parts = args.slice(1).map((a) => toStr(a).replace(/^\/+|\/+$/g, ""));
+    return base + "/" + parts.join("/");
+  }
+};
+var UrlFunctionMetadata = {
+  parse: {
+    description: "Parse a URL into components",
+    parameters: [{ name: "url", dataType: "string", description: "URL string", formInputType: "text", required: true }],
+    returnType: "object",
+    returnDescription: "Object with protocol, hostname, port, pathname, search, hash",
+    example: 'url.parse "https://example.com/path?q=1"'
+  },
+  format: {
+    description: "Format a URL object into a string",
+    parameters: [{ name: "urlObject", dataType: "object", description: "URL components object", formInputType: "json", required: true }],
+    returnType: "string",
+    returnDescription: "Formatted URL string",
+    example: "url.format $urlObj"
+  },
+  resolve: {
+    description: "Resolve a relative URL against a base",
+    parameters: [
+      { name: "base", dataType: "string", description: "Base URL", formInputType: "text", required: true },
+      { name: "relative", dataType: "string", description: "Relative URL", formInputType: "text", required: true }
+    ],
+    returnType: "string",
+    returnDescription: "Resolved URL",
+    example: 'url.resolve "https://example.com" "/path"'
+  },
+  searchParams: {
+    description: "Extract query parameters as an object",
+    parameters: [{ name: "url", dataType: "string", description: "URL string", formInputType: "text", required: true }],
+    returnType: "object",
+    returnDescription: "Key-value object of query parameters",
+    example: 'url.searchParams "https://example.com?a=1&b=2"'
+  },
+  buildQuery: {
+    description: "Build a query string from an object",
+    parameters: [{ name: "params", dataType: "object", description: "Key-value pairs", formInputType: "json", required: true }],
+    returnType: "string",
+    returnDescription: "Query string (without ?)",
+    example: 'url.buildQuery {"a": 1, "b": 2}'
+  },
+  encode: {
+    description: "URL-encode a string component",
+    parameters: [{ name: "value", dataType: "string", description: "String to encode", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Encoded string",
+    example: 'url.encode "hello world"'
+  },
+  decode: {
+    description: "URL-decode a string component",
+    parameters: [{ name: "value", dataType: "string", description: "String to decode", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Decoded string",
+    example: 'url.decode "hello%20world"'
+  },
+  encodeFull: {
+    description: "Encode a full URI",
+    parameters: [{ name: "uri", dataType: "string", description: "URI to encode", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Encoded URI",
+    example: 'url.encodeFull "https://example.com/path with spaces"'
+  },
+  decodeFull: {
+    description: "Decode a full URI",
+    parameters: [{ name: "uri", dataType: "string", description: "URI to decode", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Decoded URI",
+    example: 'url.decodeFull "https://example.com/path%20with%20spaces"'
+  },
+  isValid: {
+    description: "Check if a string is a valid URL",
+    parameters: [{ name: "url", dataType: "string", description: "String to check", formInputType: "text", required: true }],
+    returnType: "boolean",
+    returnDescription: "true if valid URL",
+    example: 'url.isValid "https://example.com"'
+  },
+  join: {
+    description: "Join URL path segments",
+    parameters: [
+      { name: "base", dataType: "string", description: "Base URL", formInputType: "text", required: true },
+      { name: "segments", dataType: "string", description: "Path segments", formInputType: "text", required: true }
+    ],
+    returnType: "string",
+    returnDescription: "Joined URL",
+    example: 'url.join "https://api.example.com" "v1" "users"'
+  }
+};
+var UrlModuleMetadata = {
+  description: "URL parsing, formatting, encoding, and query string utilities",
+  methods: Object.keys(UrlFunctions)
+};
+var url_default = {
+  name: "url",
+  functions: UrlFunctions,
+  functionMetadata: UrlFunctionMetadata,
+  moduleMetadata: UrlModuleMetadata,
+  global: false
+};
+
+// modules/child.js
+var import_node_child_process = require("node:child_process");
+var _processes = /* @__PURE__ */ new Map();
+var _nextId = 1;
+var ChildFunctions = {
+  exec: (args) => {
+    requireArgs("child.exec", args, 1);
+    const command = toStr(args[0]);
+    const opts = {};
+    if (args[1] && typeof args[1] === "object") {
+      if (args[1].cwd) opts.cwd = toStr(args[1].cwd);
+      if (args[1].timeout) opts.timeout = toNum(args[1].timeout);
+      if (args[1].encoding) opts.encoding = toStr(args[1].encoding);
+      if (args[1].env) opts.env = { ...process.env, ...args[1].env };
+      if (args[1].maxBuffer) opts.maxBuffer = toNum(args[1].maxBuffer);
+      if (args[1].shell) opts.shell = toStr(args[1].shell);
+    }
+    opts.encoding = opts.encoding || "utf-8";
+    return new Promise((resolve5, reject) => {
+      (0, import_node_child_process.exec)(command, opts, (error, stdout, stderr) => {
+        resolve5({
+          stdout: stdout || "",
+          stderr: stderr || "",
+          code: error ? error.code ?? 1 : 0,
+          error: error ? error.message : null
+        });
+      });
+    });
+  },
+  execSync: (args) => {
+    requireArgs("child.execSync", args, 1);
+    const command = toStr(args[0]);
+    const opts = { encoding: "utf-8" };
+    if (args[1] && typeof args[1] === "object") {
+      if (args[1].cwd) opts.cwd = toStr(args[1].cwd);
+      if (args[1].timeout) opts.timeout = toNum(args[1].timeout);
+      if (args[1].shell) opts.shell = toStr(args[1].shell);
+    }
+    try {
+      return (0, import_node_child_process.execSync)(command, opts);
+    } catch (err) {
+      return {
+        stdout: err.stdout || "",
+        stderr: err.stderr || "",
+        code: err.status ?? 1,
+        error: err.message
+      };
+    }
+  },
+  spawn: (args) => {
+    requireArgs("child.spawn", args, 1);
+    const command = toStr(args[0]);
+    const spawnArgs = Array.isArray(args[1]) ? args[1].map((a) => toStr(a)) : [];
+    const opts = { shell: true };
+    if (args[2] && typeof args[2] === "object") {
+      if (args[2].cwd) opts.cwd = toStr(args[2].cwd);
+      if (args[2].env) opts.env = { ...process.env, ...args[2].env };
+      if (args[2].shell !== void 0) opts.shell = args[2].shell;
+      if (args[2].detached) opts.detached = true;
+    }
+    const child = (0, import_node_child_process.spawn)(command, spawnArgs, opts);
+    const id = `proc_${_nextId++}`;
+    let stdout = "";
+    let stderr = "";
+    if (child.stdout) child.stdout.on("data", (d2) => {
+      stdout += d2;
+    });
+    if (child.stderr) child.stderr.on("data", (d2) => {
+      stderr += d2;
+    });
+    const resultPromise = new Promise((resolve5) => {
+      child.on("close", (code) => {
+        _processes.delete(id);
+        resolve5({ id, stdout, stderr, code: code ?? 0 });
+      });
+      child.on("error", (err) => {
+        _processes.delete(id);
+        resolve5({ id, stdout, stderr, code: 1, error: err.message });
+      });
+    });
+    _processes.set(id, { child, resultPromise });
+    return id;
+  },
+  wait: async (args) => {
+    requireArgs("child.wait", args, 1);
+    const id = toStr(args[0]);
+    const proc = _processes.get(id);
+    if (!proc) return { error: `Process ${id} not found` };
+    return await proc.resultPromise;
+  },
+  kill: (args) => {
+    requireArgs("child.kill", args, 1);
+    const id = toStr(args[0]);
+    const signal = toStr(args[1], "SIGTERM");
+    const proc = _processes.get(id);
+    if (!proc) return false;
+    proc.child.kill(signal);
+    _processes.delete(id);
+    return true;
+  },
+  running: () => {
+    return Array.from(_processes.keys());
+  }
+};
+var ChildFunctionMetadata = {
+  exec: {
+    description: "Execute a shell command and return output",
+    parameters: [
+      { name: "command", dataType: "string", description: "Shell command to execute", formInputType: "text", required: true },
+      { name: "options", dataType: "object", description: "Options: cwd, timeout, encoding, env, maxBuffer, shell", formInputType: "json", required: false }
+    ],
+    returnType: "object",
+    returnDescription: "Object with stdout, stderr, code, error",
+    example: 'child.exec "ls -la"'
+  },
+  execSync: {
+    description: "Execute a shell command synchronously",
+    parameters: [
+      { name: "command", dataType: "string", description: "Shell command", formInputType: "text", required: true },
+      { name: "options", dataType: "object", description: "Options: cwd, timeout, shell", formInputType: "json", required: false }
+    ],
+    returnType: "string",
+    returnDescription: "Command output string",
+    example: 'child.execSync "echo hello"'
+  },
+  spawn: {
+    description: "Spawn a child process (non-blocking)",
+    parameters: [
+      { name: "command", dataType: "string", description: "Command to run", formInputType: "text", required: true },
+      { name: "args", dataType: "array", description: "Command arguments", formInputType: "json", required: false },
+      { name: "options", dataType: "object", description: "Options: cwd, env, shell, detached", formInputType: "json", required: false }
+    ],
+    returnType: "string",
+    returnDescription: "Process handle ID",
+    example: 'child.spawn "node" ["server.js"]'
+  },
+  wait: {
+    description: "Wait for a spawned process to finish",
+    parameters: [{ name: "processId", dataType: "string", description: "Process handle ID from spawn", formInputType: "text", required: true }],
+    returnType: "object",
+    returnDescription: "Object with stdout, stderr, code",
+    example: "child.wait $pid"
+  },
+  kill: {
+    description: "Kill a spawned process",
+    parameters: [
+      { name: "processId", dataType: "string", description: "Process handle ID", formInputType: "text", required: true },
+      { name: "signal", dataType: "string", description: "Signal (default: SIGTERM)", formInputType: "text", required: false, defaultValue: "SIGTERM" }
+    ],
+    returnType: "boolean",
+    returnDescription: "true if killed",
+    example: "child.kill $pid"
+  },
+  running: {
+    description: "List all running spawned processes",
+    parameters: [],
+    returnType: "array",
+    returnDescription: "Array of process handle IDs",
+    example: "child.running"
+  }
+};
+var ChildModuleMetadata = {
+  description: "Child process execution: exec, execSync, spawn, kill, and process management",
+  methods: Object.keys(ChildFunctions)
+};
+var child_default = {
+  name: "child",
+  functions: ChildFunctions,
+  functionMetadata: ChildFunctionMetadata,
+  moduleMetadata: ChildModuleMetadata,
+  global: false
+};
+
+// modules/timer.js
+var _intervals = /* @__PURE__ */ new Map();
+var _timeouts = /* @__PURE__ */ new Map();
+var _nextId2 = 1;
+var TimerFunctions = {
+  sleep: (args) => {
+    const ms = toNum(args[0], 1e3);
+    return new Promise((resolve5) => setTimeout(() => resolve5(true), ms));
+  },
+  delay: (args) => {
+    const ms = toNum(args[0], 1e3);
+    return new Promise((resolve5) => setTimeout(() => resolve5(true), ms));
+  },
+  setTimeout: (args, callback) => {
+    requireArgs("timer.setTimeout", args, 1);
+    const ms = toNum(args[0], 1e3);
+    const id = `timeout_${_nextId2++}`;
+    const handle = setTimeout(() => {
+      _timeouts.delete(id);
+      if (callback) callback([id]);
+    }, ms);
+    _timeouts.set(id, handle);
+    return id;
+  },
+  setInterval: (args, callback) => {
+    requireArgs("timer.setInterval", args, 1);
+    const ms = toNum(args[0], 1e3);
+    const id = `interval_${_nextId2++}`;
+    const handle = setInterval(() => {
+      if (callback) callback([id]);
+    }, ms);
+    _intervals.set(id, handle);
+    return id;
+  },
+  clearTimeout: (args) => {
+    requireArgs("timer.clearTimeout", args, 1);
+    const id = String(args[0]);
+    const handle = _timeouts.get(id);
+    if (handle) {
+      clearTimeout(handle);
+      _timeouts.delete(id);
+      return true;
+    }
+    return false;
+  },
+  clearInterval: (args) => {
+    requireArgs("timer.clearInterval", args, 1);
+    const id = String(args[0]);
+    const handle = _intervals.get(id);
+    if (handle) {
+      clearInterval(handle);
+      _intervals.delete(id);
+      return true;
+    }
+    return false;
+  },
+  clearAll: () => {
+    for (const handle of _timeouts.values()) clearTimeout(handle);
+    for (const handle of _intervals.values()) clearInterval(handle);
+    _timeouts.clear();
+    _intervals.clear();
+    return true;
+  },
+  active: () => {
+    return {
+      timeouts: Array.from(_timeouts.keys()),
+      intervals: Array.from(_intervals.keys())
+    };
+  },
+  measure: async (args, callback) => {
+    const start = process.hrtime.bigint();
+    if (callback) await callback([]);
+    const end = process.hrtime.bigint();
+    const ms = Number(end - start) / 1e6;
+    return ms;
+  },
+  timestamp: () => Date.now(),
+  now: () => performance.now()
+};
+var TimerFunctionMetadata = {
+  sleep: {
+    description: "Pause execution for a duration",
+    parameters: [{ name: "milliseconds", dataType: "number", description: "Duration in ms (default: 1000)", formInputType: "number", required: false, defaultValue: 1e3 }],
+    returnType: "boolean",
+    returnDescription: "true when done",
+    example: "timer.sleep 2000"
+  },
+  delay: {
+    description: "Alias for sleep",
+    parameters: [{ name: "milliseconds", dataType: "number", description: "Duration in ms", formInputType: "number", required: false, defaultValue: 1e3 }],
+    returnType: "boolean",
+    returnDescription: "true when done",
+    example: "timer.delay 500"
+  },
+  setTimeout: {
+    description: "Execute callback after a delay",
+    parameters: [{ name: "milliseconds", dataType: "number", description: "Delay in ms", formInputType: "number", required: true }],
+    returnType: "string",
+    returnDescription: "Timeout handle ID",
+    example: "timer.setTimeout 1000"
+  },
+  setInterval: {
+    description: "Execute callback repeatedly at an interval",
+    parameters: [{ name: "milliseconds", dataType: "number", description: "Interval in ms", formInputType: "number", required: true }],
+    returnType: "string",
+    returnDescription: "Interval handle ID",
+    example: "timer.setInterval 5000"
+  },
+  clearTimeout: {
+    description: "Cancel a pending timeout",
+    parameters: [{ name: "id", dataType: "string", description: "Timeout handle ID", formInputType: "text", required: true }],
+    returnType: "boolean",
+    returnDescription: "true if cleared",
+    example: "timer.clearTimeout $id"
+  },
+  clearInterval: {
+    description: "Cancel a repeating interval",
+    parameters: [{ name: "id", dataType: "string", description: "Interval handle ID", formInputType: "text", required: true }],
+    returnType: "boolean",
+    returnDescription: "true if cleared",
+    example: "timer.clearInterval $id"
+  },
+  clearAll: {
+    description: "Cancel all active timeouts and intervals",
+    parameters: [],
+    returnType: "boolean",
+    returnDescription: "true",
+    example: "timer.clearAll"
+  },
+  active: {
+    description: "List all active timers",
+    parameters: [],
+    returnType: "object",
+    returnDescription: "Object with timeouts and intervals arrays",
+    example: "timer.active"
+  },
+  measure: {
+    description: "Measure execution time of a callback in milliseconds",
+    parameters: [],
+    returnType: "number",
+    returnDescription: "Execution time in ms",
+    example: "timer.measure"
+  },
+  timestamp: {
+    description: "Get current Unix timestamp in milliseconds",
+    parameters: [],
+    returnType: "number",
+    returnDescription: "Unix timestamp (ms)",
+    example: "timer.timestamp"
+  },
+  now: {
+    description: "Get high-resolution monotonic time (performance.now)",
+    parameters: [],
+    returnType: "number",
+    returnDescription: "Time in ms",
+    example: "timer.now"
+  }
+};
+var TimerModuleMetadata = {
+  description: "Timer operations: sleep, delay, setTimeout, setInterval, measure, and timestamp",
+  methods: Object.keys(TimerFunctions)
+};
+var timer_default = {
+  name: "timer",
+  functions: TimerFunctions,
+  functionMetadata: TimerFunctionMetadata,
+  moduleMetadata: TimerModuleMetadata,
+  global: false
+};
+
+// modules/http.js
+var import_node_http = require("node:http");
+var _servers = /* @__PURE__ */ new Map();
+var _nextId3 = 1;
+async function doFetch(url, method, bodyArg, headersArg) {
+  const opts = { method };
+  const headers = {};
+  if (headersArg && typeof headersArg === "object") {
+    for (const [k2, v] of Object.entries(headersArg)) headers[k2] = toStr(v);
+  }
+  if (bodyArg != null && method !== "GET" && method !== "HEAD") {
+    if (typeof bodyArg === "object") {
+      headers["Content-Type"] = headers["Content-Type"] || "application/json";
+      opts.body = JSON.stringify(bodyArg);
+    } else {
+      opts.body = toStr(bodyArg);
+    }
+  }
+  opts.headers = headers;
+  const res = await fetch(url, opts);
+  const contentType = res.headers.get("content-type") || "";
+  let data;
+  if (contentType.includes("application/json")) {
+    try {
+      data = await res.json();
+    } catch {
+      data = await res.text();
+    }
+  } else {
+    data = await res.text();
+  }
+  return {
+    status: res.status,
+    statusText: res.statusText,
+    headers: Object.fromEntries(res.headers.entries()),
+    data,
+    ok: res.ok,
+    url: res.url
+  };
+}
+var HttpFunctions = {
+  get: async (args) => {
+    requireArgs("http.get", args, 1);
+    return doFetch(toStr(args[0]), "GET", null, args[1]);
+  },
+  post: async (args) => {
+    requireArgs("http.post", args, 1);
+    return doFetch(toStr(args[0]), "POST", args[1], args[2]);
+  },
+  put: async (args) => {
+    requireArgs("http.put", args, 1);
+    return doFetch(toStr(args[0]), "PUT", args[1], args[2]);
+  },
+  patch: async (args) => {
+    requireArgs("http.patch", args, 1);
+    return doFetch(toStr(args[0]), "PATCH", args[1], args[2]);
+  },
+  delete: async (args) => {
+    requireArgs("http.delete", args, 1);
+    return doFetch(toStr(args[0]), "DELETE", args[1], args[2]);
+  },
+  head: async (args) => {
+    requireArgs("http.head", args, 1);
+    const res = await fetch(toStr(args[0]), { method: "HEAD" });
+    return {
+      status: res.status,
+      statusText: res.statusText,
+      headers: Object.fromEntries(res.headers.entries()),
+      ok: res.ok
+    };
+  },
+  request: async (args) => {
+    requireArgs("http.request", args, 1);
+    const opts = args[0];
+    if (typeof opts !== "object" || opts === null) {
+      throw new Error("http.request requires an options object: {url, method, body?, headers?}");
+    }
+    const url = toStr(opts.url || opts.href);
+    const method = toStr(opts.method || "GET").toUpperCase();
+    return doFetch(url, method, opts.body || opts.data, opts.headers);
+  },
+  serve: (args, callback) => {
+    requireArgs("http.serve", args, 1);
+    const port = toNum(args[0], 3e3);
+    const host = toStr(args[1], "0.0.0.0");
+    const id = `http_${_nextId3++}`;
+    const server = (0, import_node_http.createServer)(async (req, res) => {
+      const body = await new Promise((resolve5) => {
+        let data = "";
+        req.on("data", (chunk) => {
+          data += chunk;
+        });
+        req.on("end", () => resolve5(data));
+      });
+      let parsedBody = body;
+      try {
+        parsedBody = JSON.parse(body);
+      } catch {
+      }
+      const request = {
+        method: req.method,
+        url: req.url,
+        headers: req.headers,
+        body: parsedBody
+      };
+      if (callback) {
+        try {
+          const result = await callback([request]);
+          const statusCode = result && result.status ? result.status : 200;
+          const respHeaders = result && result.headers ? result.headers : { "Content-Type": "application/json" };
+          const respBody = result && result.body != null ? result.body : result;
+          res.writeHead(statusCode, respHeaders);
+          res.end(typeof respBody === "object" ? JSON.stringify(respBody) : toStr(respBody));
+        } catch (err) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      } else {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(request));
+      }
+    });
+    server.listen(port, host);
+    _servers.set(id, server);
+    return id;
+  },
+  close: (args) => {
+    requireArgs("http.close", args, 1);
+    const id = toStr(args[0]);
+    const server = _servers.get(id);
+    if (server) {
+      server.close();
+      _servers.delete(id);
+      return true;
+    }
+    return false;
+  },
+  servers: () => Array.from(_servers.keys()),
+  download: async (args) => {
+    requireArgs("http.download", args, 2);
+    const url = toStr(args[0]);
+    const filePath = toStr(args[1]);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`http.download: ${res.status} ${res.statusText}`);
+    const { writeFile: writeFile2 } = await import("node:fs/promises");
+    const { resolve: resolve5 } = await import("node:path");
+    const buffer = Buffer.from(await res.arrayBuffer());
+    await writeFile2(resolve5(filePath), buffer);
+    return { size: buffer.length, path: filePath, status: res.status };
+  }
+};
+var HttpFunctionMetadata = {
+  get: {
+    description: "HTTP GET request",
+    parameters: [
+      { name: "url", dataType: "string", description: "URL to request", formInputType: "text", required: true },
+      { name: "headers", dataType: "object", description: "Request headers", formInputType: "json", required: false }
+    ],
+    returnType: "object",
+    returnDescription: "Response with status, headers, data",
+    example: 'http.get "https://api.example.com/data"'
+  },
+  post: {
+    description: "HTTP POST request",
+    parameters: [
+      { name: "url", dataType: "string", description: "URL", formInputType: "text", required: true },
+      { name: "body", dataType: "any", description: "Request body (object auto-serialized to JSON)", formInputType: "json", required: false },
+      { name: "headers", dataType: "object", description: "Request headers", formInputType: "json", required: false }
+    ],
+    returnType: "object",
+    returnDescription: "Response with status, headers, data",
+    example: 'http.post "https://api.example.com/data" {"key": "value"}'
+  },
+  put: {
+    description: "HTTP PUT request",
+    parameters: [
+      { name: "url", dataType: "string", description: "URL", formInputType: "text", required: true },
+      { name: "body", dataType: "any", description: "Request body", formInputType: "json", required: false },
+      { name: "headers", dataType: "object", description: "Headers", formInputType: "json", required: false }
+    ],
+    returnType: "object",
+    returnDescription: "Response",
+    example: 'http.put "https://api.example.com/data/1" {"key": "new"}'
+  },
+  patch: {
+    description: "HTTP PATCH request",
+    parameters: [
+      { name: "url", dataType: "string", description: "URL", formInputType: "text", required: true },
+      { name: "body", dataType: "any", description: "Request body", formInputType: "json", required: false },
+      { name: "headers", dataType: "object", description: "Headers", formInputType: "json", required: false }
+    ],
+    returnType: "object",
+    returnDescription: "Response",
+    example: 'http.patch "https://api.example.com/data/1" {"key": "updated"}'
+  },
+  delete: {
+    description: "HTTP DELETE request",
+    parameters: [
+      { name: "url", dataType: "string", description: "URL", formInputType: "text", required: true },
+      { name: "body", dataType: "any", description: "Request body", formInputType: "json", required: false },
+      { name: "headers", dataType: "object", description: "Headers", formInputType: "json", required: false }
+    ],
+    returnType: "object",
+    returnDescription: "Response",
+    example: 'http.delete "https://api.example.com/data/1"'
+  },
+  head: {
+    description: "HTTP HEAD request (headers only)",
+    parameters: [{ name: "url", dataType: "string", description: "URL", formInputType: "text", required: true }],
+    returnType: "object",
+    returnDescription: "Response with status and headers",
+    example: 'http.head "https://example.com"'
+  },
+  request: {
+    description: "Custom HTTP request with full options",
+    parameters: [{ name: "options", dataType: "object", description: "Object with url, method, body, headers", formInputType: "json", required: true }],
+    returnType: "object",
+    returnDescription: "Response",
+    example: 'http.request {"url": "https://api.example.com", "method": "POST", "body": {"key": 1}}'
+  },
+  serve: {
+    description: "Start an HTTP server",
+    parameters: [
+      { name: "port", dataType: "number", description: "Port to listen on (default: 3000)", formInputType: "number", required: true },
+      { name: "host", dataType: "string", description: "Host (default: 0.0.0.0)", formInputType: "text", required: false, defaultValue: "0.0.0.0" }
+    ],
+    returnType: "string",
+    returnDescription: "Server handle ID",
+    example: "http.serve 8080"
+  },
+  close: {
+    description: "Close an HTTP server",
+    parameters: [{ name: "serverId", dataType: "string", description: "Server handle ID", formInputType: "text", required: true }],
+    returnType: "boolean",
+    returnDescription: "true if closed",
+    example: "http.close $serverId"
+  },
+  servers: {
+    description: "List all running HTTP servers",
+    parameters: [],
+    returnType: "array",
+    returnDescription: "Array of server IDs",
+    example: "http.servers"
+  },
+  download: {
+    description: "Download a file from a URL",
+    parameters: [
+      { name: "url", dataType: "string", description: "URL to download", formInputType: "text", required: true },
+      { name: "path", dataType: "string", description: "Local file path to save", formInputType: "text", required: true }
+    ],
+    returnType: "object",
+    returnDescription: "Object with size, path, status",
+    example: 'http.download "https://example.com/file.zip" "file.zip"'
+  }
+};
+var HttpModuleMetadata = {
+  description: "HTTP client and server: GET, POST, PUT, DELETE, serve, download",
+  methods: Object.keys(HttpFunctions)
+};
+var http_default = {
+  name: "http",
+  functions: HttpFunctions,
+  functionMetadata: HttpFunctionMetadata,
+  moduleMetadata: HttpModuleMetadata,
+  global: false
+};
+
+// modules/net.js
+var import_node_net = require("node:net");
+var _servers2 = /* @__PURE__ */ new Map();
+var _sockets = /* @__PURE__ */ new Map();
+var _nextId4 = 1;
+var NetFunctions = {
+  connect: (args) => {
+    requireArgs("net.connect", args, 2);
+    const host = toStr(args[0]);
+    const port = toNum(args[1]);
+    const id = `sock_${_nextId4++}`;
+    return new Promise((resolve5, reject) => {
+      const socket = (0, import_node_net.createConnection)({ host, port }, () => {
+        _sockets.set(id, { socket, data: "" });
+        socket.on("data", (chunk) => {
+          const entry = _sockets.get(id);
+          if (entry) entry.data += chunk.toString();
+        });
+        socket.on("end", () => {
+          _sockets.delete(id);
+        });
+        socket.on("error", () => {
+          _sockets.delete(id);
+        });
+        resolve5(id);
+      });
+      socket.on("error", (err) => reject(new Error(`net.connect: ${err.message}`)));
+    });
+  },
+  send: (args) => {
+    requireArgs("net.send", args, 2);
+    const id = toStr(args[0]);
+    const data = toStr(args[1]);
+    const entry = _sockets.get(id);
+    if (!entry) throw new Error(`net.send: socket ${id} not found`);
+    return new Promise((resolve5, reject) => {
+      entry.socket.write(data, (err) => {
+        if (err) reject(err);
+        else resolve5(true);
+      });
+    });
+  },
+  read: (args) => {
+    requireArgs("net.read", args, 1);
+    const id = toStr(args[0]);
+    const entry = _sockets.get(id);
+    if (!entry) throw new Error(`net.read: socket ${id} not found`);
+    const data = entry.data;
+    entry.data = "";
+    return data;
+  },
+  close: (args) => {
+    requireArgs("net.close", args, 1);
+    const id = toStr(args[0]);
+    const entry = _sockets.get(id);
+    if (entry) {
+      entry.socket.destroy();
+      _sockets.delete(id);
+      return true;
+    }
+    const server = _servers2.get(id);
+    if (server) {
+      server.close();
+      _servers2.delete(id);
+      return true;
+    }
+    return false;
+  },
+  createServer: (args, callback) => {
+    requireArgs("net.createServer", args, 1);
+    const port = toNum(args[0]);
+    const host = toStr(args[1], "0.0.0.0");
+    const serverId = `tcp_${_nextId4++}`;
+    const server = (0, import_node_net.createServer)((socket) => {
+      const connId = `conn_${_nextId4++}`;
+      _sockets.set(connId, { socket, data: "" });
+      socket.on("data", (chunk) => {
+        const entry = _sockets.get(connId);
+        if (entry) entry.data += chunk.toString();
+        if (callback) callback([connId, chunk.toString()]);
+      });
+      socket.on("end", () => {
+        _sockets.delete(connId);
+      });
+      socket.on("error", () => {
+        _sockets.delete(connId);
+      });
+    });
+    server.listen(port, host);
+    _servers2.set(serverId, server);
+    return serverId;
+  },
+  isIP: (args) => {
+    requireArgs("net.isIP", args, 1);
+    return (0, import_node_net.isIP)(toStr(args[0]));
+  },
+  isIPv4: (args) => {
+    requireArgs("net.isIPv4", args, 1);
+    return (0, import_node_net.isIPv4)(toStr(args[0]));
+  },
+  isIPv6: (args) => {
+    requireArgs("net.isIPv6", args, 1);
+    return (0, import_node_net.isIPv6)(toStr(args[0]));
+  },
+  active: () => ({
+    servers: Array.from(_servers2.keys()),
+    sockets: Array.from(_sockets.keys())
+  })
+};
+var NetFunctionMetadata = {
+  connect: {
+    description: "Connect to a TCP server",
+    parameters: [
+      { name: "host", dataType: "string", description: "Host to connect to", formInputType: "text", required: true },
+      { name: "port", dataType: "number", description: "Port number", formInputType: "number", required: true }
+    ],
+    returnType: "string",
+    returnDescription: "Socket handle ID",
+    example: 'net.connect "localhost" 8080'
+  },
+  send: {
+    description: "Send data through a socket",
+    parameters: [
+      { name: "socketId", dataType: "string", description: "Socket handle ID", formInputType: "text", required: true },
+      { name: "data", dataType: "string", description: "Data to send", formInputType: "text", required: true }
+    ],
+    returnType: "boolean",
+    returnDescription: "true on success",
+    example: 'net.send $sock "hello"'
+  },
+  read: {
+    description: "Read buffered data from a socket",
+    parameters: [{ name: "socketId", dataType: "string", description: "Socket handle ID", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Buffered data",
+    example: "net.read $sock"
+  },
+  close: {
+    description: "Close a socket or server",
+    parameters: [{ name: "id", dataType: "string", description: "Socket or server handle ID", formInputType: "text", required: true }],
+    returnType: "boolean",
+    returnDescription: "true if closed",
+    example: "net.close $sock"
+  },
+  createServer: {
+    description: "Create a TCP server",
+    parameters: [
+      { name: "port", dataType: "number", description: "Port to listen on", formInputType: "number", required: true },
+      { name: "host", dataType: "string", description: "Host (default: 0.0.0.0)", formInputType: "text", required: false, defaultValue: "0.0.0.0" }
+    ],
+    returnType: "string",
+    returnDescription: "Server handle ID",
+    example: "net.createServer 9090"
+  },
+  isIP: {
+    description: "Check if string is a valid IP (returns 0, 4, or 6)",
+    parameters: [{ name: "address", dataType: "string", description: "Address to check", formInputType: "text", required: true }],
+    returnType: "number",
+    returnDescription: "0 (invalid), 4 (IPv4), or 6 (IPv6)",
+    example: 'net.isIP "192.168.1.1"'
+  },
+  isIPv4: {
+    description: "Check if string is a valid IPv4 address",
+    parameters: [{ name: "address", dataType: "string", description: "Address", formInputType: "text", required: true }],
+    returnType: "boolean",
+    returnDescription: "true if IPv4",
+    example: 'net.isIPv4 "192.168.1.1"'
+  },
+  isIPv6: {
+    description: "Check if string is a valid IPv6 address",
+    parameters: [{ name: "address", dataType: "string", description: "Address", formInputType: "text", required: true }],
+    returnType: "boolean",
+    returnDescription: "true if IPv6",
+    example: 'net.isIPv6 "::1"'
+  },
+  active: {
+    description: "List active servers and sockets",
+    parameters: [],
+    returnType: "object",
+    returnDescription: "Object with servers and sockets arrays",
+    example: "net.active"
+  }
+};
+var NetModuleMetadata = {
+  description: "TCP networking: connect, send, read, createServer, and IP utilities",
+  methods: Object.keys(NetFunctions)
+};
+var net_default = {
+  name: "net",
+  functions: NetFunctions,
+  functionMetadata: NetFunctionMetadata,
+  moduleMetadata: NetModuleMetadata,
+  global: false
+};
+
+// modules/dns.js
+var import_node_dns = require("node:dns");
+var DnsFunctions = {
+  lookup: async (args) => {
+    requireArgs("dns.lookup", args, 1);
+    const hostname2 = toStr(args[0]);
+    const result = await import_node_dns.promises.lookup(hostname2, { all: true });
+    if (Array.isArray(result)) {
+      return result.map((r) => ({ address: r.address, family: r.family }));
+    }
+    return { address: result.address, family: result.family };
+  },
+  resolve: async (args) => {
+    requireArgs("dns.resolve", args, 1);
+    const hostname2 = toStr(args[0]);
+    const rrtype = toStr(args[1], "A");
+    return await import_node_dns.promises.resolve(hostname2, rrtype);
+  },
+  resolve4: async (args) => {
+    requireArgs("dns.resolve4", args, 1);
+    return await import_node_dns.promises.resolve4(toStr(args[0]));
+  },
+  resolve6: async (args) => {
+    requireArgs("dns.resolve6", args, 1);
+    return await import_node_dns.promises.resolve6(toStr(args[0]));
+  },
+  resolveMx: async (args) => {
+    requireArgs("dns.resolveMx", args, 1);
+    return await import_node_dns.promises.resolveMx(toStr(args[0]));
+  },
+  resolveTxt: async (args) => {
+    requireArgs("dns.resolveTxt", args, 1);
+    const records = await import_node_dns.promises.resolveTxt(toStr(args[0]));
+    return records.map((r) => r.join(""));
+  },
+  resolveNs: async (args) => {
+    requireArgs("dns.resolveNs", args, 1);
+    return await import_node_dns.promises.resolveNs(toStr(args[0]));
+  },
+  resolveCname: async (args) => {
+    requireArgs("dns.resolveCname", args, 1);
+    return await import_node_dns.promises.resolveCname(toStr(args[0]));
+  },
+  resolveSrv: async (args) => {
+    requireArgs("dns.resolveSrv", args, 1);
+    return await import_node_dns.promises.resolveSrv(toStr(args[0]));
+  },
+  resolveSoa: async (args) => {
+    requireArgs("dns.resolveSoa", args, 1);
+    return await import_node_dns.promises.resolveSoa(toStr(args[0]));
+  },
+  reverse: async (args) => {
+    requireArgs("dns.reverse", args, 1);
+    return await import_node_dns.promises.reverse(toStr(args[0]));
+  }
+};
+var DnsFunctionMetadata = {
+  lookup: {
+    description: "Resolve hostname to IP address(es)",
+    parameters: [{ name: "hostname", dataType: "string", description: "Hostname to resolve", formInputType: "text", required: true }],
+    returnType: "array",
+    returnDescription: "Array of {address, family}",
+    example: 'dns.lookup "google.com"'
+  },
+  resolve: {
+    description: "Resolve DNS records by type",
+    parameters: [
+      { name: "hostname", dataType: "string", description: "Hostname", formInputType: "text", required: true },
+      { name: "rrtype", dataType: "string", description: "Record type (A, AAAA, MX, TXT, etc.)", formInputType: "text", required: false, defaultValue: "A" }
+    ],
+    returnType: "array",
+    returnDescription: "Array of DNS records",
+    example: 'dns.resolve "example.com" "MX"'
+  },
+  resolve4: {
+    description: "Resolve IPv4 addresses",
+    parameters: [{ name: "hostname", dataType: "string", description: "Hostname", formInputType: "text", required: true }],
+    returnType: "array",
+    returnDescription: "Array of IPv4 addresses",
+    example: 'dns.resolve4 "google.com"'
+  },
+  resolve6: {
+    description: "Resolve IPv6 addresses",
+    parameters: [{ name: "hostname", dataType: "string", description: "Hostname", formInputType: "text", required: true }],
+    returnType: "array",
+    returnDescription: "Array of IPv6 addresses",
+    example: 'dns.resolve6 "google.com"'
+  },
+  resolveMx: {
+    description: "Resolve MX (mail) records",
+    parameters: [{ name: "hostname", dataType: "string", description: "Domain", formInputType: "text", required: true }],
+    returnType: "array",
+    returnDescription: "Array of {exchange, priority}",
+    example: 'dns.resolveMx "gmail.com"'
+  },
+  resolveTxt: {
+    description: "Resolve TXT records",
+    parameters: [{ name: "hostname", dataType: "string", description: "Domain", formInputType: "text", required: true }],
+    returnType: "array",
+    returnDescription: "Array of TXT record strings",
+    example: 'dns.resolveTxt "example.com"'
+  },
+  resolveNs: {
+    description: "Resolve NS (nameserver) records",
+    parameters: [{ name: "hostname", dataType: "string", description: "Domain", formInputType: "text", required: true }],
+    returnType: "array",
+    returnDescription: "Array of nameserver hostnames",
+    example: 'dns.resolveNs "example.com"'
+  },
+  resolveCname: {
+    description: "Resolve CNAME records",
+    parameters: [{ name: "hostname", dataType: "string", description: "Hostname", formInputType: "text", required: true }],
+    returnType: "array",
+    returnDescription: "Array of CNAME records",
+    example: 'dns.resolveCname "www.example.com"'
+  },
+  resolveSrv: {
+    description: "Resolve SRV records",
+    parameters: [{ name: "hostname", dataType: "string", description: "Hostname", formInputType: "text", required: true }],
+    returnType: "array",
+    returnDescription: "Array of SRV records",
+    example: 'dns.resolveSrv "_http._tcp.example.com"'
+  },
+  resolveSoa: {
+    description: "Resolve SOA (Start of Authority) record",
+    parameters: [{ name: "hostname", dataType: "string", description: "Domain", formInputType: "text", required: true }],
+    returnType: "object",
+    returnDescription: "SOA record object",
+    example: 'dns.resolveSoa "example.com"'
+  },
+  reverse: {
+    description: "Reverse DNS lookup (IP to hostname)",
+    parameters: [{ name: "ip", dataType: "string", description: "IP address", formInputType: "text", required: true }],
+    returnType: "array",
+    returnDescription: "Array of hostnames",
+    example: 'dns.reverse "8.8.8.8"'
+  }
+};
+var DnsModuleMetadata = {
+  description: "DNS resolution: lookup, resolve A/AAAA/MX/TXT/NS/SRV/SOA records, reverse lookup",
+  methods: Object.keys(DnsFunctions)
+};
+var dns_default = {
+  name: "dns",
+  functions: DnsFunctions,
+  functionMetadata: DnsFunctionMetadata,
+  moduleMetadata: DnsModuleMetadata,
+  global: false
+};
+
+// modules/events.js
+var import_node_events = require("node:events");
+var _emitters = /* @__PURE__ */ new Map();
+var _nextId5 = 1;
+var EventsFunctions = {
+  create: () => {
+    const id = `emitter_${_nextId5++}`;
+    _emitters.set(id, new import_node_events.EventEmitter());
+    return id;
+  },
+  on: (args, callback) => {
+    requireArgs("events.on", args, 2);
+    const id = toStr(args[0]);
+    const event = toStr(args[1]);
+    const emitter = _emitters.get(id);
+    if (!emitter) throw new Error(`events.on: emitter ${id} not found`);
+    if (callback) {
+      emitter.on(event, (...eventArgs) => callback(eventArgs));
+    }
+    return true;
+  },
+  once: (args, callback) => {
+    requireArgs("events.once", args, 2);
+    const id = toStr(args[0]);
+    const event = toStr(args[1]);
+    const emitter = _emitters.get(id);
+    if (!emitter) throw new Error(`events.once: emitter ${id} not found`);
+    if (callback) {
+      emitter.once(event, (...eventArgs) => callback(eventArgs));
+    }
+    return true;
+  },
+  emit: (args) => {
+    requireArgs("events.emit", args, 2);
+    const id = toStr(args[0]);
+    const event = toStr(args[1]);
+    const emitter = _emitters.get(id);
+    if (!emitter) throw new Error(`events.emit: emitter ${id} not found`);
+    return emitter.emit(event, ...args.slice(2));
+  },
+  off: (args) => {
+    requireArgs("events.off", args, 2);
+    const id = toStr(args[0]);
+    const event = toStr(args[1]);
+    const emitter = _emitters.get(id);
+    if (!emitter) throw new Error(`events.off: emitter ${id} not found`);
+    emitter.removeAllListeners(event);
+    return true;
+  },
+  listeners: (args) => {
+    requireArgs("events.listeners", args, 2);
+    const id = toStr(args[0]);
+    const event = toStr(args[1]);
+    const emitter = _emitters.get(id);
+    if (!emitter) throw new Error(`events.listeners: emitter ${id} not found`);
+    return emitter.listenerCount(event);
+  },
+  eventNames: (args) => {
+    requireArgs("events.eventNames", args, 1);
+    const id = toStr(args[0]);
+    const emitter = _emitters.get(id);
+    if (!emitter) throw new Error(`events.eventNames: emitter ${id} not found`);
+    return emitter.eventNames();
+  },
+  removeAll: (args) => {
+    requireArgs("events.removeAll", args, 1);
+    const id = toStr(args[0]);
+    const emitter = _emitters.get(id);
+    if (!emitter) throw new Error(`events.removeAll: emitter ${id} not found`);
+    emitter.removeAllListeners();
+    return true;
+  },
+  destroy: (args) => {
+    requireArgs("events.destroy", args, 1);
+    const id = toStr(args[0]);
+    const emitter = _emitters.get(id);
+    if (emitter) {
+      emitter.removeAllListeners();
+      _emitters.delete(id);
+      return true;
+    }
+    return false;
+  },
+  list: () => Array.from(_emitters.keys())
+};
+var EventsFunctionMetadata = {
+  create: { description: "Create a new event emitter", parameters: [], returnType: "string", returnDescription: "Emitter handle ID", example: "events.create" },
+  on: {
+    description: "Listen for an event",
+    parameters: [
+      { name: "emitterId", dataType: "string", description: "Emitter handle", formInputType: "text", required: true },
+      { name: "event", dataType: "string", description: "Event name", formInputType: "text", required: true }
+    ],
+    returnType: "boolean",
+    returnDescription: "true",
+    example: 'events.on $emitter "data"'
+  },
+  once: {
+    description: "Listen for an event once",
+    parameters: [
+      { name: "emitterId", dataType: "string", description: "Emitter handle", formInputType: "text", required: true },
+      { name: "event", dataType: "string", description: "Event name", formInputType: "text", required: true }
+    ],
+    returnType: "boolean",
+    returnDescription: "true",
+    example: 'events.once $emitter "ready"'
+  },
+  emit: {
+    description: "Emit an event with arguments",
+    parameters: [
+      { name: "emitterId", dataType: "string", description: "Emitter handle", formInputType: "text", required: true },
+      { name: "event", dataType: "string", description: "Event name", formInputType: "text", required: true }
+    ],
+    returnType: "boolean",
+    returnDescription: "true if listeners were called",
+    example: 'events.emit $emitter "data" "payload"'
+  },
+  off: {
+    description: "Remove all listeners for an event",
+    parameters: [
+      { name: "emitterId", dataType: "string", description: "Emitter handle", formInputType: "text", required: true },
+      { name: "event", dataType: "string", description: "Event name", formInputType: "text", required: true }
+    ],
+    returnType: "boolean",
+    returnDescription: "true",
+    example: 'events.off $emitter "data"'
+  },
+  listeners: {
+    description: "Get listener count for an event",
+    parameters: [
+      { name: "emitterId", dataType: "string", description: "Emitter handle", formInputType: "text", required: true },
+      { name: "event", dataType: "string", description: "Event name", formInputType: "text", required: true }
+    ],
+    returnType: "number",
+    returnDescription: "Number of listeners",
+    example: 'events.listeners $emitter "data"'
+  },
+  eventNames: {
+    description: "Get all event names with listeners",
+    parameters: [{ name: "emitterId", dataType: "string", description: "Emitter handle", formInputType: "text", required: true }],
+    returnType: "array",
+    returnDescription: "Array of event names",
+    example: "events.eventNames $emitter"
+  },
+  removeAll: {
+    description: "Remove all listeners from an emitter",
+    parameters: [{ name: "emitterId", dataType: "string", description: "Emitter handle", formInputType: "text", required: true }],
+    returnType: "boolean",
+    returnDescription: "true",
+    example: "events.removeAll $emitter"
+  },
+  destroy: {
+    description: "Destroy an emitter",
+    parameters: [{ name: "emitterId", dataType: "string", description: "Emitter handle", formInputType: "text", required: true }],
+    returnType: "boolean",
+    returnDescription: "true if destroyed",
+    example: "events.destroy $emitter"
+  },
+  list: { description: "List all active emitters", parameters: [], returnType: "array", returnDescription: "Array of emitter IDs", example: "events.list" }
+};
+var EventsModuleMetadata = {
+  description: "EventEmitter pattern: create emitters, listen, emit, and manage events",
+  methods: Object.keys(EventsFunctions)
+};
+var events_default = {
+  name: "events",
+  functions: EventsFunctions,
+  functionMetadata: EventsFunctionMetadata,
+  moduleMetadata: EventsModuleMetadata,
+  global: false
+};
+
+// modules/zlib.js
+var import_node_zlib = require("node:zlib");
+function promisify(fn2, input) {
+  return new Promise((resolve5, reject) => {
+    fn2(input, (err, result) => {
+      if (err) reject(err);
+      else resolve5(result);
+    });
+  });
+}
+var ZlibFunctions = {
+  gzip: async (args) => {
+    requireArgs("zlib.gzip", args, 1);
+    const input = Buffer.from(toStr(args[0]));
+    const result = await promisify(import_node_zlib.gzip, input);
+    return result.toString("base64");
+  },
+  gunzip: async (args) => {
+    requireArgs("zlib.gunzip", args, 1);
+    const input = Buffer.from(toStr(args[0]), "base64");
+    const result = await promisify(import_node_zlib.gunzip, input);
+    return result.toString("utf-8");
+  },
+  deflate: async (args) => {
+    requireArgs("zlib.deflate", args, 1);
+    const input = Buffer.from(toStr(args[0]));
+    const result = await promisify(import_node_zlib.deflate, input);
+    return result.toString("base64");
+  },
+  inflate: async (args) => {
+    requireArgs("zlib.inflate", args, 1);
+    const input = Buffer.from(toStr(args[0]), "base64");
+    const result = await promisify(import_node_zlib.inflate, input);
+    return result.toString("utf-8");
+  },
+  brotliCompress: async (args) => {
+    requireArgs("zlib.brotliCompress", args, 1);
+    const input = Buffer.from(toStr(args[0]));
+    const result = await promisify(import_node_zlib.brotliCompress, input);
+    return result.toString("base64");
+  },
+  brotliDecompress: async (args) => {
+    requireArgs("zlib.brotliDecompress", args, 1);
+    const input = Buffer.from(toStr(args[0]), "base64");
+    const result = await promisify(import_node_zlib.brotliDecompress, input);
+    return result.toString("utf-8");
+  },
+  compressSize: async (args) => {
+    requireArgs("zlib.compressSize", args, 1);
+    const input = Buffer.from(toStr(args[0]));
+    const compressed = await promisify(import_node_zlib.gzip, input);
+    return {
+      original: input.length,
+      compressed: compressed.length,
+      ratio: Math.round(compressed.length / input.length * 1e4) / 100
+    };
+  }
+};
+var ZlibFunctionMetadata = {
+  gzip: {
+    description: "Gzip compress a string",
+    parameters: [{ name: "data", dataType: "string", description: "Data to compress", formInputType: "textarea", required: true }],
+    returnType: "string",
+    returnDescription: "Base64-encoded gzipped data",
+    example: 'zlib.gzip "hello world"'
+  },
+  gunzip: {
+    description: "Decompress gzipped data",
+    parameters: [{ name: "data", dataType: "string", description: "Base64-encoded gzipped data", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Decompressed string",
+    example: "zlib.gunzip $compressed"
+  },
+  deflate: {
+    description: "Deflate compress a string",
+    parameters: [{ name: "data", dataType: "string", description: "Data to compress", formInputType: "textarea", required: true }],
+    returnType: "string",
+    returnDescription: "Base64-encoded deflated data",
+    example: 'zlib.deflate "hello world"'
+  },
+  inflate: {
+    description: "Decompress deflated data",
+    parameters: [{ name: "data", dataType: "string", description: "Base64-encoded deflated data", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Decompressed string",
+    example: "zlib.inflate $compressed"
+  },
+  brotliCompress: {
+    description: "Brotli compress a string",
+    parameters: [{ name: "data", dataType: "string", description: "Data to compress", formInputType: "textarea", required: true }],
+    returnType: "string",
+    returnDescription: "Base64-encoded brotli data",
+    example: 'zlib.brotliCompress "hello world"'
+  },
+  brotliDecompress: {
+    description: "Decompress brotli data",
+    parameters: [{ name: "data", dataType: "string", description: "Base64-encoded brotli data", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Decompressed string",
+    example: "zlib.brotliDecompress $compressed"
+  },
+  compressSize: {
+    description: "Show compression ratio (gzip)",
+    parameters: [{ name: "data", dataType: "string", description: "Data to analyze", formInputType: "textarea", required: true }],
+    returnType: "object",
+    returnDescription: "Object with original, compressed, ratio",
+    example: 'zlib.compressSize "hello world hello world"'
+  }
+};
+var ZlibModuleMetadata = {
+  description: "Compression: gzip, deflate, brotli compress/decompress",
+  methods: Object.keys(ZlibFunctions)
+};
+var zlib_default = {
+  name: "zlib",
+  functions: ZlibFunctions,
+  functionMetadata: ZlibFunctionMetadata,
+  moduleMetadata: ZlibModuleMetadata,
+  global: false
+};
+
+// modules/stream.js
+var import_node_stream = require("node:stream");
+var _streams = /* @__PURE__ */ new Map();
+var _nextId6 = 1;
+var StreamFunctions = {
+  readable: (args) => {
+    const data = args[0];
+    const id = `readable_${_nextId6++}`;
+    let chunks;
+    if (typeof data === "string") {
+      chunks = [data];
+    } else if (Array.isArray(data)) {
+      chunks = data.map((c) => toStr(c));
+    } else {
+      chunks = [toStr(data)];
+    }
+    const stream = new import_node_stream.Readable({
+      read() {
+        if (chunks.length > 0) this.push(chunks.shift());
+        else this.push(null);
+      }
+    });
+    _streams.set(id, { stream, data: "" });
+    stream.on("data", (chunk) => {
+      const entry = _streams.get(id);
+      if (entry) entry.data += chunk.toString();
+    });
+    return id;
+  },
+  writable: (args) => {
+    const id = `writable_${_nextId6++}`;
+    let collected = "";
+    const stream = new import_node_stream.Writable({
+      write(chunk, encoding, callback) {
+        collected += chunk.toString();
+        const entry = _streams.get(id);
+        if (entry) entry.data = collected;
+        callback();
+      }
+    });
+    _streams.set(id, { stream, data: "" });
+    return id;
+  },
+  transform: (args) => {
+    const id = `transform_${_nextId6++}`;
+    const stream = new import_node_stream.Transform({
+      transform(chunk, encoding, callback) {
+        callback(null, chunk);
+      }
+    });
+    _streams.set(id, { stream, data: "" });
+    stream.on("data", (chunk) => {
+      const entry = _streams.get(id);
+      if (entry) entry.data += chunk.toString();
+    });
+    return id;
+  },
+  duplex: (args) => {
+    const id = `duplex_${_nextId6++}`;
+    const stream = new import_node_stream.Duplex({
+      read() {
+      },
+      write(chunk, encoding, callback) {
+        this.push(chunk);
+        callback();
+      }
+    });
+    _streams.set(id, { stream, data: "" });
+    stream.on("data", (chunk) => {
+      const entry = _streams.get(id);
+      if (entry) entry.data += chunk.toString();
+    });
+    return id;
+  },
+  passThrough: (args) => {
+    const id = `passthrough_${_nextId6++}`;
+    const stream = new import_node_stream.PassThrough();
+    _streams.set(id, { stream, data: "" });
+    stream.on("data", (chunk) => {
+      const entry = _streams.get(id);
+      if (entry) entry.data += chunk.toString();
+    });
+    return id;
+  },
+  write: (args) => {
+    requireArgs("stream.write", args, 2);
+    const id = toStr(args[0]);
+    const data = toStr(args[1]);
+    const entry = _streams.get(id);
+    if (!entry) throw new Error(`stream.write: stream ${id} not found`);
+    return new Promise((resolve5, reject) => {
+      entry.stream.write(data, (err) => {
+        if (err) reject(err);
+        else resolve5(true);
+      });
+    });
+  },
+  read: (args) => {
+    requireArgs("stream.read", args, 1);
+    const id = toStr(args[0]);
+    const entry = _streams.get(id);
+    if (!entry) throw new Error(`stream.read: stream ${id} not found`);
+    const data = entry.data;
+    entry.data = "";
+    return data;
+  },
+  end: (args) => {
+    requireArgs("stream.end", args, 1);
+    const id = toStr(args[0]);
+    const entry = _streams.get(id);
+    if (!entry) throw new Error(`stream.end: stream ${id} not found`);
+    entry.stream.end();
+    return true;
+  },
+  destroy: (args) => {
+    requireArgs("stream.destroy", args, 1);
+    const id = toStr(args[0]);
+    const entry = _streams.get(id);
+    if (entry) {
+      entry.stream.destroy();
+      _streams.delete(id);
+      return true;
+    }
+    return false;
+  },
+  pipe: (args) => {
+    requireArgs("stream.pipe", args, 2);
+    const srcId = toStr(args[0]);
+    const destId = toStr(args[1]);
+    const src = _streams.get(srcId);
+    const dest = _streams.get(destId);
+    if (!src) throw new Error(`stream.pipe: source ${srcId} not found`);
+    if (!dest) throw new Error(`stream.pipe: destination ${destId} not found`);
+    src.stream.pipe(dest.stream);
+    return destId;
+  },
+  pipeline: (args) => {
+    if (!Array.isArray(args[0]) && args.length < 2) {
+      throw new Error("stream.pipeline requires at least 2 stream IDs");
+    }
+    const ids = Array.isArray(args[0]) ? args[0] : args;
+    const streams = ids.map((id) => {
+      const entry = _streams.get(toStr(id));
+      if (!entry) throw new Error(`stream.pipeline: stream ${id} not found`);
+      return entry.stream;
+    });
+    return new Promise((resolve5, reject) => {
+      (0, import_node_stream.pipeline)(...streams, (err) => {
+        if (err) reject(err);
+        else resolve5(true);
+      });
+    });
+  },
+  toBuffer: (args) => {
+    requireArgs("stream.toBuffer", args, 1);
+    const id = toStr(args[0]);
+    const entry = _streams.get(id);
+    if (!entry) throw new Error(`stream.toBuffer: stream ${id} not found`);
+    return new Promise((resolve5) => {
+      const chunks = [];
+      entry.stream.on("data", (chunk) => chunks.push(chunk));
+      entry.stream.on("end", () => {
+        resolve5(Buffer.concat(chunks).toString("base64"));
+      });
+      if (entry.stream.readableEnded) {
+        resolve5(Buffer.from(entry.data).toString("base64"));
+      }
+    });
+  },
+  toString: (args) => {
+    requireArgs("stream.toString", args, 1);
+    const id = toStr(args[0]);
+    const entry = _streams.get(id);
+    if (!entry) throw new Error(`stream.toString: stream ${id} not found`);
+    return new Promise((resolve5) => {
+      let data = "";
+      entry.stream.on("data", (chunk) => {
+        data += chunk.toString();
+      });
+      entry.stream.on("end", () => resolve5(data));
+      if (entry.stream.readableEnded) resolve5(entry.data);
+    });
+  },
+  fromString: (args) => {
+    requireArgs("stream.fromString", args, 1);
+    const data = toStr(args[0]);
+    const id = `readable_${_nextId6++}`;
+    const stream = import_node_stream.Readable.from([data]);
+    _streams.set(id, { stream, data });
+    return id;
+  },
+  fromArray: (args) => {
+    requireArgs("stream.fromArray", args, 1);
+    const arr = Array.isArray(args[0]) ? args[0] : [args[0]];
+    const id = `readable_${_nextId6++}`;
+    const stream = import_node_stream.Readable.from(arr.map((a) => toStr(a)));
+    _streams.set(id, { stream, data: arr.join("") });
+    return id;
+  },
+  active: () => Array.from(_streams.keys()),
+  count: () => _streams.size
+};
+var StreamFunctionMetadata = {
+  readable: {
+    description: "Create a readable stream from data",
+    parameters: [{ name: "data", dataType: "any", description: "String or array of chunks", formInputType: "textarea", required: true }],
+    returnType: "string",
+    returnDescription: "Stream handle ID",
+    example: 'stream.readable "hello world"'
+  },
+  writable: {
+    description: "Create a writable stream that collects data",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "Stream handle ID",
+    example: "stream.writable"
+  },
+  transform: {
+    description: "Create a transform (pass-through) stream",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "Stream handle ID",
+    example: "stream.transform"
+  },
+  duplex: {
+    description: "Create a duplex (read/write) stream",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "Stream handle ID",
+    example: "stream.duplex"
+  },
+  passThrough: {
+    description: "Create a passthrough stream",
+    parameters: [],
+    returnType: "string",
+    returnDescription: "Stream handle ID",
+    example: "stream.passThrough"
+  },
+  write: {
+    description: "Write data to a stream",
+    parameters: [
+      { name: "streamId", dataType: "string", description: "Stream handle ID", formInputType: "text", required: true },
+      { name: "data", dataType: "string", description: "Data to write", formInputType: "textarea", required: true }
+    ],
+    returnType: "boolean",
+    returnDescription: "true on success",
+    example: 'stream.write $s "data"'
+  },
+  read: {
+    description: "Read buffered data from a stream",
+    parameters: [{ name: "streamId", dataType: "string", description: "Stream handle ID", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Buffered data",
+    example: "stream.read $s"
+  },
+  end: {
+    description: "Signal end of stream",
+    parameters: [{ name: "streamId", dataType: "string", description: "Stream handle ID", formInputType: "text", required: true }],
+    returnType: "boolean",
+    returnDescription: "true",
+    example: "stream.end $s"
+  },
+  destroy: {
+    description: "Destroy a stream and free resources",
+    parameters: [{ name: "streamId", dataType: "string", description: "Stream handle ID", formInputType: "text", required: true }],
+    returnType: "boolean",
+    returnDescription: "true if destroyed",
+    example: "stream.destroy $s"
+  },
+  pipe: {
+    description: "Pipe one stream into another",
+    parameters: [
+      { name: "sourceId", dataType: "string", description: "Source stream", formInputType: "text", required: true },
+      { name: "destId", dataType: "string", description: "Destination stream", formInputType: "text", required: true }
+    ],
+    returnType: "string",
+    returnDescription: "Destination stream ID",
+    example: "stream.pipe $src $dest"
+  },
+  pipeline: {
+    description: "Chain multiple streams together with error propagation",
+    parameters: [{ name: "streamIds", dataType: "array", description: "Array of stream IDs to chain", formInputType: "json", required: true }],
+    returnType: "boolean",
+    returnDescription: "true on completion",
+    example: "stream.pipeline [$s1, $s2, $s3]"
+  },
+  toBuffer: {
+    description: "Collect stream data as base64 buffer",
+    parameters: [{ name: "streamId", dataType: "string", description: "Stream handle ID", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Base64-encoded buffer",
+    example: "stream.toBuffer $s"
+  },
+  toString: {
+    description: "Collect stream data as string",
+    parameters: [{ name: "streamId", dataType: "string", description: "Stream handle ID", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Collected string",
+    example: "stream.toString $s"
+  },
+  fromString: {
+    description: "Create a readable stream from a string",
+    parameters: [{ name: "data", dataType: "string", description: "Input string", formInputType: "textarea", required: true }],
+    returnType: "string",
+    returnDescription: "Stream handle ID",
+    example: 'stream.fromString "hello"'
+  },
+  fromArray: {
+    description: "Create a readable stream from an array",
+    parameters: [{ name: "data", dataType: "array", description: "Array of chunks", formInputType: "json", required: true }],
+    returnType: "string",
+    returnDescription: "Stream handle ID",
+    example: 'stream.fromArray ["chunk1", "chunk2"]'
+  },
+  active: { description: "List all active stream handles", parameters: [], returnType: "array", returnDescription: "Array of stream IDs", example: "stream.active" },
+  count: { description: "Count active streams", parameters: [], returnType: "number", returnDescription: "Number of active streams", example: "stream.count" }
+};
+var StreamModuleMetadata = {
+  description: "Stream operations: Readable, Writable, Transform, Duplex, PassThrough, pipe, pipeline",
+  methods: Object.keys(StreamFunctions)
+};
+var stream_default = {
+  name: "stream",
+  functions: StreamFunctions,
+  functionMetadata: StreamFunctionMetadata,
+  moduleMetadata: StreamModuleMetadata,
+  global: false
+};
+
+// modules/tls.js
+var import_node_tls = require("node:tls");
+var import_node_fs2 = require("node:fs");
+var import_node_path3 = require("node:path");
+var _sockets2 = /* @__PURE__ */ new Map();
+var _servers3 = /* @__PURE__ */ new Map();
+var _nextId7 = 1;
+var TlsFunctions = {
+  connect: (args) => {
+    requireArgs("tls.connect", args, 2);
+    const host = toStr(args[0]);
+    const port = toNum(args[1]);
+    const opts = args[2] && typeof args[2] === "object" ? args[2] : {};
+    const id = `tls_${_nextId7++}`;
+    const tlsOpts = {
+      host,
+      port,
+      rejectUnauthorized: opts.rejectUnauthorized !== false
+    };
+    if (opts.cert) tlsOpts.cert = (0, import_node_fs2.readFileSync)((0, import_node_path3.resolve)(toStr(opts.cert)));
+    if (opts.key) tlsOpts.key = (0, import_node_fs2.readFileSync)((0, import_node_path3.resolve)(toStr(opts.key)));
+    if (opts.ca) tlsOpts.ca = (0, import_node_fs2.readFileSync)((0, import_node_path3.resolve)(toStr(opts.ca)));
+    if (opts.servername) tlsOpts.servername = toStr(opts.servername);
+    if (opts.minVersion) tlsOpts.minVersion = toStr(opts.minVersion);
+    if (opts.maxVersion) tlsOpts.maxVersion = toStr(opts.maxVersion);
+    return new Promise((resolve5, reject) => {
+      const socket = (0, import_node_tls.connect)(tlsOpts, () => {
+        _sockets2.set(id, { socket, data: "" });
+        socket.on("data", (chunk) => {
+          const entry = _sockets2.get(id);
+          if (entry) entry.data += chunk.toString();
+        });
+        socket.on("end", () => {
+          _sockets2.delete(id);
+        });
+        socket.on("error", () => {
+          _sockets2.delete(id);
+        });
+        resolve5(id);
+      });
+      socket.on("error", (err) => reject(new Error(`tls.connect: ${err.message}`)));
+    });
+  },
+  send: (args) => {
+    requireArgs("tls.send", args, 2);
+    const id = toStr(args[0]);
+    const data = toStr(args[1]);
+    const entry = _sockets2.get(id);
+    if (!entry) throw new Error(`tls.send: socket ${id} not found`);
+    return new Promise((resolve5, reject) => {
+      entry.socket.write(data, (err) => {
+        if (err) reject(err);
+        else resolve5(true);
+      });
+    });
+  },
+  read: (args) => {
+    requireArgs("tls.read", args, 1);
+    const id = toStr(args[0]);
+    const entry = _sockets2.get(id);
+    if (!entry) throw new Error(`tls.read: socket ${id} not found`);
+    const data = entry.data;
+    entry.data = "";
+    return data;
+  },
+  close: (args) => {
+    requireArgs("tls.close", args, 1);
+    const id = toStr(args[0]);
+    const entry = _sockets2.get(id);
+    if (entry) {
+      entry.socket.destroy();
+      _sockets2.delete(id);
+      return true;
+    }
+    const server = _servers3.get(id);
+    if (server) {
+      server.close();
+      _servers3.delete(id);
+      return true;
+    }
+    return false;
+  },
+  createServer: (args, callback) => {
+    requireArgs("tls.createServer", args, 1);
+    const opts = args[0];
+    if (typeof opts !== "object" || opts === null) {
+      throw new Error("tls.createServer requires options: {port, cert, key}");
+    }
+    const port = toNum(opts.port, 443);
+    const host = toStr(opts.host || "0.0.0.0");
+    const id = `tlss_${_nextId7++}`;
+    const serverOpts = {};
+    if (opts.cert) serverOpts.cert = (0, import_node_fs2.readFileSync)((0, import_node_path3.resolve)(toStr(opts.cert)));
+    if (opts.key) serverOpts.key = (0, import_node_fs2.readFileSync)((0, import_node_path3.resolve)(toStr(opts.key)));
+    if (opts.ca) serverOpts.ca = (0, import_node_fs2.readFileSync)((0, import_node_path3.resolve)(toStr(opts.ca)));
+    if (opts.requestCert) serverOpts.requestCert = true;
+    const server = (0, import_node_tls.createServer)(serverOpts, (socket) => {
+      const connId = `tlsc_${_nextId7++}`;
+      _sockets2.set(connId, { socket, data: "" });
+      socket.on("data", (chunk) => {
+        const entry = _sockets2.get(connId);
+        if (entry) entry.data += chunk.toString();
+        if (callback) callback([connId, chunk.toString()]);
+      });
+      socket.on("end", () => {
+        _sockets2.delete(connId);
+      });
+      socket.on("error", () => {
+        _sockets2.delete(connId);
+      });
+    });
+    server.listen(port, host);
+    _servers3.set(id, server);
+    return id;
+  },
+  getCertificate: (args) => {
+    requireArgs("tls.getCertificate", args, 1);
+    const id = toStr(args[0]);
+    const entry = _sockets2.get(id);
+    if (!entry) throw new Error(`tls.getCertificate: socket ${id} not found`);
+    const cert = entry.socket.getPeerCertificate();
+    return {
+      subject: cert.subject,
+      issuer: cert.issuer,
+      validFrom: cert.valid_from,
+      validTo: cert.valid_to,
+      fingerprint: cert.fingerprint,
+      fingerprint256: cert.fingerprint256,
+      serialNumber: cert.serialNumber
+    };
+  },
+  getPeerCertificate: (args) => {
+    requireArgs("tls.getPeerCertificate", args, 1);
+    const id = toStr(args[0]);
+    const entry = _sockets2.get(id);
+    if (!entry) throw new Error(`tls.getPeerCertificate: socket ${id} not found`);
+    const cert = entry.socket.getPeerCertificate(true);
+    return {
+      subject: cert.subject,
+      issuer: cert.issuer,
+      validFrom: cert.valid_from,
+      validTo: cert.valid_to,
+      fingerprint: cert.fingerprint,
+      fingerprint256: cert.fingerprint256,
+      serialNumber: cert.serialNumber,
+      raw: cert.raw ? cert.raw.toString("base64") : null
+    };
+  },
+  isEncrypted: (args) => {
+    requireArgs("tls.isEncrypted", args, 1);
+    const id = toStr(args[0]);
+    const entry = _sockets2.get(id);
+    if (!entry) return false;
+    return entry.socket.encrypted === true;
+  },
+  getProtocol: (args) => {
+    requireArgs("tls.getProtocol", args, 1);
+    const id = toStr(args[0]);
+    const entry = _sockets2.get(id);
+    if (!entry) throw new Error(`tls.getProtocol: socket ${id} not found`);
+    return entry.socket.getProtocol();
+  },
+  getCipher: (args) => {
+    requireArgs("tls.getCipher", args, 1);
+    const id = toStr(args[0]);
+    const entry = _sockets2.get(id);
+    if (!entry) throw new Error(`tls.getCipher: socket ${id} not found`);
+    return entry.socket.getCipher();
+  },
+  active: () => ({
+    sockets: Array.from(_sockets2.keys()),
+    servers: Array.from(_servers3.keys())
+  })
+};
+var TlsFunctionMetadata = {
+  connect: {
+    description: "Create a TLS/SSL connection",
+    parameters: [
+      { name: "host", dataType: "string", description: "Hostname", formInputType: "text", required: true },
+      { name: "port", dataType: "number", description: "Port number", formInputType: "number", required: true },
+      { name: "options", dataType: "object", description: "TLS options: cert, key, ca, rejectUnauthorized, servername", formInputType: "json", required: false }
+    ],
+    returnType: "string",
+    returnDescription: "TLS socket handle ID",
+    example: 'tls.connect "smtp.gmail.com" 465'
+  },
+  send: {
+    description: "Send data over TLS socket",
+    parameters: [
+      { name: "socketId", dataType: "string", description: "Socket handle", formInputType: "text", required: true },
+      { name: "data", dataType: "string", description: "Data to send", formInputType: "text", required: true }
+    ],
+    returnType: "boolean",
+    returnDescription: "true on success",
+    example: 'tls.send $sock "EHLO example.com"'
+  },
+  read: {
+    description: "Read buffered TLS data",
+    parameters: [{ name: "socketId", dataType: "string", description: "Socket handle", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Buffered data",
+    example: "tls.read $sock"
+  },
+  close: {
+    description: "Close TLS socket or server",
+    parameters: [{ name: "id", dataType: "string", description: "Socket or server handle", formInputType: "text", required: true }],
+    returnType: "boolean",
+    returnDescription: "true if closed",
+    example: "tls.close $sock"
+  },
+  createServer: {
+    description: "Create a TLS server",
+    parameters: [{ name: "options", dataType: "object", description: "Server options: port, cert, key, ca", formInputType: "json", required: true }],
+    returnType: "string",
+    returnDescription: "Server handle ID",
+    example: 'tls.createServer {"port": 443, "cert": "cert.pem", "key": "key.pem"}'
+  },
+  getCertificate: {
+    description: "Get peer TLS certificate info",
+    parameters: [{ name: "socketId", dataType: "string", description: "Socket handle", formInputType: "text", required: true }],
+    returnType: "object",
+    returnDescription: "Certificate details",
+    example: "tls.getCertificate $sock"
+  },
+  getPeerCertificate: {
+    description: "Get full peer certificate with raw data",
+    parameters: [{ name: "socketId", dataType: "string", description: "Socket handle", formInputType: "text", required: true }],
+    returnType: "object",
+    returnDescription: "Full certificate object",
+    example: "tls.getPeerCertificate $sock"
+  },
+  isEncrypted: {
+    description: "Check if socket is TLS encrypted",
+    parameters: [{ name: "socketId", dataType: "string", description: "Socket handle", formInputType: "text", required: true }],
+    returnType: "boolean",
+    returnDescription: "true if encrypted",
+    example: "tls.isEncrypted $sock"
+  },
+  getProtocol: {
+    description: "Get TLS protocol version (e.g. TLSv1.3)",
+    parameters: [{ name: "socketId", dataType: "string", description: "Socket handle", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Protocol version string",
+    example: "tls.getProtocol $sock"
+  },
+  getCipher: {
+    description: "Get current cipher info",
+    parameters: [{ name: "socketId", dataType: "string", description: "Socket handle", formInputType: "text", required: true }],
+    returnType: "object",
+    returnDescription: "Cipher name and version",
+    example: "tls.getCipher $sock"
+  },
+  active: { description: "List active TLS sockets and servers", parameters: [], returnType: "object", returnDescription: "{sockets, servers}", example: "tls.active" }
+};
+var TlsModuleMetadata = {
+  description: "TLS/SSL: secure connections, certificates, encrypted client/server sockets",
+  methods: Object.keys(TlsFunctions)
+};
+var tls_default = {
+  name: "tls",
+  functions: TlsFunctions,
+  functionMetadata: TlsFunctionMetadata,
+  moduleMetadata: TlsModuleMetadata,
+  global: false
+};
+
+// modules/util.js
+var import_node_util = require("node:util");
+var UtilFunctions = {
+  // --- Inspection & Formatting ---
+  inspect: (args) => {
+    requireArgs("util.inspect", args, 1);
+    const obj = args[0];
+    const opts = args[1] && typeof args[1] === "object" ? args[1] : {};
+    return (0, import_node_util.inspect)(obj, {
+      depth: opts.depth != null ? toNum(opts.depth, 4) : 4,
+      colors: opts.colors !== false,
+      showHidden: opts.showHidden === true,
+      maxArrayLength: opts.maxArrayLength != null ? toNum(opts.maxArrayLength) : 100,
+      maxStringLength: opts.maxStringLength != null ? toNum(opts.maxStringLength) : 200,
+      compact: opts.compact !== false,
+      sorted: opts.sorted === true,
+      breakLength: opts.breakLength != null ? toNum(opts.breakLength) : 80
+    });
+  },
+  format: (args) => {
+    return (0, import_node_util.format)(...args.map((a) => a));
+  },
+  formatWithOptions: (args) => {
+    requireArgs("util.formatWithOptions", args, 2);
+    const opts = args[0];
+    return (0, import_node_util.formatWithOptions)(opts, ...args.slice(1));
+  },
+  // --- Type Checks ---
+  isArray: (args) => Array.isArray(args[0]),
+  isBoolean: (args) => typeof args[0] === "boolean",
+  isNull: (args) => args[0] === null,
+  isUndefined: (args) => args[0] === void 0,
+  isNullOrUndefined: (args) => args[0] == null,
+  isNumber: (args) => typeof args[0] === "number",
+  isString: (args) => typeof args[0] === "string",
+  isObject: (args) => typeof args[0] === "object" && args[0] !== null,
+  isFunction: (args) => typeof args[0] === "function",
+  isRegExp: (args) => args[0] instanceof RegExp,
+  isDate: (args) => args[0] instanceof Date,
+  isError: (args) => args[0] instanceof Error,
+  isPrimitive: (args) => {
+    const val = args[0];
+    return val === null || typeof val !== "object" && typeof val !== "function";
+  },
+  isPromise: (args) => import_node_util.types.isPromise(args[0]),
+  isMap: (args) => import_node_util.types.isMap(args[0]),
+  isSet: (args) => import_node_util.types.isSet(args[0]),
+  isTypedArray: (args) => import_node_util.types.isTypedArray(args[0]),
+  isArrayBuffer: (args) => import_node_util.types.isArrayBuffer(args[0]),
+  typeOf: (args) => {
+    requireArgs("util.typeOf", args, 1);
+    const val = args[0];
+    if (val === null) return "null";
+    if (Array.isArray(val)) return "array";
+    return typeof val;
+  },
+  // --- Text Encoding ---
+  textEncode: (args) => {
+    requireArgs("util.textEncode", args, 1);
+    const encoder = new import_node_util.TextEncoder();
+    const encoded = encoder.encode(toStr(args[0]));
+    return Buffer.from(encoded).toString("base64");
+  },
+  textDecode: (args) => {
+    requireArgs("util.textDecode", args, 1);
+    const encoding = toStr(args[1], "utf-8");
+    const decoder = new import_node_util.TextDecoder(encoding);
+    const buf = Buffer.from(toStr(args[0]), "base64");
+    return decoder.decode(buf);
+  },
+  // --- Object Utilities ---
+  deepClone: (args) => {
+    requireArgs("util.deepClone", args, 1);
+    return structuredClone(args[0]);
+  },
+  deepEqual: (args) => {
+    requireArgs("util.deepEqual", args, 2);
+    try {
+      return JSON.stringify(args[0]) === JSON.stringify(args[1]);
+    } catch {
+      return false;
+    }
+  },
+  merge: (args) => {
+    const result = {};
+    for (const arg of args) {
+      if (arg && typeof arg === "object" && !Array.isArray(arg)) {
+        Object.assign(result, arg);
+      }
+    }
+    return result;
+  },
+  deepMerge: (args) => {
+    function _deepMerge(target, source) {
+      const result2 = { ...target };
+      for (const key of Object.keys(source)) {
+        if (source[key] && typeof source[key] === "object" && !Array.isArray(source[key]) && target[key] && typeof target[key] === "object" && !Array.isArray(target[key])) {
+          result2[key] = _deepMerge(target[key], source[key]);
+        } else {
+          result2[key] = source[key];
+        }
+      }
+      return result2;
+    }
+    let result = {};
+    for (const arg of args) {
+      if (arg && typeof arg === "object" && !Array.isArray(arg)) {
+        result = _deepMerge(result, arg);
+      }
+    }
+    return result;
+  },
+  // --- String Utilities ---
+  inherits: () => {
+    return "util.inherits is not needed in RobinPath \u2014 use object composition instead";
+  },
+  deprecate: (args) => {
+    requireArgs("util.deprecate", args, 1);
+    console.error(`[DEPRECATED] ${toStr(args[0])}`);
+    return true;
+  },
+  // --- Performance ---
+  callbackify: () => {
+    return "util.callbackify is not needed \u2014 RobinPath handles async natively";
+  },
+  sizeof: (args) => {
+    requireArgs("util.sizeof", args, 1);
+    const val = args[0];
+    if (val === null || val === void 0) return 0;
+    if (typeof val === "string") return Buffer.byteLength(val, "utf-8");
+    if (typeof val === "number") return 8;
+    if (typeof val === "boolean") return 4;
+    try {
+      return Buffer.byteLength(JSON.stringify(val), "utf-8");
+    } catch {
+      return 0;
+    }
+  }
+};
+var UtilFunctionMetadata = {
+  inspect: {
+    description: "Inspect any value with detailed formatting",
+    parameters: [
+      { name: "value", dataType: "any", description: "Value to inspect", formInputType: "json", required: true },
+      { name: "options", dataType: "object", description: "Options: depth, colors, showHidden, compact, sorted", formInputType: "json", required: false }
+    ],
+    returnType: "string",
+    returnDescription: "Formatted inspection string",
+    example: "util.inspect $obj"
+  },
+  format: {
+    description: "Format a string with substitutions (%s, %d, %j, %o)",
+    parameters: [{ name: "args", dataType: "any", description: "Format string + values", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Formatted string",
+    example: 'util.format "Hello %s, you are %d" "World" 42'
+  },
+  typeOf: {
+    description: "Get the type of a value (null, array, string, number, object, boolean)",
+    parameters: [{ name: "value", dataType: "any", description: "Value to check", formInputType: "json", required: true }],
+    returnType: "string",
+    returnDescription: "Type string",
+    example: "util.typeOf [1,2,3]"
+  },
+  isArray: { description: "Check if value is an array", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if array", example: "util.isArray [1,2]" },
+  isBoolean: { description: "Check if value is boolean", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if boolean", example: "util.isBoolean true" },
+  isNull: { description: "Check if value is null", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if null", example: "util.isNull $val" },
+  isNumber: { description: "Check if value is a number", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if number", example: "util.isNumber 42" },
+  isString: { description: "Check if value is a string", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if string", example: 'util.isString "hello"' },
+  isObject: { description: "Check if value is an object (non-null)", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if object", example: 'util.isObject {"a":1}' },
+  isPrimitive: { description: "Check if value is a primitive", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if primitive", example: "util.isPrimitive 42" },
+  textEncode: {
+    description: "Encode string to UTF-8 bytes (base64)",
+    parameters: [{ name: "text", dataType: "string", description: "Text to encode", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Base64-encoded bytes",
+    example: 'util.textEncode "hello"'
+  },
+  textDecode: {
+    description: "Decode bytes (base64) to string",
+    parameters: [
+      { name: "data", dataType: "string", description: "Base64-encoded data", formInputType: "text", required: true },
+      { name: "encoding", dataType: "string", description: "Encoding (default: utf-8)", formInputType: "text", required: false, defaultValue: "utf-8" }
+    ],
+    returnType: "string",
+    returnDescription: "Decoded string",
+    example: "util.textDecode $data"
+  },
+  deepClone: {
+    description: "Deep clone any value",
+    parameters: [{ name: "value", dataType: "any", description: "Value to clone", formInputType: "json", required: true }],
+    returnType: "any",
+    returnDescription: "Deep cloned value",
+    example: "util.deepClone $obj"
+  },
+  deepEqual: {
+    description: "Deep equality comparison",
+    parameters: [
+      { name: "a", dataType: "any", description: "First value", formInputType: "json", required: true },
+      { name: "b", dataType: "any", description: "Second value", formInputType: "json", required: true }
+    ],
+    returnType: "boolean",
+    returnDescription: "true if deeply equal",
+    example: "util.deepEqual $a $b"
+  },
+  merge: {
+    description: "Shallow merge objects",
+    parameters: [{ name: "objects", dataType: "object", description: "Objects to merge", formInputType: "json", required: true }],
+    returnType: "object",
+    returnDescription: "Merged object",
+    example: "util.merge $a $b $c"
+  },
+  deepMerge: {
+    description: "Deep merge objects (recursive)",
+    parameters: [{ name: "objects", dataType: "object", description: "Objects to merge", formInputType: "json", required: true }],
+    returnType: "object",
+    returnDescription: "Deep merged object",
+    example: "util.deepMerge $a $b"
+  },
+  sizeof: {
+    description: "Estimate byte size of a value",
+    parameters: [{ name: "value", dataType: "any", description: "Value to measure", formInputType: "json", required: true }],
+    returnType: "number",
+    returnDescription: "Approximate byte size",
+    example: 'util.sizeof "hello"'
+  },
+  formatWithOptions: {
+    description: "Format with inspection options",
+    parameters: [
+      { name: "options", dataType: "object", description: "Inspection options", formInputType: "json", required: true },
+      { name: "args", dataType: "any", description: "Format string + values", formInputType: "text", required: true }
+    ],
+    returnType: "string",
+    returnDescription: "Formatted string",
+    example: 'util.formatWithOptions {"colors":true} "value: %s" 42'
+  },
+  isUndefined: { description: "Check if value is undefined", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if undefined", example: "util.isUndefined $val" },
+  isNullOrUndefined: { description: "Check if value is null or undefined", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if null or undefined", example: "util.isNullOrUndefined $val" },
+  isFunction: { description: "Check if value is a function", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if function", example: "util.isFunction $val" },
+  isRegExp: { description: "Check if value is a RegExp", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if RegExp", example: "util.isRegExp $val" },
+  isDate: { description: "Check if value is a Date", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if Date", example: "util.isDate $val" },
+  isError: { description: "Check if value is an Error", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if Error", example: "util.isError $val" },
+  isPromise: { description: "Check if value is a Promise", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if Promise", example: "util.isPromise $val" },
+  isMap: { description: "Check if value is a Map", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if Map", example: "util.isMap $val" },
+  isSet: { description: "Check if value is a Set", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if Set", example: "util.isSet $val" },
+  isTypedArray: { description: "Check if value is a TypedArray", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if TypedArray", example: "util.isTypedArray $val" },
+  isArrayBuffer: { description: "Check if value is an ArrayBuffer", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if ArrayBuffer", example: "util.isArrayBuffer $val" },
+  inherits: { description: "Not needed in RobinPath \u2014 use object composition", parameters: [], returnType: "string", returnDescription: "Info message", example: "util.inherits" },
+  deprecate: {
+    description: "Log a deprecation warning",
+    parameters: [{ name: "message", dataType: "string", description: "Deprecation message", formInputType: "text", required: true }],
+    returnType: "boolean",
+    returnDescription: "true",
+    example: 'util.deprecate "Use newFunc instead"'
+  },
+  callbackify: { description: "Not needed \u2014 RobinPath handles async natively", parameters: [], returnType: "string", returnDescription: "Info message", example: "util.callbackify" }
+};
+var UtilModuleMetadata = {
+  description: "Utilities: inspect, format, type checks, deep clone/merge, text encoding, sizeof",
+  methods: Object.keys(UtilFunctions)
+};
+var util_default = {
+  name: "util",
+  functions: UtilFunctions,
+  functionMetadata: UtilFunctionMetadata,
+  moduleMetadata: UtilModuleMetadata,
+  global: false
+};
+
+// modules/assert.js
+function fail(message) {
+  const err = new Error(message);
+  err.__formattedMessage = message;
+  throw err;
+}
+var AssertFunctions = {
+  ok: (args) => {
+    requireArgs("assert.ok", args, 1);
+    const val = args[0];
+    const msg = args[1] ? toStr(args[1]) : `Expected truthy, got ${JSON.stringify(val)}`;
+    if (!val) fail(msg);
+    return true;
+  },
+  equal: (args) => {
+    requireArgs("assert.equal", args, 2);
+    const actual = args[0];
+    const expected = args[1];
+    const msg = args[2] ? toStr(args[2]) : `Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`;
+    if (actual != expected) fail(msg);
+    return true;
+  },
+  strictEqual: (args) => {
+    requireArgs("assert.strictEqual", args, 2);
+    const actual = args[0];
+    const expected = args[1];
+    const msg = args[2] ? toStr(args[2]) : `Expected strict ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`;
+    if (actual !== expected) fail(msg);
+    return true;
+  },
+  notEqual: (args) => {
+    requireArgs("assert.notEqual", args, 2);
+    const actual = args[0];
+    const expected = args[1];
+    const msg = args[2] ? toStr(args[2]) : `Expected not equal to ${JSON.stringify(expected)}`;
+    if (actual == expected) fail(msg);
+    return true;
+  },
+  deepEqual: (args) => {
+    requireArgs("assert.deepEqual", args, 2);
+    const actual = args[0];
+    const expected = args[1];
+    const msg = args[2] ? toStr(args[2]) : `Deep equal assertion failed`;
+    try {
+      if (JSON.stringify(actual) !== JSON.stringify(expected)) fail(msg);
+    } catch {
+      fail(msg);
+    }
+    return true;
+  },
+  notDeepEqual: (args) => {
+    requireArgs("assert.notDeepEqual", args, 2);
+    const msg = args[2] ? toStr(args[2]) : `Expected objects to not be deeply equal`;
+    try {
+      if (JSON.stringify(args[0]) === JSON.stringify(args[1])) fail(msg);
+    } catch {
+      return true;
+    }
+    return true;
+  },
+  truthy: (args) => {
+    requireArgs("assert.truthy", args, 1);
+    const msg = args[1] ? toStr(args[1]) : `Expected truthy, got ${JSON.stringify(args[0])}`;
+    if (!args[0]) fail(msg);
+    return true;
+  },
+  falsy: (args) => {
+    requireArgs("assert.falsy", args, 1);
+    const msg = args[1] ? toStr(args[1]) : `Expected falsy, got ${JSON.stringify(args[0])}`;
+    if (args[0]) fail(msg);
+    return true;
+  },
+  isNull: (args) => {
+    requireArgs("assert.isNull", args, 1);
+    const msg = args[1] ? toStr(args[1]) : `Expected null, got ${JSON.stringify(args[0])}`;
+    if (args[0] !== null) fail(msg);
+    return true;
+  },
+  isNotNull: (args) => {
+    requireArgs("assert.isNotNull", args, 1);
+    const msg = args[1] ? toStr(args[1]) : `Expected non-null value`;
+    if (args[0] === null) fail(msg);
+    return true;
+  },
+  isType: (args) => {
+    requireArgs("assert.isType", args, 2);
+    const val = args[0];
+    const expectedType = toStr(args[1]);
+    const actualType = val === null ? "null" : Array.isArray(val) ? "array" : typeof val;
+    const msg = args[2] ? toStr(args[2]) : `Expected type ${expectedType}, got ${actualType}`;
+    if (actualType !== expectedType) fail(msg);
+    return true;
+  },
+  contains: (args) => {
+    requireArgs("assert.contains", args, 2);
+    const haystack = args[0];
+    const needle = args[1];
+    const msg = args[2] ? toStr(args[2]) : `Expected to contain ${JSON.stringify(needle)}`;
+    if (typeof haystack === "string") {
+      if (!haystack.includes(toStr(needle))) fail(msg);
+    } else if (Array.isArray(haystack)) {
+      if (!haystack.includes(needle)) fail(msg);
+    } else {
+      fail(`assert.contains: first argument must be string or array`);
+    }
+    return true;
+  },
+  notContains: (args) => {
+    requireArgs("assert.notContains", args, 2);
+    const haystack = args[0];
+    const needle = args[1];
+    const msg = args[2] ? toStr(args[2]) : `Expected to not contain ${JSON.stringify(needle)}`;
+    if (typeof haystack === "string") {
+      if (haystack.includes(toStr(needle))) fail(msg);
+    } else if (Array.isArray(haystack)) {
+      if (haystack.includes(needle)) fail(msg);
+    }
+    return true;
+  },
+  match: (args) => {
+    requireArgs("assert.match", args, 2);
+    const str = toStr(args[0]);
+    const pattern = toStr(args[1]);
+    const msg = args[2] ? toStr(args[2]) : `Expected "${str}" to match ${pattern}`;
+    if (!new RegExp(pattern).test(str)) fail(msg);
+    return true;
+  },
+  notMatch: (args) => {
+    requireArgs("assert.notMatch", args, 2);
+    const str = toStr(args[0]);
+    const pattern = toStr(args[1]);
+    const msg = args[2] ? toStr(args[2]) : `Expected "${str}" to not match ${pattern}`;
+    if (new RegExp(pattern).test(str)) fail(msg);
+    return true;
+  },
+  greaterThan: (args) => {
+    requireArgs("assert.greaterThan", args, 2);
+    const a = Number(args[0]);
+    const b = Number(args[1]);
+    const msg = args[2] ? toStr(args[2]) : `Expected ${a} > ${b}`;
+    if (!(a > b)) fail(msg);
+    return true;
+  },
+  lessThan: (args) => {
+    requireArgs("assert.lessThan", args, 2);
+    const a = Number(args[0]);
+    const b = Number(args[1]);
+    const msg = args[2] ? toStr(args[2]) : `Expected ${a} < ${b}`;
+    if (!(a < b)) fail(msg);
+    return true;
+  },
+  between: (args) => {
+    requireArgs("assert.between", args, 3);
+    const val = Number(args[0]);
+    const min = Number(args[1]);
+    const max = Number(args[2]);
+    const msg = args[3] ? toStr(args[3]) : `Expected ${val} between ${min} and ${max}`;
+    if (val < min || val > max) fail(msg);
+    return true;
+  },
+  lengthOf: (args) => {
+    requireArgs("assert.lengthOf", args, 2);
+    const val = args[0];
+    const expected = Number(args[1]);
+    const actual = typeof val === "string" || Array.isArray(val) ? val.length : Object.keys(val).length;
+    const msg = args[2] ? toStr(args[2]) : `Expected length ${expected}, got ${actual}`;
+    if (actual !== expected) fail(msg);
+    return true;
+  },
+  hasProperty: (args) => {
+    requireArgs("assert.hasProperty", args, 2);
+    const obj = args[0];
+    const prop = toStr(args[1]);
+    const msg = args[2] ? toStr(args[2]) : `Expected object to have property "${prop}"`;
+    if (typeof obj !== "object" || obj === null || !(prop in obj)) fail(msg);
+    return true;
+  },
+  throws: async (args, callback) => {
+    const msg = args[0] ? toStr(args[0]) : "Expected an error to be thrown";
+    if (!callback) fail("assert.throws requires a callback block");
+    try {
+      await callback([]);
+      fail(msg);
+    } catch {
+      return true;
+    }
+  },
+  doesNotThrow: async (args, callback) => {
+    const msg = args[0] ? toStr(args[0]) : "Expected no error to be thrown";
+    if (!callback) fail("assert.doesNotThrow requires a callback block");
+    try {
+      await callback([]);
+      return true;
+    } catch (err) {
+      fail(`${msg}: ${err.message}`);
+    }
+  },
+  fail: (args) => {
+    const msg = args[0] ? toStr(args[0]) : "Assertion failed";
+    fail(msg);
+  }
+};
+var AssertFunctionMetadata = {
+  ok: { description: "Assert value is truthy", parameters: [{ name: "value", dataType: "any", description: "Value to check", formInputType: "json", required: true }, { name: "message", dataType: "string", description: "Error message", formInputType: "text", required: false }], returnType: "boolean", returnDescription: "true if passes", example: "assert.ok $val" },
+  equal: { description: "Assert loose equality (==)", parameters: [{ name: "actual", dataType: "any", description: "Actual value", formInputType: "json", required: true }, { name: "expected", dataType: "any", description: "Expected value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if equal", example: "assert.equal $a $b" },
+  strictEqual: { description: "Assert strict equality (===)", parameters: [{ name: "actual", dataType: "any", description: "Actual", formInputType: "json", required: true }, { name: "expected", dataType: "any", description: "Expected", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if strict equal", example: "assert.strictEqual $a $b" },
+  notEqual: { description: "Assert not equal", parameters: [{ name: "actual", dataType: "any", description: "Actual", formInputType: "json", required: true }, { name: "expected", dataType: "any", description: "Not expected", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if not equal", example: "assert.notEqual $a $b" },
+  deepEqual: { description: "Assert deep equality", parameters: [{ name: "actual", dataType: "any", description: "Actual", formInputType: "json", required: true }, { name: "expected", dataType: "any", description: "Expected", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if deeply equal", example: "assert.deepEqual $a $b" },
+  truthy: { description: "Assert truthy", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true", example: "assert.truthy $val" },
+  falsy: { description: "Assert falsy", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true", example: "assert.falsy $val" },
+  isNull: { description: "Assert null", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if null", example: "assert.isNull $val" },
+  isNotNull: { description: "Assert not null", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if not null", example: "assert.isNotNull $val" },
+  isType: { description: "Assert value type", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }, { name: "type", dataType: "string", description: "Expected type", formInputType: "text", required: true }], returnType: "boolean", returnDescription: "true if type matches", example: 'assert.isType $val "string"' },
+  contains: { description: "Assert string/array contains value", parameters: [{ name: "haystack", dataType: "any", description: "String or array", formInputType: "json", required: true }, { name: "needle", dataType: "any", description: "Value to find", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if contains", example: 'assert.contains "hello world" "world"' },
+  match: { description: "Assert string matches regex", parameters: [{ name: "string", dataType: "string", description: "String to test", formInputType: "text", required: true }, { name: "pattern", dataType: "string", description: "Regex pattern", formInputType: "text", required: true }], returnType: "boolean", returnDescription: "true if matches", example: 'assert.match "hello" "^he"' },
+  greaterThan: { description: "Assert a > b", parameters: [{ name: "a", dataType: "number", description: "Value", formInputType: "number", required: true }, { name: "b", dataType: "number", description: "Comparison", formInputType: "number", required: true }], returnType: "boolean", returnDescription: "true if a > b", example: "assert.greaterThan 5 3" },
+  lessThan: { description: "Assert a < b", parameters: [{ name: "a", dataType: "number", description: "Value", formInputType: "number", required: true }, { name: "b", dataType: "number", description: "Comparison", formInputType: "number", required: true }], returnType: "boolean", returnDescription: "true if a < b", example: "assert.lessThan 3 5" },
+  between: { description: "Assert value is between min and max", parameters: [{ name: "value", dataType: "number", description: "Value", formInputType: "number", required: true }, { name: "min", dataType: "number", description: "Minimum", formInputType: "number", required: true }, { name: "max", dataType: "number", description: "Maximum", formInputType: "number", required: true }], returnType: "boolean", returnDescription: "true if in range", example: "assert.between 5 1 10" },
+  lengthOf: { description: "Assert length of string/array/object", parameters: [{ name: "value", dataType: "any", description: "Value", formInputType: "json", required: true }, { name: "length", dataType: "number", description: "Expected length", formInputType: "number", required: true }], returnType: "boolean", returnDescription: "true if length matches", example: "assert.lengthOf [1,2,3] 3" },
+  hasProperty: { description: "Assert object has a property", parameters: [{ name: "object", dataType: "object", description: "Object", formInputType: "json", required: true }, { name: "property", dataType: "string", description: "Property name", formInputType: "text", required: true }], returnType: "boolean", returnDescription: "true if has property", example: 'assert.hasProperty $obj "name"' },
+  notDeepEqual: { description: "Assert not deeply equal", parameters: [{ name: "actual", dataType: "any", description: "Actual", formInputType: "json", required: true }, { name: "expected", dataType: "any", description: "Not expected", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if not deeply equal", example: "assert.notDeepEqual $a $b" },
+  notContains: { description: "Assert string/array does not contain value", parameters: [{ name: "haystack", dataType: "any", description: "String or array", formInputType: "json", required: true }, { name: "needle", dataType: "any", description: "Value to check absence", formInputType: "json", required: true }], returnType: "boolean", returnDescription: "true if not contains", example: 'assert.notContains "hello" "xyz"' },
+  notMatch: { description: "Assert string does not match regex", parameters: [{ name: "string", dataType: "string", description: "String to test", formInputType: "text", required: true }, { name: "pattern", dataType: "string", description: "Regex pattern", formInputType: "text", required: true }], returnType: "boolean", returnDescription: "true if not matches", example: 'assert.notMatch "hello" "^xyz"' },
+  throws: { description: "Assert callback throws an error", parameters: [{ name: "message", dataType: "string", description: "Error message if no throw", formInputType: "text", required: false }], returnType: "boolean", returnDescription: "true if threw", example: 'assert.throws "Should error"' },
+  doesNotThrow: { description: "Assert callback does not throw", parameters: [{ name: "message", dataType: "string", description: "Error message if throws", formInputType: "text", required: false }], returnType: "boolean", returnDescription: "true if no throw", example: 'assert.doesNotThrow "Should not error"' },
+  fail: { description: "Force assertion failure", parameters: [{ name: "message", dataType: "string", description: "Failure message", formInputType: "text", required: false }], returnType: "null", returnDescription: "Always throws", example: 'assert.fail "Not implemented"' }
+};
+var AssertModuleMetadata = {
+  description: "Assertions: equal, deepEqual, truthy, falsy, contains, match, greaterThan, throws, and more",
+  methods: Object.keys(AssertFunctions)
+};
+var assert_default = {
+  name: "assert",
+  functions: AssertFunctions,
+  functionMetadata: AssertFunctionMetadata,
+  moduleMetadata: AssertModuleMetadata,
+  global: false
+};
+
+// modules/string_decoder.js
+var import_node_string_decoder = require("node:string_decoder");
+var _decoders = /* @__PURE__ */ new Map();
+var _nextId8 = 1;
+var StringDecoderFunctions = {
+  create: (args) => {
+    const encoding = toStr(args[0], "utf-8");
+    const id = `decoder_${_nextId8++}`;
+    _decoders.set(id, new import_node_string_decoder.StringDecoder(encoding));
+    return id;
+  },
+  write: (args) => {
+    requireArgs("stringDecoder.write", args, 2);
+    const id = toStr(args[0]);
+    const decoder = _decoders.get(id);
+    if (!decoder) throw new Error(`stringDecoder.write: decoder ${id} not found`);
+    const buf = Buffer.from(toStr(args[1]), "base64");
+    return decoder.write(buf);
+  },
+  end: (args) => {
+    requireArgs("stringDecoder.end", args, 1);
+    const id = toStr(args[0]);
+    const decoder = _decoders.get(id);
+    if (!decoder) throw new Error(`stringDecoder.end: decoder ${id} not found`);
+    const result = decoder.end();
+    _decoders.delete(id);
+    return result;
+  },
+  decode: (args) => {
+    requireArgs("stringDecoder.decode", args, 1);
+    const encoding = toStr(args[1], "utf-8");
+    const buf = Buffer.from(toStr(args[0]), "base64");
+    const decoder = new import_node_string_decoder.StringDecoder(encoding);
+    return decoder.write(buf) + decoder.end();
+  },
+  destroy: (args) => {
+    requireArgs("stringDecoder.destroy", args, 1);
+    const id = toStr(args[0]);
+    if (_decoders.has(id)) {
+      _decoders.delete(id);
+      return true;
+    }
+    return false;
+  },
+  active: () => Array.from(_decoders.keys())
+};
+var StringDecoderFunctionMetadata = {
+  create: {
+    description: "Create a string decoder for an encoding",
+    parameters: [{ name: "encoding", dataType: "string", description: "Encoding (utf-8, ascii, base64, hex, etc.)", formInputType: "text", required: false, defaultValue: "utf-8" }],
+    returnType: "string",
+    returnDescription: "Decoder handle ID",
+    example: 'stringDecoder.create "utf-8"'
+  },
+  write: {
+    description: "Write buffer data through decoder",
+    parameters: [
+      { name: "decoderId", dataType: "string", description: "Decoder handle", formInputType: "text", required: true },
+      { name: "buffer", dataType: "string", description: "Base64-encoded buffer data", formInputType: "text", required: true }
+    ],
+    returnType: "string",
+    returnDescription: "Decoded string",
+    example: "stringDecoder.write $dec $buf"
+  },
+  end: {
+    description: "Flush remaining bytes and close decoder",
+    parameters: [{ name: "decoderId", dataType: "string", description: "Decoder handle", formInputType: "text", required: true }],
+    returnType: "string",
+    returnDescription: "Any remaining decoded bytes",
+    example: "stringDecoder.end $dec"
+  },
+  decode: {
+    description: "One-shot decode: buffer to string",
+    parameters: [
+      { name: "buffer", dataType: "string", description: "Base64-encoded buffer", formInputType: "text", required: true },
+      { name: "encoding", dataType: "string", description: "Encoding (default: utf-8)", formInputType: "text", required: false, defaultValue: "utf-8" }
+    ],
+    returnType: "string",
+    returnDescription: "Decoded string",
+    example: 'stringDecoder.decode $buf "utf-8"'
+  },
+  destroy: {
+    description: "Destroy a decoder",
+    parameters: [{ name: "decoderId", dataType: "string", description: "Decoder handle", formInputType: "text", required: true }],
+    returnType: "boolean",
+    returnDescription: "true if destroyed",
+    example: "stringDecoder.destroy $dec"
+  },
+  active: { description: "List active decoders", parameters: [], returnType: "array", returnDescription: "Array of decoder IDs", example: "stringDecoder.active" }
+};
+var StringDecoderModuleMetadata = {
+  description: "String decoder: convert Buffer sequences to strings with multi-byte character handling",
+  methods: Object.keys(StringDecoderFunctions)
+};
+var string_decoder_default = {
+  name: "stringDecoder",
+  functions: StringDecoderFunctions,
+  functionMetadata: StringDecoderFunctionMetadata,
+  moduleMetadata: StringDecoderModuleMetadata,
+  global: false
+};
+
+// modules/tty.js
+var import_node_tty = require("node:tty");
+var TtyFunctions = {
+  isatty: (args) => {
+    requireArgs("tty.isatty", args, 1);
+    const fd = toNum(args[0], 1);
+    return (0, import_node_tty.isatty)(fd);
+  },
+  isStdinTTY: () => process.stdin?.isTTY === true,
+  isStdoutTTY: () => process.stdout?.isTTY === true,
+  isStderrTTY: () => process.stderr?.isTTY === true,
+  columns: () => process.stdout?.columns || 80,
+  rows: () => process.stdout?.rows || 24,
+  size: () => ({
+    columns: process.stdout?.columns || 80,
+    rows: process.stdout?.rows || 24
+  }),
+  hasColors: (args) => {
+    const count = args[0] ? toNum(args[0], 16) : 16;
+    if (process.stdout?.hasColors) {
+      return process.stdout.hasColors(count);
+    }
+    const env = process.env;
+    if (env.NO_COLOR) return false;
+    if (env.FORCE_COLOR) return true;
+    if (env.TERM === "dumb") return false;
+    if (process.platform === "win32") return true;
+    if (env.CI) return true;
+    if (env.COLORTERM === "truecolor" || env.COLORTERM === "24bit") return count <= 16777216;
+    if (env.TERM_PROGRAM === "iTerm.app") return count <= 256;
+    if (/256color/i.test(env.TERM || "")) return count <= 256;
+    return count <= 16;
+  },
+  colorDepth: () => {
+    if (process.stdout?.getColorDepth) {
+      return process.stdout.getColorDepth();
+    }
+    const env = process.env;
+    if (env.NO_COLOR) return 1;
+    if (env.COLORTERM === "truecolor" || env.COLORTERM === "24bit") return 24;
+    if (process.platform === "win32") return 4;
+    if (/256color/i.test(env.TERM || "")) return 8;
+    return 4;
+  },
+  supportsColor: () => {
+    const env = process.env;
+    if (env.NO_COLOR) return false;
+    if (env.FORCE_COLOR) return true;
+    if (env.TERM === "dumb") return false;
+    if (process.platform === "win32") return true;
+    if (process.stdout?.isTTY) return true;
+    if (env.CI) return true;
+    return false;
+  },
+  getWindowSize: () => {
+    if (process.stdout?.getWindowSize) {
+      const [cols, rows] = process.stdout.getWindowSize();
+      return { columns: cols, rows };
+    }
+    return {
+      columns: process.stdout?.columns || 80,
+      rows: process.stdout?.rows || 24
+    };
+  },
+  clearLine: (args) => {
+    const dir = args[0] ? toNum(args[0], 0) : 0;
+    if (process.stdout?.clearLine) {
+      process.stdout.clearLine(dir);
+      return true;
+    }
+    return false;
+  },
+  cursorTo: (args) => {
+    requireArgs("tty.cursorTo", args, 1);
+    const x = toNum(args[0], 0);
+    const y = args[1] != null ? toNum(args[1]) : void 0;
+    if (process.stdout?.cursorTo) {
+      process.stdout.cursorTo(x, y);
+      return true;
+    }
+    return false;
+  },
+  moveCursor: (args) => {
+    requireArgs("tty.moveCursor", args, 2);
+    const dx = toNum(args[0], 0);
+    const dy = toNum(args[1], 0);
+    if (process.stdout?.moveCursor) {
+      process.stdout.moveCursor(dx, dy);
+      return true;
+    }
+    return false;
+  }
+};
+var TtyFunctionMetadata = {
+  isatty: {
+    description: "Check if a file descriptor is a TTY",
+    parameters: [{ name: "fd", dataType: "number", description: "File descriptor (0=stdin, 1=stdout, 2=stderr)", formInputType: "number", required: true }],
+    returnType: "boolean",
+    returnDescription: "true if TTY",
+    example: "tty.isatty 1"
+  },
+  isStdinTTY: { description: "Check if stdin is a TTY", parameters: [], returnType: "boolean", returnDescription: "true if TTY", example: "tty.isStdinTTY" },
+  isStdoutTTY: { description: "Check if stdout is a TTY", parameters: [], returnType: "boolean", returnDescription: "true if TTY", example: "tty.isStdoutTTY" },
+  isStderrTTY: { description: "Check if stderr is a TTY", parameters: [], returnType: "boolean", returnDescription: "true if TTY", example: "tty.isStderrTTY" },
+  columns: { description: "Get terminal width in columns", parameters: [], returnType: "number", returnDescription: "Column count", example: "tty.columns" },
+  rows: { description: "Get terminal height in rows", parameters: [], returnType: "number", returnDescription: "Row count", example: "tty.rows" },
+  size: { description: "Get terminal size {columns, rows}", parameters: [], returnType: "object", returnDescription: "{columns, rows}", example: "tty.size" },
+  hasColors: {
+    description: "Check if terminal supports N colors",
+    parameters: [{ name: "count", dataType: "number", description: "Number of colors to check (default: 16)", formInputType: "number", required: false, defaultValue: "16" }],
+    returnType: "boolean",
+    returnDescription: "true if supported",
+    example: "tty.hasColors 256"
+  },
+  colorDepth: { description: "Get terminal color depth in bits", parameters: [], returnType: "number", returnDescription: "Color depth (1, 4, 8, or 24)", example: "tty.colorDepth" },
+  supportsColor: { description: "Check if terminal supports color output", parameters: [], returnType: "boolean", returnDescription: "true if color supported", example: "tty.supportsColor" },
+  getWindowSize: { description: "Get terminal window size", parameters: [], returnType: "object", returnDescription: "{columns, rows}", example: "tty.getWindowSize" },
+  clearLine: {
+    description: "Clear the current terminal line",
+    parameters: [{ name: "direction", dataType: "number", description: "-1=left, 0=entire, 1=right", formInputType: "number", required: false, defaultValue: "0" }],
+    returnType: "boolean",
+    returnDescription: "true if cleared",
+    example: "tty.clearLine 0"
+  },
+  cursorTo: {
+    description: "Move cursor to position",
+    parameters: [
+      { name: "x", dataType: "number", description: "Column position", formInputType: "number", required: true },
+      { name: "y", dataType: "number", description: "Row position", formInputType: "number", required: false }
+    ],
+    returnType: "boolean",
+    returnDescription: "true if moved",
+    example: "tty.cursorTo 0 5"
+  },
+  moveCursor: {
+    description: "Move cursor relative to current position",
+    parameters: [
+      { name: "dx", dataType: "number", description: "Horizontal offset", formInputType: "number", required: true },
+      { name: "dy", dataType: "number", description: "Vertical offset", formInputType: "number", required: true }
+    ],
+    returnType: "boolean",
+    returnDescription: "true if moved",
+    example: "tty.moveCursor 1 -1"
+  }
+};
+var TtyModuleMetadata = {
+  description: "TTY: terminal detection, color support, cursor control, window size",
+  methods: Object.keys(TtyFunctions)
+};
+var tty_default = {
+  name: "tty",
+  functions: TtyFunctions,
+  functionMetadata: TtyFunctionMetadata,
+  moduleMetadata: TtyModuleMetadata,
+  global: false
+};
+
+// modules/index.js
+var nativeModules = [
+  // Phase 1: Core System
+  file_default,
+  path_default,
+  process_default,
+  os_default,
+  // Phase 2: Data & Security
+  crypto_default,
+  buffer_default,
+  url_default,
+  child_default,
+  timer_default,
+  // Phase 3a: Networking & I/O
+  http_default,
+  net_default,
+  dns_default,
+  events_default,
+  zlib_default,
+  // Phase 3b: Streams, TLS & Utilities
+  stream_default,
+  tls_default,
+  util_default,
+  assert_default,
+  string_decoder_default,
+  tty_default
+  // Phase 4
+  // ArchiveModule,
+  // EmailModule,
+  // BarcodeModule,
+  // PdfModule,
+  // ExcelModule,
+];
+
 // cli-entry.js
+var CLI_VERSION = true ? "1.42.0" : "1.42.0";
 var FLAG_QUIET = false;
 var FLAG_VERBOSE = false;
 function log(...args) {
@@ -13886,19 +18379,26 @@ var color = {
   cyan: (s) => isTTY ? `\x1B[36m${s}\x1B[0m` : s
 };
 function getInstallDir() {
-  return (0, import_node_path.join)((0, import_node_os.homedir)(), ".robinpath", "bin");
+  return (0, import_node_path4.join)((0, import_node_os3.homedir)(), ".robinpath", "bin");
 }
 function getRobinPathHome() {
-  return (0, import_node_path.join)((0, import_node_os.homedir)(), ".robinpath");
+  return (0, import_node_path4.join)((0, import_node_os3.homedir)(), ".robinpath");
+}
+var MODULES_DIR = (0, import_node_path4.join)((0, import_node_os3.homedir)(), ".robinpath", "modules");
+var MODULES_MANIFEST = (0, import_node_path4.join)(MODULES_DIR, "modules.json");
+var CACHE_DIR = (0, import_node_path4.join)((0, import_node_os3.homedir)(), ".robinpath", "cache");
+function toTarPath(p) {
+  if (process.platform !== "win32") return p;
+  return p.replace(/\\/g, "/").replace(/^([A-Za-z]):/, (_2, d2) => "/" + d2.toLowerCase());
 }
 async function checkForUpdates() {
   try {
-    const res = await fetch("https://api.github.com/repos/nabivogedu/robinpath-cli/releases/latest");
+    const res = await fetch("https://api.github.com/repos/wiredwp/robinpath-cli/releases/latest");
     const data = await res.json();
     const latest = data.tag_name.replace("v", "");
-    if (latest !== Sn) {
+    if (latest !== CLI_VERSION) {
       console.log(`
-${color.yellow("\u26A1")} New version available: ${color.green("v" + latest)} (you have v${Sn})`);
+${color.yellow("\u26A1")} New version available: ${color.green("v" + latest)} (you have v${CLI_VERSION})`);
       console.log(`   Run ${color.cyan("robinpath update")} to upgrade
 `);
     }
@@ -13906,13 +18406,13 @@ ${color.yellow("\u26A1")} New version available: ${color.green("v" + latest)} (y
   }
 }
 function handleUpdate() {
-  const isWindows = (0, import_node_os.platform)() === "win32";
-  log(`Updating RobinPath...`);
+  const isWindows = (0, import_node_os3.platform)() === "win32";
+  const env = { ...process.env, ROBINPATH_CURRENT_VERSION: CLI_VERSION };
   try {
     if (isWindows) {
-      (0, import_node_child_process.execSync)('powershell -NoProfile -Command "irm https://dev.robinpath.com/install.ps1 | iex"', { stdio: "inherit" });
+      (0, import_node_child_process2.execSync)('powershell -NoProfile -Command "irm https://dev.robinpath.com/install.ps1 | iex"', { stdio: "inherit", env });
     } else {
-      (0, import_node_child_process.execSync)("curl -fsSL https://dev.robinpath.com/install.sh | sh", { stdio: "inherit" });
+      (0, import_node_child_process2.execSync)("curl -fsSL https://dev.robinpath.com/install.sh | sh", { stdio: "inherit", env });
     }
   } catch (err) {
     console.error(color.red("Update failed:") + ` ${err.message}`);
@@ -13921,34 +18421,34 @@ function handleUpdate() {
 }
 function handleInstall() {
   const installDir = getInstallDir();
-  const isWindows = (0, import_node_os.platform)() === "win32";
+  const isWindows = (0, import_node_os3.platform)() === "win32";
   const exeName = isWindows ? "robinpath.exe" : "robinpath";
   const rpName = isWindows ? "rp.exe" : "rp";
-  const dest = (0, import_node_path.join)(installDir, exeName);
-  const rpDest = (0, import_node_path.join)(installDir, rpName);
+  const dest = (0, import_node_path4.join)(installDir, exeName);
+  const rpDest = (0, import_node_path4.join)(installDir, rpName);
   const src = process.execPath;
-  if ((0, import_node_path.resolve)(src) === (0, import_node_path.resolve)(dest)) {
-    log(`robinpath v${Sn} is already installed.`);
+  if ((0, import_node_path4.resolve)(src) === (0, import_node_path4.resolve)(dest)) {
+    log(`robinpath v${CLI_VERSION} is already installed.`);
     return;
   }
-  (0, import_node_fs.mkdirSync)(installDir, { recursive: true });
-  (0, import_node_fs.copyFileSync)(src, dest);
-  (0, import_node_fs.copyFileSync)(src, rpDest);
+  (0, import_node_fs3.mkdirSync)(installDir, { recursive: true });
+  (0, import_node_fs3.copyFileSync)(src, dest);
+  (0, import_node_fs3.copyFileSync)(src, rpDest);
   if (!isWindows) {
     try {
-      (0, import_node_fs.chmodSync)(dest, 493);
-      (0, import_node_fs.chmodSync)(rpDest, 493);
+      (0, import_node_fs3.chmodSync)(dest, 493);
+      (0, import_node_fs3.chmodSync)(rpDest, 493);
     } catch {
     }
   }
   if (isWindows) {
     try {
-      const checkPath = (0, import_node_child_process.execSync)(
+      const checkPath = (0, import_node_child_process2.execSync)(
         `powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('Path','User')"`,
         { encoding: "utf-8" }
       ).trim();
       if (!checkPath.includes(installDir)) {
-        (0, import_node_child_process.execSync)(
+        (0, import_node_child_process2.execSync)(
           `powershell -NoProfile -Command "[Environment]::SetEnvironmentVariable('Path','${installDir};' + [Environment]::GetEnvironmentVariable('Path','User'),'User')"`,
           { encoding: "utf-8" }
         );
@@ -13964,7 +18464,7 @@ function handleInstall() {
     log(`  ${exportLine}`);
   }
   log("");
-  log(`Installed robinpath v${Sn}`);
+  log(`Installed robinpath v${CLI_VERSION}`);
   log(`Location: ${dest}`);
   log(`Alias:    ${rpDest} (use "rp" as shorthand)`);
   log("");
@@ -13974,16 +18474,16 @@ function handleInstall() {
 function handleUninstall() {
   const installDir = getInstallDir();
   const robinpathHome = getRobinPathHome();
-  const isWindows = (0, import_node_os.platform)() === "win32";
-  if ((0, import_node_fs.existsSync)(robinpathHome)) {
-    (0, import_node_fs.rmSync)(robinpathHome, { recursive: true, force: true });
+  const isWindows = (0, import_node_os3.platform)() === "win32";
+  if ((0, import_node_fs3.existsSync)(robinpathHome)) {
+    (0, import_node_fs3.rmSync)(robinpathHome, { recursive: true, force: true });
     log(`Removed ${robinpathHome}`);
   } else {
     log("Nothing to remove.");
   }
   if (isWindows) {
     try {
-      (0, import_node_child_process.execSync)(
+      (0, import_node_child_process2.execSync)(
         `powershell -NoProfile -Command "$p = [Environment]::GetEnvironmentVariable('Path','User'); $clean = ($p -split ';' | Where-Object { $_ -notlike '*\\.robinpath\\bin*' }) -join ';'; [Environment]::SetEnvironmentVariable('Path',$clean,'User')"`,
         { encoding: "utf-8" }
       );
@@ -13999,13 +18499,13 @@ function handleUninstall() {
   log("RobinPath uninstalled. Restart your terminal.");
 }
 function resolveScriptPath(fileArg) {
-  const filePath = (0, import_node_path.resolve)(fileArg);
-  if ((0, import_node_fs.existsSync)(filePath)) return filePath;
-  if (!(0, import_node_path.extname)(filePath)) {
+  const filePath = (0, import_node_path4.resolve)(fileArg);
+  if ((0, import_node_fs3.existsSync)(filePath)) return filePath;
+  if (!(0, import_node_path4.extname)(filePath)) {
     const rpPath = filePath + ".rp";
-    if ((0, import_node_fs.existsSync)(rpPath)) return rpPath;
+    if ((0, import_node_fs3.existsSync)(rpPath)) return rpPath;
     const robinPath = filePath + ".robin";
-    if ((0, import_node_fs.existsSync)(robinPath)) return robinPath;
+    if ((0, import_node_fs3.existsSync)(robinPath)) return robinPath;
   }
   return null;
 }
@@ -14027,7 +18527,7 @@ function displayError(error, script) {
   console.error(color.red("Error:") + " " + error.message);
 }
 async function runScript(script, filePath) {
-  const rp = new xe();
+  const rp = await createRobinPath();
   const startTime = FLAG_VERBOSE ? performance.now() : 0;
   try {
     await rp.executeScript(script);
@@ -14042,27 +18542,27 @@ async function runScript(script, filePath) {
   }
 }
 function readStdin() {
-  return new Promise((resolve2) => {
+  return new Promise((resolve5) => {
     let data = "";
     process.stdin.setEncoding("utf-8");
     process.stdin.on("data", (chunk) => {
       data += chunk;
     });
     process.stdin.on("end", () => {
-      resolve2(data);
+      resolve5(data);
     });
   });
 }
 var CLOUD_URL = process.env.ROBINPATH_CLOUD_URL || "https://dev.robinpath.com";
 var PLATFORM_URL = process.env.ROBINPATH_PLATFORM_URL || "https://robinpath-platform.nabivogedu.workers.dev";
 function getAuthPath() {
-  return (0, import_node_path.join)((0, import_node_os.homedir)(), ".robinpath", "auth.json");
+  return (0, import_node_path4.join)((0, import_node_os3.homedir)(), ".robinpath", "auth.json");
 }
 function readAuth() {
   try {
     const authPath = getAuthPath();
-    if (!(0, import_node_fs.existsSync)(authPath)) return null;
-    const data = JSON.parse((0, import_node_fs.readFileSync)(authPath, "utf-8"));
+    if (!(0, import_node_fs3.existsSync)(authPath)) return null;
+    const data = JSON.parse((0, import_node_fs3.readFileSync)(authPath, "utf-8"));
     if (!data.token) return null;
     return data;
   } catch {
@@ -14071,22 +18571,22 @@ function readAuth() {
 }
 function writeAuth(data) {
   const authPath = getAuthPath();
-  const dir = (0, import_node_path.dirname)(authPath);
-  if (!(0, import_node_fs.existsSync)(dir)) {
-    (0, import_node_fs.mkdirSync)(dir, { recursive: true });
+  const dir = (0, import_node_path4.dirname)(authPath);
+  if (!(0, import_node_fs3.existsSync)(dir)) {
+    (0, import_node_fs3.mkdirSync)(dir, { recursive: true });
   }
-  (0, import_node_fs.writeFileSync)(authPath, JSON.stringify(data, null, 2), "utf-8");
-  if ((0, import_node_os.platform)() !== "win32") {
+  (0, import_node_fs3.writeFileSync)(authPath, JSON.stringify(data, null, 2), "utf-8");
+  if ((0, import_node_os3.platform)() !== "win32") {
     try {
-      (0, import_node_fs.chmodSync)(authPath, 384);
+      (0, import_node_fs3.chmodSync)(authPath, 384);
     } catch {
     }
   }
 }
 function removeAuth() {
   const authPath = getAuthPath();
-  if ((0, import_node_fs.existsSync)(authPath)) {
-    (0, import_node_fs.unlinkSync)(authPath);
+  if ((0, import_node_fs3.existsSync)(authPath)) {
+    (0, import_node_fs3.unlinkSync)(authPath);
   }
 }
 function getAuthToken() {
@@ -14112,15 +18612,122 @@ async function platformFetch(path, opts = {}) {
   const res = await fetch(url, { ...opts, headers });
   return res;
 }
+function readModulesManifest() {
+  try {
+    if (!(0, import_node_fs3.existsSync)(MODULES_MANIFEST)) return {};
+    return JSON.parse((0, import_node_fs3.readFileSync)(MODULES_MANIFEST, "utf-8"));
+  } catch {
+    return {};
+  }
+}
+function writeModulesManifest(manifest) {
+  if (!(0, import_node_fs3.existsSync)(MODULES_DIR)) {
+    (0, import_node_fs3.mkdirSync)(MODULES_DIR, { recursive: true });
+  }
+  (0, import_node_fs3.writeFileSync)(MODULES_MANIFEST, JSON.stringify(manifest, null, 2), "utf-8");
+}
+function getModulePath(packageName) {
+  return (0, import_node_path4.join)(MODULES_DIR, ...packageName.split("/"));
+}
+function parsePackageSpec(spec) {
+  if (!spec) return null;
+  let fullName, version = null;
+  if (spec.startsWith("@")) {
+    const lastAt = spec.lastIndexOf("@");
+    if (lastAt > 0 && spec.indexOf("/") < lastAt) {
+      fullName = spec.slice(0, lastAt);
+      version = spec.slice(lastAt + 1);
+    } else {
+      fullName = spec;
+    }
+  } else {
+    const atIdx = spec.indexOf("@");
+    if (atIdx > 0) {
+      fullName = spec.slice(0, atIdx);
+      version = spec.slice(atIdx + 1);
+    } else {
+      fullName = spec;
+    }
+  }
+  let scope, name;
+  if (fullName.startsWith("@") && fullName.includes("/")) {
+    const parts = fullName.slice(1).split("/");
+    scope = parts[0];
+    name = parts.slice(1).join("/");
+  } else {
+    scope = null;
+    name = fullName;
+  }
+  return { scope, name, fullName, version };
+}
+async function loadInstalledModules(rp) {
+  const manifest = readModulesManifest();
+  const entries = Object.entries(manifest);
+  if (entries.length === 0) return;
+  for (const [packageName, info] of entries) {
+    try {
+      const modDir = getModulePath(packageName);
+      let entryPoint = "dist/index.js";
+      const pkgJsonPath = (0, import_node_path4.join)(modDir, "package.json");
+      if ((0, import_node_fs3.existsSync)(pkgJsonPath)) {
+        try {
+          const pkg = JSON.parse((0, import_node_fs3.readFileSync)(pkgJsonPath, "utf-8"));
+          if (pkg.main) entryPoint = pkg.main;
+        } catch {
+        }
+      }
+      const modulePath = (0, import_node_path4.join)(modDir, entryPoint);
+      if (!(0, import_node_fs3.existsSync)(modulePath)) {
+        if (FLAG_VERBOSE) logVerbose(`Module ${packageName}: entry not found at ${entryPoint}, skipping`);
+        continue;
+      }
+      const mod = await import((0, import_node_url.pathToFileURL)(modulePath).href);
+      const adapter = mod.default;
+      if (!adapter || !adapter.name || !adapter.functions) {
+        if (FLAG_VERBOSE) logVerbose(`Module ${packageName}: invalid ModuleAdapter, skipping`);
+        continue;
+      }
+      rp.registerModule(adapter.name, adapter.functions);
+      if (adapter.functionMetadata) {
+        rp.registerModuleMeta(adapter.name, adapter.functionMetadata);
+      }
+      if (adapter.moduleMetadata) {
+        rp.registerModuleInfo(adapter.name, adapter.moduleMetadata);
+      }
+      if (adapter.global === true) {
+        for (const [funcName, handler] of Object.entries(adapter.functions)) {
+          rp.registerBuiltin(funcName, handler);
+        }
+      }
+      if (FLAG_VERBOSE) logVerbose(`Loaded module: ${packageName}@${info.version}`);
+    } catch (err) {
+      console.error(color.yellow("Warning:") + ` Failed to load module ${packageName}: ${err.message}`);
+    }
+  }
+}
+async function createRobinPath(opts) {
+  const rp = new xe(opts);
+  for (const mod of nativeModules) {
+    rp.registerModule(mod.name, mod.functions);
+    if (mod.functionMetadata) {
+      rp.registerModuleMeta(mod.name, mod.functionMetadata);
+    }
+    if (mod.moduleMetadata) {
+      rp.registerModuleInfo(mod.name, mod.moduleMetadata);
+    }
+  }
+  await loadInstalledModules(rp);
+  return rp;
+}
 function openBrowser(url) {
-  const plat = (0, import_node_os.platform)();
+  const plat = (0, import_node_os3.platform)();
   try {
     if (plat === "win32") {
-      (0, import_node_child_process.execSync)(`start "" "${url}"`, { stdio: "ignore" });
+      (0, import_node_child_process2.execSync)(`start "" "${url}"`, { stdio: "ignore" });
     } else if (plat === "darwin") {
-      (0, import_node_child_process.execSync)(`open "${url}"`, { stdio: "ignore" });
+      (0, import_node_child_process2.execSync)(`open "${url}"`, { stdio: "ignore" });
     } else {
-      (0, import_node_child_process.execSync)(`xdg-open "${url}"`, { stdio: "ignore" });
+      (0, import_node_child_process2.execSync)(`xdg-open "${url}"`, { stdio: "ignore" });
     }
   } catch {
     log(color.yellow("Could not open browser automatically."));
@@ -14147,7 +18754,7 @@ async function handleLogin() {
     return;
   }
   return new Promise((resolveLogin) => {
-    const server = (0, import_node_http.createServer)((req, res) => {
+    const server = (0, import_node_http2.createServer)((req, res) => {
       const url = new URL(req.url, `http://localhost`);
       if (url.pathname !== "/callback") {
         res.writeHead(404);
@@ -14229,7 +18836,16 @@ async function handleWhoami() {
   log(color.bold("Local credentials:"));
   log(`  Email:   ${auth.email || color.dim("(none)")}`);
   log(`  Name:    ${auth.name || color.dim("(none)")}`);
-  log(`  Expires: ${auth.expiresAt ? new Date(auth.expiresAt * 1e3).toLocaleDateString() : color.dim("(unknown)")}`);
+  if (auth.expiresAt) {
+    const msLeft = auth.expiresAt * 1e3 - Date.now();
+    const daysLeft = Math.floor(msLeft / (1e3 * 60 * 60 * 24));
+    const hoursLeft = Math.floor(msLeft % (1e3 * 60 * 60 * 24) / (1e3 * 60 * 60));
+    const expiryDate = new Date(auth.expiresAt * 1e3).toLocaleDateString();
+    const remaining = daysLeft > 0 ? `${daysLeft}d ${hoursLeft}h remaining` : `${hoursLeft}h remaining`;
+    log(`  Expires: ${expiryDate} (${remaining})`);
+  } else {
+    log(`  Expires: ${color.dim("(unknown)")}`);
+  }
   try {
     const res = await platformFetch("/v1/me");
     if (res.ok) {
@@ -14251,16 +18867,17 @@ async function handleWhoami() {
 }
 async function handlePublish(args) {
   const token = requireAuth();
-  const targetArg = args.find((a) => !a.startsWith("-")) || ".";
-  const targetDir = (0, import_node_path.resolve)(targetArg);
-  const pkgPath = (0, import_node_path.join)(targetDir, "package.json");
-  if (!(0, import_node_fs.existsSync)(pkgPath)) {
+  const isDryRun = args.includes("--dry-run");
+  const targetArg = args.find((a) => !a.startsWith("-") && !a.startsWith("--org")) || ".";
+  const targetDir = (0, import_node_path4.resolve)(targetArg);
+  const pkgPath = (0, import_node_path4.join)(targetDir, "package.json");
+  if (!(0, import_node_fs3.existsSync)(pkgPath)) {
     console.error(color.red("Error:") + ` No package.json found in ${targetDir}`);
     process.exit(2);
   }
   let pkg;
   try {
-    pkg = JSON.parse((0, import_node_fs.readFileSync)(pkgPath, "utf-8"));
+    pkg = JSON.parse((0, import_node_fs3.readFileSync)(pkgPath, "utf-8"));
   } catch (err) {
     console.error(color.red("Error:") + ` Invalid package.json: ${err.message}`);
     process.exit(2);
@@ -14273,6 +18890,25 @@ async function handlePublish(args) {
     console.error(color.red("Error:") + ' package.json is missing "version" field');
     process.exit(2);
   }
+  if (args.includes("--patch") || args.includes("--minor") || args.includes("--major")) {
+    const [major, minor, patch] = pkg.version.split(".").map(Number);
+    if (args.includes("--major")) pkg.version = `${major + 1}.0.0`;
+    else if (args.includes("--minor")) pkg.version = `${major}.${minor + 1}.0`;
+    else pkg.version = `${major}.${minor}.${patch + 1}`;
+    (0, import_node_fs3.writeFileSync)(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
+    log(`Bumped version to ${color.cyan(pkg.version)}`);
+  }
+  let visibility = "public";
+  if (args.includes("--private")) {
+    visibility = "private";
+  } else if (args.includes("--public")) {
+    visibility = "public";
+  } else {
+    const orgIdx = args.indexOf("--org");
+    if (orgIdx !== -1 && args[orgIdx + 1]) {
+      visibility = `org:${args[orgIdx + 1]}`;
+    }
+  }
   let scope, name;
   if (pkg.name.startsWith("@") && pkg.name.includes("/")) {
     const parts = pkg.name.slice(1).split("/");
@@ -14284,36 +18920,43 @@ async function handlePublish(args) {
     scope = emailPrefix;
     name = pkg.name;
   }
-  const tmpFile = (0, import_node_path.join)((0, import_node_os.tmpdir)(), `robinpath-publish-${Date.now()}.tar.gz`);
-  const parentDir = (0, import_node_path.dirname)(targetDir);
-  const dirName = (0, import_node_path.basename)(targetDir);
-  log(`Packing @${scope}/${name}@${pkg.version}...`);
+  const tmpFile = (0, import_node_path4.join)((0, import_node_os3.tmpdir)(), `robinpath-publish-${Date.now()}.tar.gz`);
+  const parentDir = (0, import_node_path4.dirname)(targetDir);
+  const dirName = (0, import_node_path4.basename)(targetDir);
+  log(`Packing @${scope}/${name}@${pkg.version} (${visibility})...`);
   try {
-    (0, import_node_child_process.execSync)(
-      `tar czf "${tmpFile}" --exclude=node_modules --exclude=.git --exclude=dist -C "${parentDir}" "${dirName}"`,
+    (0, import_node_child_process2.execSync)(
+      `tar czf "${toTarPath(tmpFile)}" --exclude=node_modules --exclude=.git --exclude="*.tar.gz" -C "${toTarPath(parentDir)}" "${dirName}"`,
       { stdio: "pipe" }
     );
   } catch (err) {
     try {
-      (0, import_node_fs.unlinkSync)(tmpFile);
+      (0, import_node_fs3.unlinkSync)(tmpFile);
     } catch {
     }
     console.error(color.red("Error:") + ` Failed to create tarball: ${err.message}`);
     process.exit(1);
   }
-  const tarball = (0, import_node_fs.readFileSync)(tmpFile);
-  const maxSize = 5 * 1024 * 1024;
+  const tarball = (0, import_node_fs3.readFileSync)(tmpFile);
+  const maxSize = 50 * 1024 * 1024;
   if (tarball.length > maxSize) {
-    (0, import_node_fs.unlinkSync)(tmpFile);
+    (0, import_node_fs3.unlinkSync)(tmpFile);
     console.error(color.red("Error:") + ` Package is too large (${(tarball.length / 1024 / 1024).toFixed(1)}MB). Max size is 5MB.`);
     process.exit(1);
   }
   log(color.dim(`Package size: ${(tarball.length / 1024).toFixed(1)}KB`));
+  if (isDryRun) {
+    (0, import_node_fs3.unlinkSync)(tmpFile);
+    log("");
+    log(color.yellow("Dry run") + ` \u2014 would publish @${scope}/${name}@${pkg.version} as ${visibility}`);
+    return;
+  }
   try {
     const headers = {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/gzip",
-      "X-Package-Version": pkg.version
+      "X-Package-Version": pkg.version,
+      "X-Package-Visibility": visibility
     };
     if (pkg.description) headers["X-Package-Description"] = pkg.description;
     if (pkg.keywords?.length) headers["X-Package-Keywords"] = pkg.keywords.join(",");
@@ -14324,7 +18967,7 @@ async function handlePublish(args) {
       body: tarball
     });
     if (res.ok) {
-      log(color.green("Published") + ` @${scope}/${name}@${pkg.version}`);
+      log(color.green("Published") + ` @${scope}/${name}@${pkg.version} (${visibility})`);
     } else {
       const body = await res.json().catch(() => ({}));
       const msg = body?.error?.message || `HTTP ${res.status}`;
@@ -14336,7 +18979,7 @@ async function handlePublish(args) {
     process.exit(1);
   } finally {
     try {
-      (0, import_node_fs.unlinkSync)(tmpFile);
+      (0, import_node_fs3.unlinkSync)(tmpFile);
     } catch {
     }
   }
@@ -14388,6 +19031,1162 @@ async function handleSync() {
     process.exit(1);
   }
 }
+async function handleAdd(args) {
+  const spec = args.find((a) => !a.startsWith("-"));
+  if (!spec) {
+    console.error(color.red("Error:") + " Usage: robinpath add <module>[@version]");
+    console.error("  Example: robinpath add @robinpath/slack");
+    process.exit(2);
+  }
+  const parsed = parsePackageSpec(spec);
+  if (!parsed || !parsed.name) {
+    console.error(color.red("Error:") + ` Invalid package name: ${spec}`);
+    process.exit(2);
+  }
+  const { scope, name, fullName, version } = parsed;
+  if (!scope) {
+    console.error(color.red("Error:") + " Module must be scoped (e.g. @robinpath/slack)");
+    process.exit(2);
+  }
+  const token = requireAuth();
+  const manifest = readModulesManifest();
+  if (manifest[fullName] && !args.includes("--force")) {
+    const current = manifest[fullName].version;
+    if (version && version === current) {
+      log(`${fullName}@${current} is already installed.`);
+      return;
+    }
+    if (!version) {
+      log(color.dim(`Reinstalling ${fullName} (currently ${current})...`));
+    }
+  }
+  let resolvedVersion = version;
+  if (!resolvedVersion) {
+    try {
+      const infoRes = await platformFetch(`/v1/registry/${scope}/${name}`);
+      if (!infoRes.ok) {
+        console.error(color.red("Error:") + ` Module not found: ${fullName}`);
+        process.exit(1);
+      }
+      const info = await infoRes.json();
+      resolvedVersion = info.data?.latestVersion || info.data?.version;
+      if (!resolvedVersion) {
+        console.error(color.red("Error:") + ` No versions available for ${fullName}`);
+        process.exit(1);
+      }
+    } catch (err) {
+      console.error(color.red("Error:") + ` Could not reach registry: ${err.message}`);
+      process.exit(1);
+    }
+  }
+  log(`Installing ${fullName}@${resolvedVersion}...`);
+  let tarballBuffer;
+  try {
+    const res = await platformFetch(`/v1/registry/${scope}/${name}/${resolvedVersion}/tarball`);
+    if (!res.ok) {
+      if (res.status === 404) {
+        console.error(color.red("Error:") + ` Module or version not found: ${fullName}@${resolvedVersion}`);
+      } else if (res.status === 401 || res.status === 403) {
+        console.error(color.red("Error:") + " Access denied. You may not have permission to install this module.");
+      } else {
+        const body = await res.json().catch(() => ({}));
+        console.error(color.red("Error:") + ` Failed to download: ${body?.error?.message || "HTTP " + res.status}`);
+      }
+      process.exit(1);
+    }
+    tarballBuffer = Buffer.from(await res.arrayBuffer());
+  } catch (err) {
+    console.error(color.red("Error:") + ` Could not reach registry: ${err.message}`);
+    process.exit(1);
+  }
+  const integrity = "sha256-" + (0, import_node_crypto2.createHash)("sha256").update(tarballBuffer).digest("hex");
+  if (!(0, import_node_fs3.existsSync)(CACHE_DIR)) {
+    (0, import_node_fs3.mkdirSync)(CACHE_DIR, { recursive: true });
+  }
+  const cacheFile = (0, import_node_path4.join)(CACHE_DIR, `${scope}-${name}-${resolvedVersion}.tar.gz`);
+  (0, import_node_fs3.writeFileSync)(cacheFile, tarballBuffer);
+  const modDir = getModulePath(fullName);
+  if ((0, import_node_fs3.existsSync)(modDir)) {
+    (0, import_node_fs3.rmSync)(modDir, { recursive: true, force: true });
+  }
+  (0, import_node_fs3.mkdirSync)(modDir, { recursive: true });
+  const tmpFile = (0, import_node_path4.join)((0, import_node_os3.tmpdir)(), `robinpath-add-${Date.now()}.tar.gz`);
+  (0, import_node_fs3.writeFileSync)(tmpFile, tarballBuffer);
+  try {
+    (0, import_node_child_process2.execSync)(`tar xzf "${toTarPath(tmpFile)}" --strip-components=1 -C "${toTarPath(modDir)}"`, { stdio: "pipe" });
+  } catch (err) {
+    (0, import_node_fs3.rmSync)(modDir, { recursive: true, force: true });
+    try {
+      (0, import_node_fs3.unlinkSync)(tmpFile);
+    } catch {
+    }
+    console.error(color.red("Error:") + ` Failed to extract module: ${err.message}`);
+    process.exit(1);
+  }
+  try {
+    (0, import_node_fs3.unlinkSync)(tmpFile);
+  } catch {
+  }
+  const distDir = (0, import_node_path4.join)(modDir, "dist");
+  const srcDir = (0, import_node_path4.join)(modDir, "src");
+  if (!(0, import_node_fs3.existsSync)(distDir) && (0, import_node_fs3.existsSync)(srcDir) && (0, import_node_fs3.existsSync)((0, import_node_path4.join)(srcDir, "index.ts"))) {
+    log(color.dim("  Compiling module..."));
+    (0, import_node_fs3.mkdirSync)(distDir, { recursive: true });
+    const tsFiles = (0, import_node_fs3.readdirSync)(srcDir).filter((f) => f.endsWith(".ts"));
+    for (const file of tsFiles) {
+      const srcFile = (0, import_node_path4.join)(srcDir, file);
+      const outFile = (0, import_node_path4.join)(distDir, file.replace(".ts", ".js"));
+      try {
+        const stripScript = `
+                    const fs = require('fs');
+                    const { stripTypeScriptTypes } = require('module');
+                    const src = fs.readFileSync(${JSON.stringify(srcFile)}, 'utf-8');
+                    const js = stripTypeScriptTypes(src, { mode: 'transform', sourceMap: false });
+                    fs.writeFileSync(${JSON.stringify(outFile)}, js);
+                `;
+        (0, import_node_child_process2.execSync)(`node -e "${stripScript.replace(/\n/g, " ").replace(/"/g, '\\"')}"`, { stdio: "pipe" });
+      } catch {
+        (0, import_node_fs3.copyFileSync)(srcFile, outFile);
+      }
+    }
+  }
+  let installedVersion = resolvedVersion;
+  const pkgJsonPath = (0, import_node_path4.join)(modDir, "package.json");
+  if ((0, import_node_fs3.existsSync)(pkgJsonPath)) {
+    try {
+      const pkg = JSON.parse((0, import_node_fs3.readFileSync)(pkgJsonPath, "utf-8"));
+      installedVersion = pkg.version || installedVersion;
+    } catch {
+    }
+  }
+  if ((0, import_node_fs3.existsSync)(pkgJsonPath)) {
+    try {
+      const pkg = JSON.parse((0, import_node_fs3.readFileSync)(pkgJsonPath, "utf-8"));
+      const depends = pkg.robinpath?.depends || [];
+      for (const dep of depends) {
+        if (!manifest[dep]) {
+          log(color.dim(`  Installing dependency: ${dep}`));
+          await handleAdd([dep]);
+        }
+      }
+    } catch {
+    }
+  }
+  const updatedManifest = readModulesManifest();
+  updatedManifest[fullName] = {
+    version: installedVersion,
+    integrity,
+    installedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  writeModulesManifest(updatedManifest);
+  const projectFile = (0, import_node_path4.resolve)("robinpath.json");
+  if ((0, import_node_fs3.existsSync)(projectFile)) {
+    try {
+      const config = JSON.parse((0, import_node_fs3.readFileSync)(projectFile, "utf-8"));
+      if (!config.modules) config.modules = {};
+      config.modules[fullName] = `^${installedVersion}`;
+      (0, import_node_fs3.writeFileSync)(projectFile, JSON.stringify(config, null, 2) + "\n", "utf-8");
+    } catch {
+    }
+  }
+  log(color.green("Installed") + ` ${fullName}@${installedVersion}`);
+}
+async function handleRemove(args) {
+  const spec = args.find((a) => !a.startsWith("-"));
+  if (!spec) {
+    console.error(color.red("Error:") + " Usage: robinpath remove <module>");
+    console.error("  Example: robinpath remove @robinpath/slack");
+    process.exit(2);
+  }
+  const parsed = parsePackageSpec(spec);
+  if (!parsed || !parsed.fullName) {
+    console.error(color.red("Error:") + ` Invalid package name: ${spec}`);
+    process.exit(2);
+  }
+  const { fullName } = parsed;
+  const manifest = readModulesManifest();
+  if (!manifest[fullName]) {
+    console.error(color.red("Error:") + ` Module not installed: ${fullName}`);
+    process.exit(1);
+  }
+  const modDir = getModulePath(fullName);
+  if ((0, import_node_fs3.existsSync)(modDir)) {
+    (0, import_node_fs3.rmSync)(modDir, { recursive: true, force: true });
+  }
+  const scopeDir = (0, import_node_path4.dirname)(modDir);
+  try {
+    const remaining = (0, import_node_fs3.readdirSync)(scopeDir);
+    if (remaining.length === 0) {
+      (0, import_node_fs3.rmSync)(scopeDir, { recursive: true, force: true });
+    }
+  } catch {
+  }
+  delete manifest[fullName];
+  writeModulesManifest(manifest);
+  const projectFile = (0, import_node_path4.resolve)("robinpath.json");
+  if ((0, import_node_fs3.existsSync)(projectFile)) {
+    try {
+      const config = JSON.parse((0, import_node_fs3.readFileSync)(projectFile, "utf-8"));
+      if (config.modules && config.modules[fullName]) {
+        delete config.modules[fullName];
+        (0, import_node_fs3.writeFileSync)(projectFile, JSON.stringify(config, null, 2) + "\n", "utf-8");
+      }
+    } catch {
+    }
+  }
+  log(color.green("Removed") + ` ${fullName}`);
+}
+async function handleUpgrade(args) {
+  const spec = args.find((a) => !a.startsWith("-"));
+  if (!spec) {
+    console.error(color.red("Error:") + " Usage: robinpath upgrade <module>");
+    console.error("  Example: robinpath upgrade @robinpath/slack");
+    process.exit(2);
+  }
+  const parsed = parsePackageSpec(spec);
+  if (!parsed || !parsed.fullName || !parsed.scope) {
+    console.error(color.red("Error:") + ` Invalid package name: ${spec}`);
+    process.exit(2);
+  }
+  const { fullName, scope, name } = parsed;
+  const manifest = readModulesManifest();
+  if (!manifest[fullName]) {
+    console.error(color.red("Error:") + ` Module not installed: ${fullName}. Use ${color.cyan("robinpath add " + fullName)} first.`);
+    process.exit(1);
+  }
+  const currentVersion = manifest[fullName].version;
+  log(`Checking for updates to ${fullName}@${currentVersion}...`);
+  try {
+    const token = requireAuth();
+    const res = await fetch(`${PLATFORM_URL}/v1/registry/${scope}/${name}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    if (!res.ok) {
+      console.error(color.red("Error:") + ` Could not check registry (HTTP ${res.status})`);
+      process.exit(1);
+    }
+    const body = await res.json();
+    const data = body.data || body;
+    const latestVersion = data.latestVersion || data.version;
+    if (latestVersion === currentVersion) {
+      log(color.green("Already up to date") + ` ${fullName}@${currentVersion}`);
+      return;
+    }
+    log(`Upgrading ${fullName}: ${currentVersion} \u2192 ${latestVersion}`);
+    await handleAdd([fullName, "--force"]);
+  } catch (err) {
+    console.error(color.red("Error:") + ` Upgrade failed: ${err.message}`);
+    process.exit(1);
+  }
+}
+async function handleModulesList() {
+  const manifest = readModulesManifest();
+  const entries = Object.entries(manifest);
+  if (entries.length === 0) {
+    log("No modules installed.");
+    log(`Run ${color.cyan("robinpath add <module>")} to install your first module.`);
+    return;
+  }
+  log(color.bold("  Name".padEnd(40) + "Version".padEnd(14) + "Installed"));
+  log(color.dim("  " + "\u2500".repeat(62)));
+  for (const [name, info] of entries) {
+    const date = info.installedAt ? info.installedAt.split("T")[0] : "-";
+    log(`  ${name.padEnd(38)}${(info.version || "-").padEnd(14)}${date}`);
+  }
+  log("");
+  log(color.dim(`${entries.length} module${entries.length !== 1 ? "s" : ""} installed`));
+}
+async function handleModulesUpgradeAll() {
+  const manifest = readModulesManifest();
+  const entries = Object.entries(manifest);
+  if (entries.length === 0) {
+    log("No modules installed.");
+    return;
+  }
+  log(`Checking ${entries.length} module${entries.length !== 1 ? "s" : ""} for updates...
+`);
+  let upgraded = 0;
+  let upToDate = 0;
+  let failed = 0;
+  for (const [fullName, info] of entries) {
+    const parsed = parsePackageSpec(fullName);
+    if (!parsed || !parsed.scope) {
+      failed++;
+      continue;
+    }
+    try {
+      const token = getAuthToken();
+      if (!token) {
+        console.error(color.red("Error:") + " Not logged in. Run " + color.cyan("robinpath login"));
+        process.exit(1);
+      }
+      const res = await fetch(`${PLATFORM_URL}/v1/registry/${parsed.scope}/${parsed.name}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        log(color.yellow("Skip") + `  ${fullName} (registry error)`);
+        failed++;
+        continue;
+      }
+      const body = await res.json();
+      const data = body.data || body;
+      const latestVersion = data.latestVersion || data.version;
+      if (latestVersion === info.version) {
+        log(color.green("  \u2713") + `  ${fullName}@${info.version} (up to date)`);
+        upToDate++;
+      } else {
+        log(color.cyan("  \u2191") + `  ${fullName}: ${info.version} \u2192 ${latestVersion}`);
+        await handleAdd([fullName, "--force"]);
+        upgraded++;
+      }
+    } catch (err) {
+      log(color.yellow("Skip") + `  ${fullName} (${err.message})`);
+      failed++;
+    }
+  }
+  log("");
+  const parts = [];
+  if (upgraded > 0) parts.push(color.green(`${upgraded} upgraded`));
+  if (upToDate > 0) parts.push(`${upToDate} up to date`);
+  if (failed > 0) parts.push(color.yellow(`${failed} failed`));
+  log(parts.join(", "));
+}
+async function handleModulesInit() {
+  const rl = (0, import_node_readline.createInterface)({ input: process.stdin, output: process.stdout });
+  const ask = (q2, def) => new Promise((resolve5) => {
+    const prompt = def ? `${q2} (${def}): ` : `${q2}: `;
+    rl.question(prompt, (answer) => resolve5(answer.trim() || def || ""));
+  });
+  log("");
+  log(color.bold("  Create a new RobinPath module"));
+  log(color.dim("  " + "\u2500".repeat(35)));
+  log("");
+  const rawName = await ask("  Module name");
+  if (!rawName) {
+    console.error(color.red("Error:") + " Module name is required");
+    rl.close();
+    process.exit(2);
+  }
+  const moduleName = rawName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  if (!moduleName) {
+    console.error(color.red("Error:") + " Invalid module name");
+    rl.close();
+    process.exit(2);
+  }
+  if (moduleName !== rawName) {
+    log(color.dim(`  \u2192 ${moduleName}`));
+  }
+  const defaultDisplay = rawName.charAt(0).toUpperCase() + rawName.slice(1);
+  const displayName = await ask("  Display name", defaultDisplay);
+  const description = await ask("  Description", `${displayName} integration for RobinPath`);
+  log("");
+  log(color.dim("  Categories: api, messaging, crm, ai, database, storage, analytics, dev-tools, utilities"));
+  const category = await ask("  Category", "utilities");
+  const auth = readAuth();
+  const defaultAuthor = auth?.email || "";
+  const author = await ask("  Author", defaultAuthor);
+  const license = await ask("  License", "MIT");
+  const defaultScope = auth?.email?.split("@")[0] || "robinpath";
+  const scope = await ask("  Scope", defaultScope);
+  rl.close();
+  const fullName = `@${scope}/${moduleName}`;
+  const pascalName = moduleName.replace(/(^|[-_])(\w)/g, (_2, __, c) => c.toUpperCase());
+  const targetDir = (0, import_node_path4.resolve)(moduleName);
+  log("");
+  log(`Creating ${color.cyan(fullName)}...`);
+  if ((0, import_node_fs3.existsSync)(targetDir)) {
+    console.error(color.red("Error:") + ` Directory already exists: ${moduleName}/`);
+    process.exit(1);
+  }
+  (0, import_node_fs3.mkdirSync)((0, import_node_path4.join)(targetDir, "src"), { recursive: true });
+  (0, import_node_fs3.mkdirSync)((0, import_node_path4.join)(targetDir, "tests"), { recursive: true });
+  (0, import_node_fs3.writeFileSync)((0, import_node_path4.join)(targetDir, "package.json"), JSON.stringify({
+    name: fullName,
+    version: "0.1.0",
+    description,
+    author,
+    license,
+    type: "module",
+    main: "dist/index.js",
+    types: "dist/index.d.ts",
+    exports: { ".": { import: "./dist/index.js", types: "./dist/index.d.ts" } },
+    files: ["dist"],
+    scripts: { build: "tsc", test: `robinpath test tests/` },
+    robinpath: { category, displayName },
+    peerDependencies: { "@wiredwp/robinpath": ">=1.30.0" },
+    devDependencies: { "@wiredwp/robinpath": "^0.30.1", typescript: "^5.6.0" }
+  }, null, 2) + "\n", "utf-8");
+  (0, import_node_fs3.writeFileSync)((0, import_node_path4.join)(targetDir, "src", "index.ts"), `import type { ModuleAdapter } from "@wiredwp/robinpath";
+import {
+  ${pascalName}Functions,
+  ${pascalName}FunctionMetadata,
+  ${pascalName}ModuleMetadata,
+} from "./${moduleName}.js";
+
+const ${pascalName}Module: ModuleAdapter = {
+  name: "${moduleName}",
+  functions: ${pascalName}Functions,
+  functionMetadata: ${pascalName}FunctionMetadata,
+  moduleMetadata: ${pascalName}ModuleMetadata,
+  global: false,
+};
+
+export default ${pascalName}Module;
+export { ${pascalName}Module };
+`, "utf-8");
+  (0, import_node_fs3.writeFileSync)((0, import_node_path4.join)(targetDir, "src", `${moduleName}.ts`), `import type {
+  BuiltinHandler,
+  FunctionMetadata,
+  ModuleMetadata,
+} from "@wiredwp/robinpath";
+
+// \u2500\u2500\u2500 Functions \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+const hello: BuiltinHandler = (args) => {
+  const name = String(args[0] ?? "world");
+  return \`Hello from ${moduleName}: \${name}\`;
+};
+
+const configure: BuiltinHandler = (args) => {
+  const apiKey = String(args[0] ?? "");
+  if (!apiKey) throw new Error("API key is required");
+  return { configured: true };
+};
+
+// \u2500\u2500\u2500 Exports \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+export const ${pascalName}Functions: Record<string, BuiltinHandler> = {
+  hello,
+  configure,
+};
+
+export const ${pascalName}FunctionMetadata: Record<string, FunctionMetadata> = {
+  hello: {
+    description: "Say hello",
+    parameters: [
+      {
+        name: "name",
+        dataType: "string",
+        description: "Name to greet",
+        formInputType: "text",
+        required: false,
+        defaultValue: "world",
+      },
+    ],
+    returnType: "string",
+    returnDescription: "Greeting message",
+    example: '${moduleName}.hello "Alice"',
+  },
+  configure: {
+    description: "Configure API credentials",
+    parameters: [
+      {
+        name: "apiKey",
+        dataType: "string",
+        description: "Your API key",
+        formInputType: "password",
+        required: true,
+      },
+    ],
+    returnType: "object",
+    returnDescription: "{ configured: true }",
+    example: '${moduleName}.configure "your-api-key"',
+  },
+};
+
+export const ${pascalName}ModuleMetadata: ModuleMetadata = {
+  description: "${description}",
+  methods: ["hello", "configure"],
+  author: "${author}",
+  category: "${category}",
+};
+`, "utf-8");
+  (0, import_node_fs3.writeFileSync)((0, import_node_path4.join)(targetDir, "tsconfig.json"), JSON.stringify({
+    compilerOptions: {
+      target: "ES2022",
+      module: "ES2022",
+      moduleResolution: "node16",
+      declaration: true,
+      declarationMap: true,
+      sourceMap: true,
+      outDir: "dist",
+      rootDir: "src",
+      strict: true,
+      esModuleInterop: true,
+      skipLibCheck: true
+    },
+    include: ["src"]
+  }, null, 2) + "\n", "utf-8");
+  (0, import_node_fs3.writeFileSync)((0, import_node_path4.join)(targetDir, "tests", `${moduleName}.test.rp`), `# ${displayName} module tests
+# Run: robinpath test tests/
+
+@desc "hello returns greeting"
+do
+  ${moduleName}.hello "Alice" into $result
+  test.assertContains $result "Alice"
+enddo
+
+@desc "hello defaults to world"
+do
+  ${moduleName}.hello into $result
+  test.assertContains $result "world"
+enddo
+`, "utf-8");
+  (0, import_node_fs3.writeFileSync)((0, import_node_path4.join)(targetDir, "README.md"), `# ${fullName}
+
+${description}
+
+## Install
+
+\`\`\`bash
+robinpath add ${fullName}
+\`\`\`
+
+## Usage
+
+\`\`\`robinpath
+# Configure credentials
+${moduleName}.configure "your-api-key"
+
+# Say hello
+${moduleName}.hello "Alice"
+log $
+\`\`\`
+
+## Functions
+
+| Function | Description |
+|----------|-------------|
+| \`configure\` | Configure API credentials |
+| \`hello\` | Say hello |
+
+## Development
+
+\`\`\`bash
+npm install
+npm run build
+robinpath test tests/
+\`\`\`
+
+## License
+
+${license}
+`, "utf-8");
+  (0, import_node_fs3.writeFileSync)((0, import_node_path4.join)(targetDir, ".gitignore"), `node_modules/
+dist/
+*.tgz
+`, "utf-8");
+  log("");
+  log(color.green("Generated:"));
+  log(`  ${moduleName}/`);
+  log(`  \u251C\u2500\u2500 package.json`);
+  log(`  \u251C\u2500\u2500 src/`);
+  log(`  \u2502   \u251C\u2500\u2500 index.ts`);
+  log(`  \u2502   \u2514\u2500\u2500 ${moduleName}.ts`);
+  log(`  \u251C\u2500\u2500 tests/`);
+  log(`  \u2502   \u2514\u2500\u2500 ${moduleName}.test.rp`);
+  log(`  \u251C\u2500\u2500 tsconfig.json`);
+  log(`  \u251C\u2500\u2500 README.md`);
+  log(`  \u2514\u2500\u2500 .gitignore`);
+  log("");
+  log(color.bold("Next steps:"));
+  log(`  1. cd ${moduleName}`);
+  log(`  2. Edit src/${moduleName}.ts \u2014 add your functions`);
+  log(`  3. npm install && npm run build`);
+  log(`  4. robinpath publish`);
+  log("");
+}
+async function handlePack(args) {
+  const targetArg = args.find((a) => !a.startsWith("-")) || ".";
+  const targetDir = (0, import_node_path4.resolve)(targetArg);
+  const pkgPath = (0, import_node_path4.join)(targetDir, "package.json");
+  if (!(0, import_node_fs3.existsSync)(pkgPath)) {
+    console.error(color.red("Error:") + ` No package.json found in ${targetDir}`);
+    process.exit(2);
+  }
+  let pkg;
+  try {
+    pkg = JSON.parse((0, import_node_fs3.readFileSync)(pkgPath, "utf-8"));
+  } catch (err) {
+    console.error(color.red("Error:") + ` Invalid package.json: ${err.message}`);
+    process.exit(2);
+  }
+  if (!pkg.name || !pkg.version) {
+    console.error(color.red("Error:") + ' package.json must have "name" and "version" fields');
+    process.exit(2);
+  }
+  const safeName = pkg.name.replace(/^@/, "").replace(/\//g, "-");
+  const outputFile = `${safeName}-${pkg.version}.tar.gz`;
+  const outputPath = (0, import_node_path4.resolve)(outputFile);
+  const parentDir = (0, import_node_path4.dirname)(targetDir);
+  const dirName = (0, import_node_path4.basename)(targetDir);
+  log(`Packing ${pkg.name}@${pkg.version}...`);
+  try {
+    (0, import_node_child_process2.execSync)(
+      `tar czf "${toTarPath(outputPath)}" --exclude=node_modules --exclude=.git --exclude=dist --exclude="*.tar.gz" -C "${toTarPath(parentDir)}" "${dirName}"`,
+      { stdio: "pipe" }
+    );
+  } catch (err) {
+    if (!(0, import_node_fs3.existsSync)(outputPath)) {
+      console.error(color.red("Error:") + ` Failed to create tarball: ${err.message}`);
+      process.exit(1);
+    }
+  }
+  const size = (0, import_node_fs3.statSync)(outputPath).size;
+  log(color.green("Created") + ` ${outputFile} (${(size / 1024).toFixed(1)}KB)`);
+}
+async function handleSearch(args) {
+  const query = args.filter((a) => !a.startsWith("-")).join(" ");
+  if (!query) {
+    console.error(color.red("Error:") + " Usage: robinpath search <query>");
+    console.error("  Example: robinpath search slack");
+    process.exit(2);
+  }
+  const category = args.find((a) => a.startsWith("--category="))?.split("=")[1];
+  const token = getAuthToken();
+  log(`Searching for "${query}"...
+`);
+  try {
+    let url = `${PLATFORM_URL}/v1/registry/search?q=${encodeURIComponent(query)}`;
+    if (category) url += `&category=${encodeURIComponent(category)}`;
+    const headers = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      console.error(color.red("Error:") + ` Search failed (HTTP ${res.status})`);
+      process.exit(1);
+    }
+    const body = await res.json();
+    const modules = body.data || body.modules || [];
+    if (modules.length === 0) {
+      log("No modules found.");
+      return;
+    }
+    log(color.bold("  Name".padEnd(35) + "Version".padEnd(10) + "Description"));
+    log(color.dim("  " + "\u2500".repeat(72)));
+    for (const mod of modules) {
+      const modName = (mod.scope ? `@${mod.scope}/${mod.name}` : mod.name) || mod.id || "?";
+      const ver = mod.version || mod.latestVersion || "-";
+      const desc = (mod.description || "").slice(0, 35);
+      log(`  ${modName.padEnd(33)}${ver.padEnd(10)}${color.dim(desc)}`);
+    }
+    log("");
+    log(color.dim(`${modules.length} result${modules.length !== 1 ? "s" : ""}`));
+  } catch (err) {
+    console.error(color.red("Error:") + ` Search failed: ${err.message}`);
+    process.exit(1);
+  }
+}
+async function handleInfo(args) {
+  const spec = args.find((a) => !a.startsWith("-"));
+  if (!spec) {
+    console.error(color.red("Error:") + " Usage: robinpath info <module>");
+    console.error("  Example: robinpath info @robinpath/slack");
+    process.exit(2);
+  }
+  const parsed = parsePackageSpec(spec);
+  if (!parsed || !parsed.scope) {
+    console.error(color.red("Error:") + ` Invalid package name: ${spec}`);
+    process.exit(2);
+  }
+  const { scope, name, fullName } = parsed;
+  const token = getAuthToken();
+  try {
+    const headers = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(`${PLATFORM_URL}/v1/registry/${scope}/${name}`, { headers });
+    if (!res.ok) {
+      if (res.status === 404) {
+        console.error(color.red("Error:") + ` Module not found: ${fullName}`);
+      } else {
+        console.error(color.red("Error:") + ` Failed to fetch info (HTTP ${res.status})`);
+      }
+      process.exit(1);
+    }
+    const body = await res.json();
+    const data = body.data || body;
+    log("");
+    log(`  ${color.bold(fullName)} ${color.cyan("v" + (data.latestVersion || data.version || "-"))}`);
+    if (data.description) log(`  ${data.description}`);
+    log("");
+    if (data.author) log(`  Author:      ${data.author}`);
+    if (data.license) log(`  License:     ${data.license}`);
+    if (data.category) log(`  Category:    ${data.category}`);
+    const downloads = data.downloads ?? data.downloadCount;
+    if (downloads !== void 0) log(`  Downloads:   ${downloads}`);
+    const visibility = data.visibility || (data.isPublic === false ? "private" : "public");
+    log(`  Visibility:  ${visibility}`);
+    if (data.keywords?.length) log(`  Keywords:    ${data.keywords.join(", ")}`);
+    log("");
+    const manifest = readModulesManifest();
+    if (manifest[fullName]) {
+      log(`  ${color.green("Installed")} v${manifest[fullName].version}`);
+    } else {
+      log(`  ${color.cyan("robinpath add " + fullName)}`);
+    }
+    log("");
+  } catch (err) {
+    console.error(color.red("Error:") + ` Failed to fetch info: ${err.message}`);
+    process.exit(1);
+  }
+}
+async function handleInit(args) {
+  const projectFile = (0, import_node_path4.resolve)("robinpath.json");
+  if ((0, import_node_fs3.existsSync)(projectFile) && !args.includes("--force")) {
+    console.error(color.red("Error:") + " robinpath.json already exists. Use --force to overwrite.");
+    process.exit(1);
+  }
+  const rl = (0, import_node_readline.createInterface)({ input: process.stdin, output: process.stdout });
+  const ask = (q2, def) => new Promise((resolve5) => {
+    const prompt = def ? `${q2} (${def}): ` : `${q2}: `;
+    rl.question(prompt, (answer) => resolve5(answer.trim() || def || ""));
+  });
+  log("");
+  log(color.bold("  Create a new RobinPath project"));
+  log(color.dim("  " + "\u2500".repeat(35)));
+  log("");
+  const dirName = (0, import_node_path4.basename)(process.cwd());
+  const projectName = await ask("  Project name", dirName);
+  const description = await ask("  Description", "");
+  const auth = readAuth();
+  const author = await ask("  Author", auth?.email || "");
+  const mainFile = await ask("  Entry file", "main.rp");
+  rl.close();
+  const config = {
+    name: projectName,
+    version: "1.0.0",
+    description,
+    author,
+    main: mainFile,
+    modules: {},
+    env: {}
+  };
+  (0, import_node_fs3.writeFileSync)(projectFile, JSON.stringify(config, null, 2) + "\n", "utf-8");
+  const mainPath = (0, import_node_path4.resolve)(mainFile);
+  if (!(0, import_node_fs3.existsSync)(mainPath)) {
+    (0, import_node_fs3.writeFileSync)(mainPath, `# ${projectName}
+# Run: robinpath ${mainFile}
+
+log "Hello from RobinPath!"
+`, "utf-8");
+  }
+  if (!(0, import_node_fs3.existsSync)((0, import_node_path4.resolve)(".env"))) {
+    (0, import_node_fs3.writeFileSync)((0, import_node_path4.resolve)(".env"), `# Add your secrets here
+# SLACK_TOKEN=xoxb-...
+# OPENAI_KEY=sk-...
+`, "utf-8");
+  }
+  if (!(0, import_node_fs3.existsSync)((0, import_node_path4.resolve)(".gitignore"))) {
+    (0, import_node_fs3.writeFileSync)((0, import_node_path4.resolve)(".gitignore"), `.env
+.robinpath/
+node_modules/
+`, "utf-8");
+  }
+  log("");
+  log(color.green("Created project:"));
+  log(`  robinpath.json`);
+  if (!(0, import_node_fs3.existsSync)(mainPath)) log(`  ${mainFile}`);
+  log(`  .env`);
+  log(`  .gitignore`);
+  log("");
+  log(`Run: ${color.cyan("robinpath " + mainFile)}`);
+  log("");
+}
+async function handleProjectInstall() {
+  const projectFile = (0, import_node_path4.resolve)("robinpath.json");
+  if (!(0, import_node_fs3.existsSync)(projectFile)) {
+    handleInstall();
+    return;
+  }
+  let config;
+  try {
+    config = JSON.parse((0, import_node_fs3.readFileSync)(projectFile, "utf-8"));
+  } catch (err) {
+    console.error(color.red("Error:") + ` Invalid robinpath.json: ${err.message}`);
+    process.exit(2);
+  }
+  const modules = config.modules || {};
+  const entries = Object.entries(modules);
+  if (entries.length === 0) {
+    log("No modules specified in robinpath.json.");
+    log(`Use ${color.cyan("robinpath add <module>")} to add modules.`);
+    return;
+  }
+  log(`Installing ${entries.length} module${entries.length !== 1 ? "s" : ""} from robinpath.json...
+`);
+  const manifest = readModulesManifest();
+  let installed = 0;
+  let skipped = 0;
+  let failed = 0;
+  for (const [name, versionSpec] of entries) {
+    if (manifest[name]) {
+      const current = manifest[name].version;
+      if (versionSpec.startsWith("^") || versionSpec.startsWith("~")) {
+        log(color.green("  \u2713") + `  ${name}@${current} (already installed)`);
+        skipped++;
+        continue;
+      }
+      if (current === versionSpec) {
+        log(color.green("  \u2713") + `  ${name}@${current} (already installed)`);
+        skipped++;
+        continue;
+      }
+    }
+    try {
+      const version = versionSpec.replace(/^[\^~]/, "");
+      await handleAdd([`${name}@${version}`]);
+      installed++;
+    } catch (err) {
+      log(color.red("  \u2717") + `  ${name}: ${err.message}`);
+      failed++;
+    }
+  }
+  const lockFile = (0, import_node_path4.resolve)("robinpath-lock.json");
+  const updatedManifest = readModulesManifest();
+  const lockData = {};
+  for (const [name] of entries) {
+    if (updatedManifest[name]) {
+      lockData[name] = {
+        version: updatedManifest[name].version,
+        integrity: updatedManifest[name].integrity
+      };
+    }
+  }
+  (0, import_node_fs3.writeFileSync)(lockFile, JSON.stringify(lockData, null, 2) + "\n", "utf-8");
+  log("");
+  const parts = [];
+  if (installed > 0) parts.push(color.green(`${installed} installed`));
+  if (skipped > 0) parts.push(`${skipped} already installed`);
+  if (failed > 0) parts.push(color.red(`${failed} failed`));
+  log(parts.join(", "));
+  log(color.dim("Lock file written: robinpath-lock.json"));
+}
+async function handleDoctor() {
+  log("");
+  log(color.bold("  RobinPath Doctor"));
+  log(color.dim("  " + "\u2500".repeat(35)));
+  log("");
+  let issues = 0;
+  log(color.green("  \u2713") + ` CLI version ${CLI_VERSION} (lang ${Sn})`);
+  const installDir = getInstallDir();
+  const isWindows = (0, import_node_os3.platform)() === "win32";
+  const binaryName = isWindows ? "robinpath.exe" : "robinpath";
+  if ((0, import_node_fs3.existsSync)((0, import_node_path4.join)(installDir, binaryName))) {
+    log(color.green("  \u2713") + ` Installed: ${installDir}`);
+  } else {
+    log(color.yellow("  !") + ` Not installed to PATH. Run ${color.cyan("robinpath install")}`);
+    issues++;
+  }
+  const auth = readAuth();
+  const token = getAuthToken();
+  if (token) {
+    log(color.green("  \u2713") + ` Logged in as ${auth.email || auth.name || "unknown"}`);
+    if (auth.expiresAt) {
+      const remaining = Math.floor((auth.expiresAt * 1e3 - Date.now()) / (1e3 * 60 * 60 * 24));
+      if (remaining < 7) {
+        log(color.yellow("  !") + ` Session expires in ${remaining} day${remaining !== 1 ? "s" : ""}`);
+        issues++;
+      }
+    }
+  } else {
+    log(color.yellow("  !") + ` Not logged in. Run ${color.cyan("robinpath login")}`);
+    issues++;
+  }
+  const manifest = readModulesManifest();
+  const moduleCount = Object.keys(manifest).length;
+  if (moduleCount > 0) {
+    log(color.green("  \u2713") + ` ${moduleCount} module${moduleCount !== 1 ? "s" : ""} installed`);
+    for (const [name, info] of Object.entries(manifest)) {
+      const modDir = getModulePath(name);
+      const pkgPath = (0, import_node_path4.join)(modDir, "package.json");
+      if (!(0, import_node_fs3.existsSync)(modDir)) {
+        log(color.red("  \u2717") + `   ${name}: directory missing`);
+        issues++;
+      } else if (!(0, import_node_fs3.existsSync)(pkgPath)) {
+        log(color.red("  \u2717") + `   ${name}: package.json missing`);
+        issues++;
+      } else {
+        let entryPoint = "dist/index.js";
+        try {
+          const pkg = JSON.parse((0, import_node_fs3.readFileSync)(pkgPath, "utf-8"));
+          if (pkg.main) entryPoint = pkg.main;
+        } catch {
+        }
+        if (!(0, import_node_fs3.existsSync)((0, import_node_path4.join)(modDir, entryPoint))) {
+          log(color.red("  \u2717") + `   ${name}: entry point ${entryPoint} missing`);
+          issues++;
+        }
+      }
+    }
+  } else {
+    log(color.dim("  -") + ` No modules installed`);
+  }
+  const projectFile = (0, import_node_path4.resolve)("robinpath.json");
+  if ((0, import_node_fs3.existsSync)(projectFile)) {
+    try {
+      const config = JSON.parse((0, import_node_fs3.readFileSync)(projectFile, "utf-8"));
+      log(color.green("  \u2713") + ` Project: ${config.name || "unnamed"} v${config.version || "?"}`);
+      const projectModules = Object.keys(config.modules || {});
+      for (const mod of projectModules) {
+        if (!manifest[mod]) {
+          log(color.red("  \u2717") + `   Missing module: ${mod} (run ${color.cyan("robinpath install")})`);
+          issues++;
+        }
+      }
+    } catch {
+      log(color.red("  \u2717") + " Invalid robinpath.json");
+      issues++;
+    }
+  }
+  if ((0, import_node_fs3.existsSync)(CACHE_DIR)) {
+    try {
+      const cacheFiles = (0, import_node_fs3.readdirSync)(CACHE_DIR);
+      const cacheSize = cacheFiles.reduce((total, f) => {
+        try {
+          return total + (0, import_node_fs3.statSync)((0, import_node_path4.join)(CACHE_DIR, f)).size;
+        } catch {
+          return total;
+        }
+      }, 0);
+      log(color.dim("  -") + ` Cache: ${cacheFiles.length} files (${(cacheSize / 1024).toFixed(0)}KB)`);
+    } catch {
+    }
+  }
+  log("");
+  if (issues === 0) {
+    log(color.green("  No issues found."));
+  } else {
+    log(color.yellow(`  ${issues} issue${issues !== 1 ? "s" : ""} found.`));
+  }
+  log("");
+}
+async function handleEnv(args) {
+  const envPath = (0, import_node_path4.join)(getRobinPathHome(), "env");
+  const sub = args[0];
+  function readEnvFile() {
+    try {
+      if (!(0, import_node_fs3.existsSync)(envPath)) return {};
+      const lines = (0, import_node_fs3.readFileSync)(envPath, "utf-8").split("\n");
+      const env = {};
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) continue;
+        const eqIdx = trimmed.indexOf("=");
+        if (eqIdx > 0) {
+          env[trimmed.slice(0, eqIdx)] = trimmed.slice(eqIdx + 1);
+        }
+      }
+      return env;
+    } catch {
+      return {};
+    }
+  }
+  function writeEnvFile(env) {
+    const dir = getRobinPathHome();
+    if (!(0, import_node_fs3.existsSync)(dir)) (0, import_node_fs3.mkdirSync)(dir, { recursive: true });
+    const content = Object.entries(env).map(([k2, v]) => `${k2}=${v}`).join("\n") + "\n";
+    (0, import_node_fs3.writeFileSync)(envPath, content, "utf-8");
+    if ((0, import_node_os3.platform)() !== "win32") {
+      try {
+        (0, import_node_fs3.chmodSync)(envPath, 384);
+      } catch {
+      }
+    }
+  }
+  if (sub === "set") {
+    const key = args[1];
+    const value = args.slice(2).join(" ");
+    if (!key) {
+      console.error(color.red("Error:") + " Usage: robinpath env set <KEY> <value>");
+      process.exit(2);
+    }
+    const env = readEnvFile();
+    env[key] = value;
+    writeEnvFile(env);
+    log(color.green("Set") + ` ${key}`);
+  } else if (sub === "list") {
+    const env = readEnvFile();
+    const entries = Object.entries(env);
+    if (entries.length === 0) {
+      log("No environment variables set.");
+      log(`Use ${color.cyan("robinpath env set <KEY> <value>")} to add one.`);
+      return;
+    }
+    log("");
+    log(color.bold("  Environment variables:"));
+    log(color.dim("  " + "\u2500".repeat(40)));
+    for (const [key, value] of entries) {
+      const masked = value.length > 4 ? value.slice(0, 2) + "\u2022".repeat(Math.min(value.length - 4, 20)) + value.slice(-2) : "\u2022\u2022\u2022\u2022";
+      log(`  ${key.padEnd(25)} ${color.dim(masked)}`);
+    }
+    log("");
+    log(color.dim(`${entries.length} variable${entries.length !== 1 ? "s" : ""}`));
+    log("");
+  } else if (sub === "remove" || sub === "delete") {
+    const key = args[1];
+    if (!key) {
+      console.error(color.red("Error:") + " Usage: robinpath env remove <KEY>");
+      process.exit(2);
+    }
+    const env = readEnvFile();
+    if (!env[key]) {
+      console.error(color.red("Error:") + ` Variable not found: ${key}`);
+      process.exit(1);
+    }
+    delete env[key];
+    writeEnvFile(env);
+    log(color.green("Removed") + ` ${key}`);
+  } else {
+    console.error(color.red("Error:") + " Usage: robinpath env <set|list|remove>");
+    console.error("  robinpath env set SLACK_TOKEN xoxb-...");
+    console.error("  robinpath env list");
+    console.error("  robinpath env remove SLACK_TOKEN");
+    process.exit(2);
+  }
+}
+async function handleCache(args) {
+  const sub = args[0];
+  if (sub === "list") {
+    if (!(0, import_node_fs3.existsSync)(CACHE_DIR)) {
+      log("Cache is empty.");
+      return;
+    }
+    try {
+      const files = (0, import_node_fs3.readdirSync)(CACHE_DIR);
+      if (files.length === 0) {
+        log("Cache is empty.");
+        return;
+      }
+      log("");
+      log(color.bold("  Cached packages:"));
+      log(color.dim("  " + "\u2500".repeat(50)));
+      let totalSize = 0;
+      for (const file of files) {
+        const size = (0, import_node_fs3.statSync)((0, import_node_path4.join)(CACHE_DIR, file)).size;
+        totalSize += size;
+        log(`  ${file.padEnd(45)} ${color.dim((size / 1024).toFixed(1) + "KB")}`);
+      }
+      log("");
+      log(color.dim(`${files.length} file${files.length !== 1 ? "s" : ""}, ${(totalSize / 1024).toFixed(0)}KB total`));
+      log("");
+    } catch (err) {
+      console.error(color.red("Error:") + ` Failed to list cache: ${err.message}`);
+      process.exit(1);
+    }
+  } else if (sub === "clean") {
+    if (!(0, import_node_fs3.existsSync)(CACHE_DIR)) {
+      log("Cache is already empty.");
+      return;
+    }
+    try {
+      const files = (0, import_node_fs3.readdirSync)(CACHE_DIR);
+      let totalSize = 0;
+      for (const file of files) {
+        totalSize += (0, import_node_fs3.statSync)((0, import_node_path4.join)(CACHE_DIR, file)).size;
+      }
+      (0, import_node_fs3.rmSync)(CACHE_DIR, { recursive: true, force: true });
+      log(color.green("Cleared") + ` ${files.length} cached file${files.length !== 1 ? "s" : ""} (${(totalSize / 1024).toFixed(0)}KB freed)`);
+    } catch (err) {
+      console.error(color.red("Error:") + ` Failed to clean cache: ${err.message}`);
+      process.exit(1);
+    }
+  } else {
+    console.error(color.red("Error:") + " Usage: robinpath cache <list|clean>");
+    process.exit(2);
+  }
+}
+async function handleAudit() {
+  const manifest = readModulesManifest();
+  const entries = Object.entries(manifest);
+  if (entries.length === 0) {
+    log("No modules installed. Nothing to audit.");
+    return;
+  }
+  log(`Auditing ${entries.length} module${entries.length !== 1 ? "s" : ""}...
+`);
+  let warnings = 0;
+  let ok = 0;
+  const token = getAuthToken();
+  for (const [fullName, info] of entries) {
+    const parsed = parsePackageSpec(fullName);
+    if (!parsed || !parsed.scope) {
+      log(color.yellow("  !") + `  ${fullName}: invalid package name`);
+      warnings++;
+      continue;
+    }
+    try {
+      const headers = {};
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const res = await fetch(`${PLATFORM_URL}/v1/registry/${parsed.scope}/${parsed.name}`, { headers });
+      if (!res.ok) {
+        log(color.yellow("  !") + `  ${fullName}: could not check registry`);
+        warnings++;
+        continue;
+      }
+      const body = await res.json();
+      const data = body.data || body;
+      if (data.deprecated) {
+        log(color.red("  \u2717") + `  ${fullName}@${info.version} \u2014 ${color.red("deprecated")}: ${data.deprecated}`);
+        warnings++;
+        continue;
+      }
+      const latest = data.latestVersion || data.version;
+      if (latest && latest !== info.version) {
+        log(color.yellow("  !") + `  ${fullName}@${info.version} \u2192 ${latest} available`);
+        warnings++;
+      } else {
+        log(color.green("  \u2713") + `  ${fullName}@${info.version}`);
+        ok++;
+      }
+    } catch (err) {
+      log(color.yellow("  !") + `  ${fullName}: ${err.message}`);
+      warnings++;
+    }
+  }
+  log("");
+  if (warnings === 0) {
+    log(color.green(`No issues found. ${ok} module${ok !== 1 ? "s" : ""} OK.`));
+  } else {
+    log(`${color.yellow(warnings + " warning" + (warnings !== 1 ? "s" : ""))}` + (ok > 0 ? `, ${ok} OK` : ""));
+  }
+  log("");
+}
+async function handleDeprecate(args) {
+  const spec = args.find((a) => !a.startsWith("-"));
+  if (!spec) {
+    console.error(color.red("Error:") + ' Usage: robinpath deprecate <module> "reason"');
+    process.exit(2);
+  }
+  const parsed = parsePackageSpec(spec);
+  if (!parsed || !parsed.scope) {
+    console.error(color.red("Error:") + ` Invalid package name: ${spec}`);
+    process.exit(2);
+  }
+  const reason = args.filter((a) => a !== spec && !a.startsWith("-")).join(" ") || "This module is deprecated";
+  const { scope, name, fullName } = parsed;
+  const token = requireAuth();
+  log(`Deprecating ${fullName}...`);
+  try {
+    const res = await fetch(`${PLATFORM_URL}/v1/registry/${scope}/${name}/deprecate`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ message: reason })
+    });
+    if (res.ok) {
+      log(color.yellow("Deprecated") + ` ${fullName}: ${reason}`);
+    } else {
+      const body = await res.json().catch(() => ({}));
+      console.error(color.red("Error:") + ` Failed to deprecate: ${body?.error?.message || "HTTP " + res.status}`);
+      process.exit(1);
+    }
+  } catch (err) {
+    console.error(color.red("Error:") + ` Failed to deprecate: ${err.message}`);
+    process.exit(1);
+  }
+}
 async function handleCheck(args) {
   const jsonOutput = args.includes("--json");
   const fileArg = args.find((a) => !a.startsWith("-"));
@@ -14405,7 +20204,7 @@ async function handleCheck(args) {
     }
     process.exit(2);
   }
-  const script = (0, import_node_fs.readFileSync)(filePath, "utf-8");
+  const script = (0, import_node_fs3.readFileSync)(filePath, "utf-8");
   const startTime = FLAG_VERBOSE ? performance.now() : 0;
   try {
     const parser = new W(script);
@@ -14456,8 +20255,8 @@ async function handleAST(args) {
     console.error(color.red("Error:") + ` File not found: ${fileArg}`);
     process.exit(2);
   }
-  const script = (0, import_node_fs.readFileSync)(filePath, "utf-8");
-  const rp = new xe();
+  const script = (0, import_node_fs3.readFileSync)(filePath, "utf-8");
+  const rp = await createRobinPath();
   const startTime = FLAG_VERBOSE ? performance.now() : 0;
   try {
     const ast = await rp.getAST(script);
@@ -14488,39 +20287,39 @@ async function handleFmt(args) {
   }
   let hasUnformatted = false;
   for (const filePath of files) {
-    const script = (0, import_node_fs.readFileSync)(filePath, "utf-8");
+    const script = (0, import_node_fs3.readFileSync)(filePath, "utf-8");
     const startTime = FLAG_VERBOSE ? performance.now() : 0;
     try {
       const formatted = await formatScript(script);
       if (FLAG_VERBOSE) {
         const elapsed = (performance.now() - startTime).toFixed(1);
-        logVerbose(`Formatted ${(0, import_node_path.relative)(process.cwd(), filePath)} in ${elapsed}ms`);
+        logVerbose(`Formatted ${(0, import_node_path4.relative)(process.cwd(), filePath)} in ${elapsed}ms`);
       }
       if (checkOnly) {
         if (formatted !== script) {
-          console.error((0, import_node_path.relative)(process.cwd(), filePath) + " \u2014 " + color.red("not formatted"));
+          console.error((0, import_node_path4.relative)(process.cwd(), filePath) + " \u2014 " + color.red("not formatted"));
           hasUnformatted = true;
         } else {
-          log((0, import_node_path.relative)(process.cwd(), filePath) + " \u2014 " + color.green("OK"));
+          log((0, import_node_path4.relative)(process.cwd(), filePath) + " \u2014 " + color.green("OK"));
         }
       } else if (diffMode) {
         if (formatted !== script) {
-          const relPath = (0, import_node_path.relative)(process.cwd(), filePath);
+          const relPath = (0, import_node_path4.relative)(process.cwd(), filePath);
           console.log(simpleDiff(relPath, script, formatted));
           hasUnformatted = true;
         }
       } else if (writeInPlace) {
         if (formatted !== script) {
-          (0, import_node_fs.writeFileSync)(filePath, formatted, "utf-8");
-          log(color.green("formatted") + " " + (0, import_node_path.relative)(process.cwd(), filePath));
+          (0, import_node_fs3.writeFileSync)(filePath, formatted, "utf-8");
+          log(color.green("formatted") + " " + (0, import_node_path4.relative)(process.cwd(), filePath));
         } else {
-          log(color.dim("unchanged") + " " + (0, import_node_path.relative)(process.cwd(), filePath));
+          log(color.dim("unchanged") + " " + (0, import_node_path4.relative)(process.cwd(), filePath));
         }
       } else {
         process.stdout.write(formatted);
       }
     } catch (error) {
-      console.error(color.red("Error") + ` formatting ${(0, import_node_path.relative)(process.cwd(), filePath)}: ${error.message}`);
+      console.error(color.red("Error") + ` formatting ${(0, import_node_path4.relative)(process.cwd(), filePath)}: ${error.message}`);
       hasUnformatted = true;
     }
   }
@@ -14636,29 +20435,29 @@ function stripFlavorFlags(node) {
   return clone;
 }
 function collectRPFiles(pathArg) {
-  const fullPath = (0, import_node_path.resolve)(pathArg);
-  if (!(0, import_node_fs.existsSync)(fullPath)) {
+  const fullPath = (0, import_node_path4.resolve)(pathArg);
+  if (!(0, import_node_fs3.existsSync)(fullPath)) {
     const resolved = resolveScriptPath(pathArg);
     if (resolved) return [resolved];
     return [];
   }
-  const stat = (0, import_node_fs.statSync)(fullPath);
-  if (stat.isFile()) {
+  const stat2 = (0, import_node_fs3.statSync)(fullPath);
+  if (stat2.isFile()) {
     return [fullPath];
   }
-  if (stat.isDirectory()) {
+  if (stat2.isDirectory()) {
     return collectRPFilesRecursive(fullPath);
   }
   return [];
 }
 function collectRPFilesRecursive(dir) {
   const results = [];
-  const entries = (0, import_node_fs.readdirSync)(dir);
+  const entries = (0, import_node_fs3.readdirSync)(dir);
   for (const entry of entries) {
     if (entry.startsWith(".") || entry === "node_modules") continue;
-    const fullPath = (0, import_node_path.join)(dir, entry);
-    const stat = (0, import_node_fs.statSync)(fullPath);
-    if (stat.isDirectory()) {
+    const fullPath = (0, import_node_path4.join)(dir, entry);
+    const stat2 = (0, import_node_fs3.statSync)(fullPath);
+    if (stat2.isDirectory()) {
       results.push(...collectRPFilesRecursive(fullPath));
     } else if (entry.endsWith(".rp") || entry.endsWith(".robin")) {
       results.push(fullPath);
@@ -14671,8 +20470,8 @@ async function handleTest(args) {
   const targetArg = args.find((a) => !a.startsWith("-"));
   const searchPath = targetArg || ".";
   let testFiles;
-  const fullPath = (0, import_node_path.resolve)(searchPath);
-  if ((0, import_node_fs.existsSync)(fullPath) && (0, import_node_fs.statSync)(fullPath).isFile()) {
+  const fullPath = (0, import_node_path4.resolve)(searchPath);
+  if ((0, import_node_fs3.existsSync)(fullPath) && (0, import_node_fs3.statSync)(fullPath).isFile()) {
     testFiles = [fullPath];
   } else {
     testFiles = collectTestFiles(searchPath);
@@ -14690,9 +20489,9 @@ async function handleTest(args) {
   const results = [];
   const startTime = performance.now();
   for (const filePath of testFiles) {
-    const relPath = (0, import_node_path.relative)(process.cwd(), filePath);
-    const script = (0, import_node_fs.readFileSync)(filePath, "utf-8");
-    const rp = new xe();
+    const relPath = (0, import_node_path4.relative)(process.cwd(), filePath);
+    const script = (0, import_node_fs3.readFileSync)(filePath, "utf-8");
+    const rp = await createRobinPath();
     try {
       await rp.executeScript(script);
       passed++;
@@ -14727,12 +20526,12 @@ async function handleTest(args) {
   process.exit(failed > 0 ? 1 : 0);
 }
 function collectTestFiles(searchPath) {
-  const fullPath = (0, import_node_path.resolve)(searchPath);
-  if (!(0, import_node_fs.existsSync)(fullPath)) {
+  const fullPath = (0, import_node_path4.resolve)(searchPath);
+  if (!(0, import_node_fs3.existsSync)(fullPath)) {
     return [];
   }
-  const stat = (0, import_node_fs.statSync)(fullPath);
-  if (!stat.isDirectory()) {
+  const stat2 = (0, import_node_fs3.statSync)(fullPath);
+  if (!stat2.isDirectory()) {
     if (fullPath.endsWith(".test.rp")) return [fullPath];
     return [];
   }
@@ -14740,12 +20539,12 @@ function collectTestFiles(searchPath) {
 }
 function collectTestFilesRecursive(dir) {
   const results = [];
-  const entries = (0, import_node_fs.readdirSync)(dir);
+  const entries = (0, import_node_fs3.readdirSync)(dir);
   for (const entry of entries) {
     if (entry.startsWith(".") || entry === "node_modules") continue;
-    const fullPath = (0, import_node_path.join)(dir, entry);
-    const stat = (0, import_node_fs.statSync)(fullPath);
-    if (stat.isDirectory()) {
+    const fullPath = (0, import_node_path4.join)(dir, entry);
+    const stat2 = (0, import_node_fs3.statSync)(fullPath);
+    if (stat2.isDirectory()) {
       results.push(...collectTestFilesRecursive(fullPath));
     } else if (entry.endsWith(".test.rp")) {
       results.push(fullPath);
@@ -14754,11 +20553,11 @@ function collectTestFilesRecursive(dir) {
   return results.sort();
 }
 async function handleWatch(filePath, script) {
-  log(color.dim(`Watching ${(0, import_node_path.relative)(process.cwd(), filePath)} for changes...`));
+  log(color.dim(`Watching ${(0, import_node_path4.relative)(process.cwd(), filePath)} for changes...`));
   log("");
   await runWatchIteration(filePath);
   let debounceTimer = null;
-  (0, import_node_fs.watch)(filePath, () => {
+  (0, import_node_fs3.watch)(filePath, () => {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(async () => {
       process.stdout.write("\x1B[2J\x1B[H");
@@ -14768,10 +20567,10 @@ async function handleWatch(filePath, script) {
 }
 async function runWatchIteration(filePath) {
   const timestamp = (/* @__PURE__ */ new Date()).toLocaleTimeString();
-  log(color.dim(`[${timestamp}]`) + ` Running ${(0, import_node_path.relative)(process.cwd(), filePath)}`);
+  log(color.dim(`[${timestamp}]`) + ` Running ${(0, import_node_path4.relative)(process.cwd(), filePath)}`);
   log(color.dim("\u2500".repeat(50)));
-  const script = (0, import_node_fs.readFileSync)(filePath, "utf-8");
-  const rp = new xe();
+  const script = (0, import_node_fs3.readFileSync)(filePath, "utf-8");
+  const rp = await createRobinPath();
   try {
     await rp.executeScript(script);
   } catch (error) {
@@ -14781,7 +20580,7 @@ async function runWatchIteration(filePath) {
   log(color.dim("Waiting for changes..."));
 }
 function showMainHelp() {
-  console.log(`RobinPath v${Sn} \u2014 Scripting language for automation and data processing
+  console.log(`RobinPath v${CLI_VERSION} \u2014 Scripting language for automation and data processing
 
 USAGE:
   robinpath [command] [flags] [file]
@@ -14793,13 +20592,37 @@ COMMANDS:
   check <file>       Check syntax without executing (--json for machine output)
   ast <file>         Dump AST as JSON (--compact for minified)
   test [dir|file]    Run *.test.rp test files (--json for machine output)
-  install            Install robinpath to system PATH
+
+MODULE MANAGEMENT:
+  add <pkg>[@ver]    Install a module from the registry
+  remove <pkg>       Uninstall a module
+  upgrade <pkg>      Upgrade a single module to latest
+  search <query>     Search the module registry
+  info <pkg>         Show module details
+  modules list       List installed modules
+  modules upgrade    Upgrade all installed modules
+  modules init       Scaffold a new module (interactive wizard)
+  audit              Check installed modules for issues
+
+PROJECT:
+  init               Create a robinpath.json project
+  install            Install all modules from robinpath.json
+  doctor             Diagnose environment and modules
+  env <set|list|rm>  Manage environment secrets
+  cache <list|clean> Manage download cache
+
+SYSTEM:
+  install            Install robinpath to system PATH (if no robinpath.json)
   uninstall          Remove robinpath from system
   update             Update robinpath to the latest version
+
+CLOUD:
   login              Sign in to RobinPath Cloud via browser
   logout             Remove stored credentials
   whoami             Show current user and account info
   publish [dir]      Publish a module to the registry
+  pack [dir]         Create tarball without publishing
+  deprecate <pkg>    Mark a module as deprecated
   sync               List your published modules
 
 FLAGS:
@@ -14862,6 +20685,7 @@ TEST WRITING:
 
 CONFIGURATION:
   Install dir:  ~/.robinpath/bin/
+  Modules dir:  ~/.robinpath/modules/
   History file: ~/.robinpath/history
   Auth file:    ~/.robinpath/auth.json
 
@@ -15014,7 +20838,7 @@ DESCRIPTION:
     publish: `robinpath publish \u2014 Publish a module to the registry
 
 USAGE:
-  robinpath publish [dir]
+  robinpath publish [dir] [flags]
 
 DESCRIPTION:
   Pack the target directory (default: current dir) as a tarball and upload
@@ -15024,9 +20848,21 @@ DESCRIPTION:
   Maximum package size: 5MB.
   Excluded from tarball: node_modules, .git, dist
 
+FLAGS:
+  --public             Publish as public (default)
+  --private            Publish as private (only you can install)
+  --org <name>         Publish to an organization
+  --patch              Auto-bump patch version before publish
+  --minor              Auto-bump minor version before publish
+  --major              Auto-bump major version before publish
+  --dry-run            Validate and show what would be published
+
 EXAMPLES:
-  robinpath publish                   Publish current directory
-  robinpath publish ./packages/uuid   Publish a specific package`,
+  robinpath publish                        Publish current directory
+  robinpath publish --private              Publish as private
+  robinpath publish --org mycompany        Publish to org
+  robinpath publish --patch                Bump 0.1.0 \u2192 0.1.1 and publish
+  robinpath publish --dry-run              Preview without uploading`,
     sync: `robinpath sync \u2014 List your published modules
 
 USAGE:
@@ -15034,25 +20870,175 @@ USAGE:
 
 DESCRIPTION:
   Fetches your published modules from the registry and displays
-  them in a table with name, version, downloads, and visibility.`
+  them in a table with name, version, downloads, and visibility.`,
+    add: `robinpath add \u2014 Install a module from the registry
+
+USAGE:
+  robinpath add <module>[@version]
+
+DESCRIPTION:
+  Downloads and installs a module to ~/.robinpath/modules/.
+  Installed modules are automatically available in all scripts.
+
+FLAGS:
+  --force            Reinstall even if already installed
+
+EXAMPLES:
+  robinpath add @robinpath/slack          Install latest version
+  robinpath add @robinpath/slack@0.2.0    Install specific version`,
+    remove: `robinpath remove \u2014 Uninstall a module
+
+USAGE:
+  robinpath remove <module>
+
+DESCRIPTION:
+  Removes an installed module from ~/.robinpath/modules/ and
+  updates the local manifest.
+
+EXAMPLES:
+  robinpath remove @robinpath/slack`,
+    upgrade: `robinpath upgrade \u2014 Upgrade a module to the latest version
+
+USAGE:
+  robinpath upgrade <module>
+
+DESCRIPTION:
+  Checks the registry for a newer version and installs it.
+
+EXAMPLES:
+  robinpath upgrade @robinpath/slack`,
+    modules: `robinpath modules \u2014 Module management subcommands
+
+USAGE:
+  robinpath modules <subcommand>
+
+SUBCOMMANDS:
+  list               List all installed modules
+  upgrade            Upgrade all installed modules to latest
+  init               Scaffold a new RobinPath module (interactive wizard)
+
+EXAMPLES:
+  robinpath modules list
+  robinpath modules upgrade
+  robinpath modules init`,
+    pack: `robinpath pack \u2014 Create a tarball without publishing
+
+USAGE:
+  robinpath pack [dir]
+
+DESCRIPTION:
+  Creates a .tar.gz archive of the module, same as publish would,
+  but saves it to the current directory instead of uploading.
+
+EXAMPLES:
+  robinpath pack
+  robinpath pack ./my-module`,
+    search: `robinpath search \u2014 Search the module registry
+
+USAGE:
+  robinpath search <query> [--category=<cat>]
+
+DESCRIPTION:
+  Searches the RobinPath module registry and displays matching modules.
+
+EXAMPLES:
+  robinpath search slack
+  robinpath search crm --category=crm`,
+    info: `robinpath info \u2014 Show module details
+
+USAGE:
+  robinpath info <module>
+
+DESCRIPTION:
+  Displays detailed information about a module from the registry,
+  including version, author, license, downloads, and install status.
+
+EXAMPLES:
+  robinpath info @robinpath/slack`,
+    init: `robinpath init \u2014 Create a new RobinPath project
+
+USAGE:
+  robinpath init [--force]
+
+DESCRIPTION:
+  Creates a robinpath.json project config file in the current directory,
+  along with a main.rp entry file, .env, and .gitignore.
+
+EXAMPLES:
+  robinpath init`,
+    doctor: `robinpath doctor \u2014 Diagnose environment
+
+USAGE:
+  robinpath doctor
+
+DESCRIPTION:
+  Checks CLI installation, authentication status, installed modules,
+  project config, and cache. Reports any issues found.`,
+    env: `robinpath env \u2014 Manage environment secrets
+
+USAGE:
+  robinpath env set <KEY> <value>
+  robinpath env list
+  robinpath env remove <KEY>
+
+DESCRIPTION:
+  Manages environment variables stored in ~/.robinpath/env.
+  Values are masked when listed.
+
+EXAMPLES:
+  robinpath env set SLACK_TOKEN xoxb-1234
+  robinpath env list
+  robinpath env remove SLACK_TOKEN`,
+    cache: `robinpath cache \u2014 Manage download cache
+
+USAGE:
+  robinpath cache list
+  robinpath cache clean
+
+DESCRIPTION:
+  Manages the module download cache at ~/.robinpath/cache/.
+  Cached tarballs speed up reinstalls and enable offline installs.
+
+EXAMPLES:
+  robinpath cache list
+  robinpath cache clean`,
+    audit: `robinpath audit \u2014 Check installed modules for issues
+
+USAGE:
+  robinpath audit
+
+DESCRIPTION:
+  Checks each installed module against the registry for deprecation
+  warnings and available updates.`,
+    deprecate: `robinpath deprecate \u2014 Mark a module as deprecated
+
+USAGE:
+  robinpath deprecate <module> "reason"
+
+DESCRIPTION:
+  Marks a published module as deprecated. Users who have it installed
+  will see a warning when running 'robinpath audit'.
+
+EXAMPLES:
+  robinpath deprecate @myorg/old-module "Use @myorg/new-module instead"`
   };
   const page = helpPages[command];
   if (page) {
     console.log(page);
   } else {
     console.error(color.red("Error:") + ` Unknown command: ${command}`);
-    console.error("Available commands: fmt, check, ast, test, install, uninstall, login, logout, whoami, publish, sync");
+    console.error("Available: add, remove, upgrade, search, info, modules, init, doctor, env, cache, audit, deprecate, pack, fmt, check, ast, test, install, uninstall, login, logout, whoami, publish, sync");
     process.exit(2);
   }
 }
 function getHistoryPath() {
-  return (0, import_node_path.join)(getRobinPathHome(), "history");
+  return (0, import_node_path4.join)(getRobinPathHome(), "history");
 }
 function loadHistory() {
   const historyPath = getHistoryPath();
   try {
-    if ((0, import_node_fs.existsSync)(historyPath)) {
-      const content = (0, import_node_fs.readFileSync)(historyPath, "utf-8");
+    if ((0, import_node_fs3.existsSync)(historyPath)) {
+      const content = (0, import_node_fs3.readFileSync)(historyPath, "utf-8");
       return content.split("\n").filter((line) => line.trim()).reverse();
     }
   } catch {
@@ -15063,16 +21049,16 @@ function appendHistory(line) {
   const historyPath = getHistoryPath();
   try {
     const dir = getRobinPathHome();
-    if (!(0, import_node_fs.existsSync)(dir)) {
-      (0, import_node_fs.mkdirSync)(dir, { recursive: true });
+    if (!(0, import_node_fs3.existsSync)(dir)) {
+      (0, import_node_fs3.mkdirSync)(dir, { recursive: true });
     }
-    (0, import_node_fs.appendFileSync)(historyPath, line + "\n", "utf-8");
+    (0, import_node_fs3.appendFileSync)(historyPath, line + "\n", "utf-8");
     try {
-      const content = (0, import_node_fs.readFileSync)(historyPath, "utf-8");
+      const content = (0, import_node_fs3.readFileSync)(historyPath, "utf-8");
       const lines = content.split("\n").filter((l) => l.trim());
       if (lines.length > 1e3) {
         const trimmed = lines.slice(lines.length - 1e3);
-        (0, import_node_fs.writeFileSync)(historyPath, trimmed.join("\n") + "\n", "utf-8");
+        (0, import_node_fs3.writeFileSync)(historyPath, trimmed.join("\n") + "\n", "utf-8");
       }
     } catch {
     }
@@ -15080,7 +21066,7 @@ function appendHistory(line) {
   }
 }
 async function startREPL() {
-  const rp = new xe({ threadControl: true });
+  const rp = await createRobinPath({ threadControl: true });
   rp.createThread("default");
   const sessionLines = [];
   function getPrompt() {
@@ -15104,7 +21090,7 @@ async function startREPL() {
     history,
     historySize: 1e3
   });
-  log(`RobinPath v${Sn}`);
+  log(`RobinPath v${CLI_VERSION}`);
   log('Type "help" for commands, "exit" to quit');
   log("");
   rl.prompt();
@@ -15161,7 +21147,7 @@ async function startREPL() {
         return;
       }
       try {
-        const script = (0, import_node_fs.readFileSync)(loadPath, "utf-8");
+        const script = (0, import_node_fs3.readFileSync)(loadPath, "utf-8");
         log(color.dim(`Loading ${fileArg}...`));
         const thread = rp.getCurrentThread();
         if (thread) {
@@ -15186,7 +21172,7 @@ async function startREPL() {
       }
       try {
         const content = sessionLines.join("\n") + "\n";
-        (0, import_node_fs.writeFileSync)((0, import_node_path.resolve)(fileArg), content, "utf-8");
+        (0, import_node_fs3.writeFileSync)((0, import_node_path4.resolve)(fileArg), content, "utf-8");
         log(color.green("Saved") + ` ${sessionLines.length} lines to ${fileArg}`);
       } catch (error) {
         console.error(color.red("Error:") + ` Could not save: ${error.message}`);
@@ -15257,10 +21243,10 @@ async function main() {
   const args = process.argv.slice(2);
   FLAG_QUIET = args.includes("--quiet") || args.includes("-q");
   FLAG_VERBOSE = args.includes("--verbose");
-  const invokedAs = (0, import_node_path.basename)(process.execPath, ".exe").toLowerCase();
+  const invokedAs = (0, import_node_path4.basename)(process.execPath, ".exe").toLowerCase();
   const cliName = invokedAs === "rp" ? "rp" : "robinpath";
   if (args.includes("--version") || args.includes("-v")) {
-    console.log(`${cliName} v${Sn}`);
+    console.log(`${cliName} v${CLI_VERSION} (lang v${Sn})`);
     return;
   }
   if (args.includes("--help") || args.includes("-h")) {
@@ -15277,8 +21263,76 @@ async function main() {
     }
     return;
   }
+  if (command === "add") {
+    await handleAdd(args.slice(1));
+    return;
+  }
+  if (command === "remove") {
+    await handleRemove(args.slice(1));
+    return;
+  }
+  if (command === "upgrade") {
+    await handleUpgrade(args.slice(1));
+    return;
+  }
+  if (command === "search") {
+    await handleSearch(args.slice(1));
+    return;
+  }
+  if (command === "info") {
+    await handleInfo(args.slice(1));
+    return;
+  }
+  if (command === "modules" || command === "module") {
+    const sub = args[1];
+    if (!sub || sub === "list") {
+      await handleModulesList();
+    } else if (sub === "upgrade") {
+      await handleModulesUpgradeAll();
+    } else if (sub === "init") {
+      await handleModulesInit();
+    } else {
+      console.error(color.red("Error:") + ` Unknown subcommand: modules ${sub}`);
+      console.error("Available: modules list, modules upgrade, modules init");
+      process.exit(2);
+    }
+    return;
+  }
+  if (command === "pack") {
+    await handlePack(args.slice(1));
+    return;
+  }
+  if (command === "audit") {
+    await handleAudit();
+    return;
+  }
+  if (command === "deprecate") {
+    await handleDeprecate(args.slice(1));
+    return;
+  }
+  if (command === "env") {
+    await handleEnv(args.slice(1));
+    return;
+  }
+  if (command === "cache") {
+    await handleCache(args.slice(1));
+    return;
+  }
+  if (command === "doctor") {
+    await handleDoctor();
+    return;
+  }
+  if (command === "init") {
+    await handleInit(args.slice(1));
+    return;
+  }
   if (command === "install") {
-    handleInstall();
+    const hasProjectFile = (0, import_node_fs3.existsSync)((0, import_node_path4.resolve)("robinpath.json"));
+    if (hasProjectFile) {
+      await handleProjectInstall();
+    } else {
+      handleInstall();
+    }
     return;
   }
   if (command === "uninstall") {
@@ -15286,7 +21340,7 @@ async function main() {
     return;
   }
   if (command === "update") {
-    handleUpdate();
+    await handleUpdate();
     return;
   }
   if (command === "check") {
@@ -15347,12 +21401,12 @@ async function main() {
     const filePath = resolveScriptPath(fileArg);
     if (!filePath) {
       console.error(color.red("Error:") + ` File not found: ${fileArg}`);
-      if (!(0, import_node_path.extname)(fileArg)) {
+      if (!(0, import_node_path4.extname)(fileArg)) {
         console.error(`  (also tried ${fileArg}.rp and ${fileArg}.robin)`);
       }
       process.exit(2);
     }
-    const script = (0, import_node_fs.readFileSync)(filePath, "utf-8");
+    const script = (0, import_node_fs3.readFileSync)(filePath, "utf-8");
     const hasWatch = args.includes("--watch");
     const hasShortWatch = args.includes("-w") && command !== "fmt";
     if (hasWatch || hasShortWatch) {

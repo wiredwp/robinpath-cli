@@ -11,6 +11,7 @@ import { homedir, platform, tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErrorWithContext } from '@wiredwp/robinpath';
+import { nativeModules } from './modules/index.js';
 
 // Injected by esbuild at build time via --define, fallback for dev mode
 const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.42.0';
@@ -488,6 +489,19 @@ async function loadInstalledModules(rp) {
  */
 async function createRobinPath(opts) {
     const rp = new RobinPath(opts);
+
+    // Register native modules (bundled in binary, always available)
+    for (const mod of nativeModules) {
+        rp.registerModule(mod.name, mod.functions);
+        if (mod.functionMetadata) {
+            rp.registerModuleMeta(mod.name, mod.functionMetadata);
+        }
+        if (mod.moduleMetadata) {
+            rp.registerModuleInfo(mod.name, mod.moduleMetadata);
+        }
+    }
+
+    // Load user-installed external modules (can override natives)
     await loadInstalledModules(rp);
     return rp;
 }
