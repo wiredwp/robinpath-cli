@@ -20,7 +20,7 @@ step() {
     printf "%12s ${NC}%s\n" "${1}" "${2}"
 }
 
-echo ""
+printf "\n"
 
 # Detect OS and architecture
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -31,8 +31,7 @@ case "$OS" in
     darwin) PLATFORM="macos" ;;
     *)
         step "${RED}error" "Unsupported OS: $OS"
-        echo "               Visit https://github.com/$REPO/releases"
-        echo ""
+        printf "               Visit https://github.com/$REPO/releases\n\n"
         exit 1
         ;;
 esac
@@ -42,7 +41,7 @@ case "$ARCH" in
     arm64|aarch64) ARCH_SUFFIX="arm64" ;;
     *)
         step "${RED}error" "Unsupported architecture: $ARCH"
-        echo ""
+        printf "\n"
         exit 1
         ;;
 esac
@@ -53,7 +52,7 @@ BINARY_NAME="robinpath-${PLATFORM}-${ARCH_SUFFIX}"
 step "${CYAN}Fetching" "latest release..."
 RELEASE_JSON=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null) || {
     step "${RED}error" "Could not reach GitHub. Check your connection."
-    echo ""
+    printf "\n"
     exit 1
 }
 
@@ -64,7 +63,7 @@ LATEST_CLEAN=$(echo "$VERSION" | sed 's/^v//')
 # Skip if already on latest version
 if [ -n "$ROBINPATH_CURRENT_VERSION" ] && [ "$ROBINPATH_CURRENT_VERSION" = "$LATEST_CLEAN" ]; then
     step "${GREEN}Up to date" "robinpath v$ROBINPATH_CURRENT_VERSION"
-    echo ""
+    printf "\n"
     exit 0
 fi
 
@@ -74,15 +73,23 @@ fi
 
 if [ -z "$DOWNLOAD_URL" ]; then
     step "${RED}error" "No binary for $PLATFORM/$ARCH_SUFFIX in $VERSION."
-    echo "               ${DIM}Visit https://github.com/$REPO/releases${NC}"
-    echo ""
+    printf "               ${DIM}Visit https://github.com/$REPO/releases${NC}\n\n"
     exit 1
 fi
 
 # Download with progress bar
 step "${CYAN}Downloading" "$VERSION ${DIM}($PLATFORM $ARCH_SUFFIX)${NC}"
 mkdir -p "$INSTALL_DIR"
-curl -f# "$DOWNLOAD_URL" -o "$INSTALL_DIR/robinpath" 2>&1
+curl -fL# "$DOWNLOAD_URL" -o "$INSTALL_DIR/robinpath" 2>&1
+
+# Verify download is not empty
+FILESIZE=$(wc -c < "$INSTALL_DIR/robinpath" | tr -d ' ')
+if [ "$FILESIZE" -lt 1000 ]; then
+    step "${RED}error" "Download failed (file is ${FILESIZE} bytes). Try again."
+    rm -f "$INSTALL_DIR/robinpath"
+    printf "\n"
+    exit 1
+fi
 
 # Install
 chmod +x "$INSTALL_DIR/robinpath"
@@ -94,7 +101,7 @@ if "$INSTALL_DIR/robinpath" --version > /dev/null 2>&1; then
     INSTALLED_VERSION=$("$INSTALL_DIR/robinpath" --version)
 else
     step "${RED}error" "Binary downloaded but failed to execute."
-    echo ""
+    printf "\n"
     exit 1
 fi
 
@@ -123,9 +130,7 @@ fi
 if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
     if [ -n "$PROFILE" ]; then
         if ! grep -q "$INSTALL_DIR" "$PROFILE" 2>/dev/null; then
-            echo "" >> "$PROFILE"
-            echo "# RobinPath" >> "$PROFILE"
-            echo "$PATH_LINE" >> "$PROFILE"
+            printf "\n# RobinPath\n%s\n" "$PATH_LINE" >> "$PROFILE"
         fi
         ADDED_PATH=true
     fi
@@ -134,18 +139,16 @@ fi
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))
 step "${GREEN}Installed" "$INSTALLED_VERSION in ${ELAPSED}s"
-echo ""
+printf "\n"
 
 if [ "$ADDED_PATH" = "true" ]; then
-    echo "  ${DIM}Restart your terminal, then run:${NC}"
+    printf "  ${DIM}Restart your terminal, then run:${NC}\n"
 elif ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
-    echo "  ${DIM}Add this to your shell profile:${NC}"
-    echo "    ${CYAN}$PATH_LINE${NC}"
-    echo ""
-    echo "  ${DIM}Then run:${NC}"
+    printf "  ${DIM}Add this to your shell profile:${NC}\n"
+    printf "    ${CYAN}%s${NC}\n\n" "$PATH_LINE"
+    printf "  ${DIM}Then run:${NC}\n"
 else
-    echo "  ${DIM}To get started, run:${NC}"
+    printf "  ${DIM}To get started, run:${NC}\n"
 fi
 
-echo "    ${WHITE}robinpath --help${NC}"
-echo ""
+printf "    ${WHITE}robinpath --help${NC}\n\n"
