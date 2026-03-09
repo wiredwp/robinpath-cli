@@ -18360,7 +18360,7 @@ var nativeModules = [
 ];
 
 // cli-entry.js
-var CLI_VERSION = true ? "1.43.0" : "1.42.0";
+var CLI_VERSION = true ? "1.45.0" : "1.45.0";
 var FLAG_QUIET = false;
 var FLAG_VERBOSE = false;
 function log(...args) {
@@ -18419,6 +18419,241 @@ function handleUpdate() {
     process.exit(1);
   }
 }
+function writeDocsFile() {
+  const docsPath = (0, import_node_path4.join)(getRobinPathHome(), "DOCUMENTATION.md");
+  const modulesList = nativeModules.map((m) => {
+    const fns = Object.keys(m.functions).join(", ");
+    const desc = m.moduleMetadata?.description || "";
+    return `### \`${m.name}\` \u2014 ${desc}
+Functions: ${fns}`;
+  }).join("\n\n");
+  const content = `# RobinPath CLI \u2014 Documentation
+> Version: ${CLI_VERSION} | Language: ${Sn} | Binary: robinpath, rp
+
+## Installation
+- macOS/Linux: \`curl -fsSL https://dev.robinpath.com/install.sh | bash\`
+- Windows: \`irm https://dev.robinpath.com/install.ps1 | iex\`
+
+## Quick Start
+\`\`\`bash
+robinpath app.rp              # Run a script
+robinpath -e 'log "hello"'    # Inline execution
+robinpath                      # Start REPL
+robinpath start                # Start HTTP server
+\`\`\`
+
+## CLI Commands
+| Command | Description |
+|---------|-------------|
+| \`<file.rp>\` | Run a script (.rp, .robin, auto-resolved) |
+| \`-e <code>\` | Execute inline code |
+| \`-w, --watch <file>\` | Re-run on file changes |
+| \`fmt <file\\|dir>\` | Format code (--write, --check, --diff) |
+| \`check <file>\` | Syntax check (--json) |
+| \`ast <file>\` | Dump AST (--compact) |
+| \`test [dir\\|file]\` | Run *.test.rp tests (--json) |
+| \`add <pkg>[@ver]\` | Install module |
+| \`remove <pkg>\` | Uninstall module |
+| \`upgrade <pkg>\` | Upgrade module |
+| \`modules list\` | List installed modules |
+| \`modules upgrade\` | Upgrade all modules |
+| \`modules init\` | Scaffold new module |
+| \`search <query>\` | Search registry (--category) |
+| \`info\` | System info & paths (--json) |
+| \`info <pkg>\` | Module details |
+| \`audit\` | Check module health |
+| \`init\` | Create project (robinpath.json) |
+| \`install\` | Install project dependencies |
+| \`doctor\` | Diagnose environment |
+| \`env set\\|list\\|remove\` | Manage environment secrets |
+| \`cache list\\|clean\` | Manage download cache |
+| \`login / logout / whoami\` | Authentication |
+| \`publish [dir]\` | Publish module (--public, --private, --org, --dry-run, --patch/--minor/--major) |
+| \`pack [dir]\` | Create tarball |
+| \`deprecate <pkg>\` | Deprecate module |
+| \`sync\` | List published modules |
+| \`start\` | Start HTTP server |
+| \`status\` | Check server status |
+| \`update\` | Update CLI to latest |
+| \`install\` | Install to system PATH |
+| \`uninstall\` | Remove from system |
+
+## Global Flags
+| Flag | Description |
+|------|-------------|
+| \`-q, --quiet\` | Suppress non-error output |
+| \`--verbose\` | Show timing and debug info |
+| \`-v, --version\` | Show version |
+| \`-h, --help\` | Show help |
+
+## HTTP Server (\`robinpath start\`)
+
+Start an HTTP server exposing the RobinPath engine via REST API. One server handles all requests. Variables persist across requests (conversational execution).
+
+### Server Flags
+| Flag | Default | Description |
+|------|---------|-------------|
+| \`-p, --port\` | 6372 | Port |
+| \`-s, --session\` | auto UUID | Session secret (gatekeeper) |
+| \`--host\` | 127.0.0.1 | Bind address |
+| \`--timeout\` | 30000 | Script timeout (ms) |
+| \`--max-concurrent\` | 5 | Max parallel jobs |
+| \`--cors-origin\` | * | CORS origin |
+| \`--log-file\` | (none) | JSON log file |
+| \`--max-body\` | 5000000 | Max body (bytes) |
+
+### Startup
+\`\`\`bash
+robinpath start -p 6372 -s my-secret
+# Output: {"ok":true,"port":6372,"host":"127.0.0.1","session":"...","version":"${CLI_VERSION}"}
+\`\`\`
+
+### Authentication
+All endpoints (except GET /v1/health) require: \`x-robinpath-session: <token>\`
+
+### Endpoints
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | /v1/health | No | Health check |
+| POST | /v1/execute | Yes | Execute script (JSON: {"code":"..."} or text/plain body) |
+| POST | /v1/execute/file | Yes | Execute file ({"file":"./script.rp"}) |
+| POST | /v1/check | Yes | Syntax check ({"script":"..."}) |
+| POST | /v1/fmt | Yes | Format code ({"script":"..."}) |
+| GET | /v1/jobs | Yes | List jobs (?status=running&limit=10) |
+| GET | /v1/jobs/:id | Yes | Job details |
+| GET | /v1/jobs/:id/stream | Yes | SSE stream for job |
+| POST | /v1/jobs/:id/cancel | Yes | Cancel job |
+| GET | /v1/modules | Yes | List loaded modules |
+| GET | /v1/info | Yes | Server runtime info |
+| GET | /v1/metrics | Yes | Prometheus metrics |
+| GET | /v1/openapi.json | Yes | OpenAPI 3.1 spec |
+| POST | /v1/stop | Yes | Graceful shutdown |
+
+### Execute Response
+\`\`\`json
+{"ok":true,"jobId":"...","status":"completed","output":"...","duration":12}
+\`\`\`
+
+### SSE Streaming
+Add \`Accept: text/event-stream\` header. Events: started, output, completed, job.failed, job.cancelled, done.
+
+### Webhooks
+Add \`webhook\` (URL) and \`webhook_secret\` to request body. Returns 202 immediately. Signature: \`X-Webhook-Signature: sha256=<hmac-hex>\`
+
+### Optional Headers
+| Header | Description |
+|--------|-------------|
+| \`x-request-id\` | Client request ID (auto UUID if missing) |
+| \`x-idempotency-key\` | Prevent duplicate execution (5-min TTL) |
+| \`Accept: text/event-stream\` | SSE streaming |
+| \`Content-Type: text/plain\` | Raw code body (no JSON) |
+
+### Response Headers
+\`x-processing-ms\`, \`x-request-id\`, \`x-rate-limit-limit\`, \`x-rate-limit-remaining\`, \`x-rate-limit-reset\`
+
+### Features
+Session gatekeeper, API versioning (/v1/), SSE streaming, webhook callbacks (HMAC-SHA256), idempotency keys, rate limiting, job queue with cancel, structured JSON logging, Prometheus metrics, OpenAPI spec, graceful shutdown, persistent runtime state, plain text body support, PID file management.
+
+## SDK (@robinpath/sdk)
+
+For JavaScript/TypeScript apps. Direct in-process execution, no HTTP server.
+
+\`\`\`bash
+npm install @robinpath/sdk
+\`\`\`
+
+\`\`\`javascript
+import { createRuntime } from '@robinpath/sdk';
+
+const rp = createRuntime();                              // full access
+const rp = createRuntime({ timeout: 5000 });             // with timeout
+const rp = createRuntime({ permissions: 'none' });       // sandboxed
+const rp = createRuntime({ modules: ['math', 'string'] }); // whitelist
+
+const result = await rp.run('log math.add 1 2');
+// { ok, output, value, logs, variables, error, stats }
+
+const result = await rp.run('log $name', { name: 'Robin' }); // context
+
+const stream = rp.stream(code);
+stream.on('log', (log) => console.log(log.message));
+const result = await stream.result;
+\`\`\`
+
+## Integration (non-JS languages)
+
+For Rust, Python, Go, PHP, Ruby, C#, Java \u2014 use \`robinpath start\` HTTP server:
+
+1. Spawn: \`robinpath start -p <port> [-s <secret>]\`
+2. Parse startup JSON from stdout to get session token
+3. Send HTTP requests with \`x-robinpath-session\` header
+4. Stop: \`POST /v1/stop\` or send SIGTERM
+
+### Rust Example
+\`\`\`rust
+let child = Command::new("robinpath").args(["start", "-p", "6372"]).stdout(Stdio::piped()).spawn()?;
+// Read first line \u2192 parse JSON \u2192 get session
+// reqwest::Client POST /v1/execute with x-robinpath-session header
+\`\`\`
+
+### Python Example
+\`\`\`python
+proc = subprocess.Popen(["robinpath", "start", "-p", "6372"], stdout=subprocess.PIPE)
+startup = json.loads(proc.stdout.readline())
+session = startup["session"]
+requests.post("http://127.0.0.1:6372/v1/execute",
+    headers={"x-robinpath-session": session}, json={"code": "log 1"})
+\`\`\`
+
+## Language Syntax
+\`\`\`
+set $x = 1                          # Variable assignment
+$x = 1                              # Short form
+log "hello"                         # Print output
+set $r = math.add 1 2               # Module function call
+set $s = "hello " + $name           # String concatenation
+if $x > 5                           # If block
+  log "big"
+end
+for $i in array.create 1 2 3        # For loop
+  log $i
+end
+def greet $name                     # Function definition
+  log "Hello " + $name
+enddef
+on "myEvent" $data                  # Event handler
+  log $data
+end
+# This is a comment                 # Comments
+\`\`\`
+
+File extensions: .rp, .robin (both recognized, auto-resolved)
+
+## File Structure
+| Path | Purpose |
+|------|---------|
+| ~/.robinpath/ | Home directory |
+| ~/.robinpath/bin/ | Binary installation |
+| ~/.robinpath/modules/ | Installed modules |
+| ~/.robinpath/modules/modules.json | Module manifest |
+| ~/.robinpath/cache/ | Download cache |
+| ~/.robinpath/auth.json | Auth credentials |
+| ~/.robinpath/history | REPL history |
+| ~/.robinpath/env | Environment secrets |
+| ~/.robinpath/server-<port>.pid | Server PID file |
+| robinpath.json | Project config |
+| robinpath-lock.json | Lock file |
+
+## Native Modules
+
+${modulesList}
+
+---
+Generated by RobinPath v${CLI_VERSION}
+`;
+  (0, import_node_fs3.mkdirSync)(getRobinPathHome(), { recursive: true });
+  (0, import_node_fs3.writeFileSync)(docsPath, content, "utf-8");
+}
 function handleInstall() {
   const installDir = getInstallDir();
   const isWindows = (0, import_node_os3.platform)() === "win32";
@@ -18434,6 +18669,10 @@ function handleInstall() {
   (0, import_node_fs3.mkdirSync)(installDir, { recursive: true });
   (0, import_node_fs3.copyFileSync)(src, dest);
   (0, import_node_fs3.copyFileSync)(src, rpDest);
+  try {
+    writeDocsFile();
+  } catch {
+  }
   if (!isWindows) {
     try {
       (0, import_node_fs3.chmodSync)(dest, 493);
@@ -18539,6 +18778,812 @@ async function runScript(script, filePath) {
   } catch (error) {
     displayError(error, script);
     process.exit(1);
+  }
+}
+async function handleStart(args) {
+  let port = 6372;
+  let session = null;
+  let host = "127.0.0.1";
+  let jobTimeout = 3e4;
+  let maxConcurrent = 5;
+  let corsOrigin = "*";
+  let logFile = null;
+  let maxBodySize = 5e6;
+  for (let i = 0; i < args.length; i++) {
+    if ((args[i] === "-p" || args[i] === "--port") && args[i + 1]) {
+      port = parseInt(args[i + 1], 10);
+      if (isNaN(port) || port < 1 || port > 65535) {
+        console.error(JSON.stringify({ ok: false, error: "Invalid port number" }));
+        process.exit(2);
+      }
+      i++;
+    } else if ((args[i] === "-s" || args[i] === "--session") && args[i + 1]) {
+      session = args[i + 1];
+      i++;
+    } else if (args[i] === "--host" && args[i + 1]) {
+      host = args[i + 1];
+      i++;
+    } else if (args[i] === "--timeout" && args[i + 1]) {
+      jobTimeout = parseInt(args[i + 1], 10);
+      if (isNaN(jobTimeout) || jobTimeout < 0) jobTimeout = 3e4;
+      i++;
+    } else if (args[i] === "--max-concurrent" && args[i + 1]) {
+      maxConcurrent = parseInt(args[i + 1], 10);
+      if (isNaN(maxConcurrent) || maxConcurrent < 1) maxConcurrent = 5;
+      i++;
+    } else if (args[i] === "--cors-origin" && args[i + 1]) {
+      corsOrigin = args[i + 1];
+      i++;
+    } else if (args[i] === "--log-file" && args[i + 1]) {
+      logFile = (0, import_node_path4.resolve)(args[i + 1]);
+      i++;
+    } else if (args[i] === "--max-body" && args[i + 1]) {
+      maxBodySize = parseInt(args[i + 1], 10);
+      if (isNaN(maxBodySize) || maxBodySize < 1) maxBodySize = 5e6;
+      i++;
+    }
+  }
+  if (!session) {
+    session = (0, import_node_crypto2.randomUUID)();
+  }
+  const rp = await createRobinPath();
+  const jobs = /* @__PURE__ */ new Map();
+  const idempotencyCache = /* @__PURE__ */ new Map();
+  function generateJobId() {
+    return "job_" + (0, import_node_crypto2.randomUUID)().replace(/-/g, "").slice(0, 12);
+  }
+  function generateRequestId() {
+    return "req_" + (0, import_node_crypto2.randomUUID)().replace(/-/g, "").slice(0, 12);
+  }
+  function getActiveJobCount() {
+    let count = 0;
+    for (const job of jobs.values()) {
+      if (job.status === "running") count++;
+    }
+    return count;
+  }
+  const moduleList = [];
+  for (const mod of nativeModules) {
+    moduleList.push({ name: mod.name, type: "native", methods: mod.moduleMetadata?.methods || [] });
+  }
+  const serverStartedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const RATE_LIMIT = 100;
+  const RATE_WINDOW_MS = 6e4;
+  let rateWindowStart = Date.now();
+  let rateCount = 0;
+  function checkRateLimit() {
+    const now = Date.now();
+    if (now - rateWindowStart > RATE_WINDOW_MS) {
+      rateWindowStart = now;
+      rateCount = 0;
+    }
+    rateCount++;
+    return {
+      allowed: rateCount <= RATE_LIMIT,
+      limit: RATE_LIMIT,
+      remaining: Math.max(0, RATE_LIMIT - rateCount),
+      reset: Math.ceil((rateWindowStart + RATE_WINDOW_MS) / 1e3)
+    };
+  }
+  let totalRequests = 0;
+  let totalErrors = 0;
+  const JOB_TTL_MS = 30 * 6e4;
+  const jobCleanupInterval = setInterval(() => {
+    const cutoff = Date.now() - JOB_TTL_MS;
+    for (const [id, job] of jobs) {
+      if (job.status !== "running" && job.completedAt && new Date(job.completedAt).getTime() < cutoff) {
+        jobs.delete(id);
+      }
+    }
+  }, 6e4);
+  jobCleanupInterval.unref();
+  function logEntry(entry) {
+    if (!logFile) return;
+    const line = JSON.stringify({ ts: (/* @__PURE__ */ new Date()).toISOString(), ...entry }) + "\n";
+    try {
+      (0, import_node_fs3.appendFileSync)(logFile, line);
+    } catch {
+    }
+  }
+  const pidFile = (0, import_node_path4.join)((0, import_node_os3.homedir)(), ".robinpath", `server-${port}.pid`);
+  try {
+    (0, import_node_fs3.mkdirSync)((0, import_node_path4.dirname)(pidFile), { recursive: true });
+    (0, import_node_fs3.writeFileSync)(pidFile, String(process.pid));
+  } catch {
+  }
+  process.on("exit", () => {
+    try {
+      (0, import_node_fs3.unlinkSync)(pidFile);
+    } catch {
+    }
+  });
+  function parseBody(req) {
+    return new Promise((resolve5, reject) => {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk;
+        if (body.length > maxBodySize) {
+          reject(new Error(`Request body too large (max ${maxBodySize} bytes)`));
+          req.destroy();
+        }
+      });
+      req.on("end", () => {
+        if (!body) return resolve5({});
+        const contentType = (req.headers["content-type"] || "").toLowerCase();
+        if (contentType.startsWith("text/plain")) {
+          return resolve5({ script: body });
+        }
+        try {
+          resolve5(JSON.parse(body));
+        } catch {
+          reject(new Error("Invalid JSON body. Tip: use Content-Type: text/plain to send raw script code."));
+        }
+      });
+      req.on("error", reject);
+    });
+  }
+  function json(res, status, data, requestId) {
+    const out = { ...data };
+    if (requestId) out.requestId = requestId;
+    out.timestamp = (/* @__PURE__ */ new Date()).toISOString();
+    const payload = JSON.stringify(out);
+    res.writeHead(status, {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(payload)
+    });
+    res.end(payload);
+  }
+  function jsonError(res, status, code, message, requestId) {
+    json(res, status, { ok: false, error: { code, message } }, requestId);
+  }
+  const activeJobForCapture = /* @__PURE__ */ new Set();
+  const origLog = console.log;
+  const origErr = console.error;
+  let currentCapturingJob = null;
+  console.log = (...args2) => {
+    if (currentCapturingJob) {
+      const line = args2.join(" ");
+      currentCapturingJob.output.push(line);
+      broadcastSSE(currentCapturingJob._jobId, "output", { line });
+    } else {
+      origLog(...args2);
+    }
+  };
+  console.error = (...args2) => {
+    if (currentCapturingJob) {
+      const line = "[error] " + args2.join(" ");
+      currentCapturingJob.output.push(line);
+      broadcastSSE(currentCapturingJob._jobId, "output", { line, level: "error" });
+    } else {
+      origErr(...args2);
+    }
+  };
+  async function executeJob(jobId, script) {
+    const job = jobs.get(jobId);
+    job._jobId = jobId;
+    const startTime = performance.now();
+    let timeoutHandle = null;
+    let timedOut = false;
+    if (jobTimeout > 0) {
+      timeoutHandle = setTimeout(() => {
+        timedOut = true;
+        job.status = "failed";
+        job.error = { code: "SCRIPT_TIMEOUT", message: `Script exceeded ${jobTimeout}ms limit` };
+        job.completedAt = (/* @__PURE__ */ new Date()).toISOString();
+        job.duration = Math.round(performance.now() - startTime);
+        broadcastSSE(jobId, "job.failed", { error: job.error, duration: job.duration });
+        broadcastSSE(jobId, "done", null);
+      }, jobTimeout);
+    }
+    try {
+      if (timedOut) return;
+      currentCapturingJob = job;
+      const result = await rp.executeScript(script);
+      currentCapturingJob = null;
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (timedOut) return;
+      job.status = "completed";
+      job.result = result ?? null;
+      job.completedAt = (/* @__PURE__ */ new Date()).toISOString();
+      job.duration = Math.round(performance.now() - startTime);
+      job.memoryUsed = process.memoryUsage().heapUsed;
+      broadcastSSE(jobId, "job.completed", { result: job.result, duration: job.duration });
+      broadcastSSE(jobId, "done", null);
+    } catch (err) {
+      currentCapturingJob = null;
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (!timedOut) {
+        job.status = "failed";
+        job.error = { code: "SCRIPT_ERROR", message: err.message };
+        job.completedAt = (/* @__PURE__ */ new Date()).toISOString();
+        job.duration = Math.round(performance.now() - startTime);
+        job.memoryUsed = process.memoryUsage().heapUsed;
+        broadcastSSE(jobId, "job.failed", { error: job.error, duration: job.duration });
+        broadcastSSE(jobId, "done", null);
+      }
+    }
+  }
+  function broadcastSSE(jobId, event, data) {
+    const job = jobs.get(jobId);
+    if (!job || !job.sseClients) return;
+    for (const client of job.sseClients) {
+      try {
+        client.write(`event: ${event}
+`);
+        client.write(`data: ${JSON.stringify(data)}
+
+`);
+      } catch {
+      }
+    }
+    if (event === "done") {
+      for (const client of job.sseClients) {
+        try {
+          client.end();
+        } catch {
+        }
+      }
+      job.sseClients = [];
+    }
+  }
+  async function deliverWebhook(webhookUrl, webhookSecret, event, payload) {
+    try {
+      const body = JSON.stringify({ event, ...payload, timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+      const headers = { "Content-Type": "application/json" };
+      if (webhookSecret) {
+        const sig = (0, import_node_crypto2.createHmac)("sha256", webhookSecret).update(body).digest("hex");
+        headers["x-robinpath-signature"] = "sha256=" + sig;
+      }
+      await fetch(webhookUrl, { method: "POST", headers, body });
+      logEntry({ level: "info", event: "webhook.delivered", url: webhookUrl, payload_event: event });
+    } catch (err) {
+      logEntry({ level: "error", event: "webhook.failed", url: webhookUrl, error: err.message });
+    }
+  }
+  function resolveScript(body) {
+    if (body.script && typeof body.script === "string") {
+      return { script: body.script, source: "inline" };
+    }
+    if (body.file && typeof body.file === "string") {
+      const filePath = resolveScriptPath(body.file);
+      if (!filePath) {
+        return { error: `File not found: ${body.file}` };
+      }
+      return { script: (0, import_node_fs3.readFileSync)(filePath, "utf-8"), source: filePath };
+    }
+    return { error: 'Missing "script" (string) or "file" (path) field' };
+  }
+  const openApiSpec = {
+    openapi: "3.1.0",
+    info: { title: "RobinPath Server API", version: CLI_VERSION, description: "HTTP API for the RobinPath scripting language runtime. Session token required via x-robinpath-session header." },
+    servers: [{ url: `http://${host}:${port}`, description: "Local server" }],
+    security: [{ sessionAuth: [] }],
+    components: {
+      securitySchemes: {
+        sessionAuth: { type: "apiKey", in: "header", name: "x-robinpath-session", description: "Session token from robinpath start" }
+      },
+      schemas: {
+        Error: { type: "object", properties: { ok: { type: "boolean", example: false }, error: { type: "object", properties: { code: { type: "string" }, message: { type: "string" } } }, requestId: { type: "string" }, timestamp: { type: "string", format: "date-time" } } },
+        Job: { type: "object", properties: { jobId: { type: "string" }, status: { type: "string", enum: ["running", "completed", "failed", "cancelled"] }, output: { type: "array", items: { type: "string" } }, result: {}, error: {}, startedAt: { type: "string", format: "date-time" }, completedAt: { type: "string", format: "date-time" }, duration: { type: "integer" }, source: { type: "string" }, usage: { type: "object", properties: { execution_ms: { type: "integer" }, memory_bytes: { type: "integer" } } } } }
+      }
+    },
+    paths: {
+      "/v1/health": { get: { summary: "Health check", security: [], responses: { 200: { description: "Server is healthy" } } } },
+      "/v1/execute": { post: { summary: "Execute a script", description: "Run inline script or file. Supports sync, SSE streaming (accept: text/event-stream), and webhook modes.", parameters: [{ name: "dry", in: "query", schema: { type: "string", enum: ["true"] }, description: "Validate without executing" }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { script: { type: "string", description: "Inline RobinPath code" }, file: { type: "string", description: "Path to .rp file" }, webhook: { type: "string", format: "uri", description: "URL for async result delivery" }, webhook_secret: { type: "string", description: "Secret for webhook signature" }, dry: { type: "boolean", description: "Validate without executing" } } } } } }, responses: { 200: { description: "Job result (sync mode)" }, 202: { description: "Job accepted (webhook mode)" } } } },
+      "/v1/execute/file": { post: { summary: "Execute a file", description: "Same as /v1/execute but conventionally for file-based execution.", requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { file: { type: "string" } }, required: ["file"] } } } }, responses: { 200: { description: "Job result" } } } },
+      "/v1/check": { post: { summary: "Syntax check", requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { script: { type: "string" } }, required: ["script"] } } } }, responses: { 200: { description: "Check result" } } } },
+      "/v1/fmt": { post: { summary: "Format code", requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { script: { type: "string" } }, required: ["script"] } } } }, responses: { 200: { description: "Formatted code" } } } },
+      "/v1/jobs": { get: { summary: "List jobs", parameters: [{ name: "limit", in: "query", schema: { type: "integer", default: 50, maximum: 200 } }, { name: "offset", in: "query", schema: { type: "integer", default: 0 } }, { name: "status", in: "query", schema: { type: "string", enum: ["running", "completed", "failed", "cancelled"] } }], responses: { 200: { description: "Paginated job list" } } } },
+      "/v1/jobs/{jobId}": { get: { summary: "Job detail", parameters: [{ name: "jobId", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Job detail" }, 404: { description: "Job not found" } } } },
+      "/v1/jobs/{jobId}/stream": { get: { summary: "SSE job stream", description: "Server-Sent Events stream for real-time job progress.", parameters: [{ name: "jobId", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "SSE event stream", content: { "text/event-stream": {} } } } } },
+      "/v1/jobs/{jobId}/cancel": { post: { summary: "Cancel a job", parameters: [{ name: "jobId", in: "path", required: true, schema: { type: "string" } }], responses: { 200: { description: "Job cancelled" }, 409: { description: "Job not running" } } } },
+      "/v1/modules": { get: { summary: "List loaded modules", responses: { 200: { description: "Module list" } } } },
+      "/v1/info": { get: { summary: "Server info", responses: { 200: { description: "Server configuration and status" } } } },
+      "/v1/metrics": { get: { summary: "Prometheus metrics", responses: { 200: { description: "Plain text metrics", content: { "text/plain": {} } } } } },
+      "/v1/openapi.json": { get: { summary: "OpenAPI specification", security: [], responses: { 200: { description: "This document" } } } },
+      "/v1/stop": { post: { summary: "Graceful shutdown", responses: { 200: { description: "Server stopping" } } } }
+    }
+  };
+  const server = (0, import_node_http2.createServer)(async (req, res) => {
+    const url = new URL(req.url, `http://${host}:${port}`);
+    const path = url.pathname;
+    const method = req.method;
+    const requestId = req.headers["x-request-id"] || generateRequestId();
+    const startTime = performance.now();
+    res.setHeader("Access-Control-Allow-Origin", corsOrigin);
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-robinpath-session, x-request-id, x-idempotency-key, Accept");
+    res.setHeader("Access-Control-Expose-Headers", "x-request-id, x-ratelimit-limit, x-ratelimit-remaining, x-ratelimit-reset, x-processing-ms");
+    res.setHeader("x-request-id", requestId);
+    res.setHeader("Access-Control-Max-Age", "3600");
+    if (method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+    totalRequests++;
+    if (method === "GET" && (path === "/v1/health" || path === "/health")) {
+      json(res, 200, { ok: true, version: CLI_VERSION }, requestId);
+      return;
+    }
+    const reqSession = req.headers["x-robinpath-session"];
+    if (reqSession !== session) {
+      jsonError(res, 403, "FORBIDDEN", "Invalid or missing session token", requestId);
+      return;
+    }
+    const rate = checkRateLimit();
+    res.setHeader("x-ratelimit-limit", rate.limit);
+    res.setHeader("x-ratelimit-remaining", rate.remaining);
+    res.setHeader("x-ratelimit-reset", rate.reset);
+    if (!rate.allowed) {
+      res.setHeader("retry-after", Math.ceil((RATE_WINDOW_MS - (Date.now() - rateWindowStart)) / 1e3));
+      jsonError(res, 429, "RATE_LIMITED", "Too many requests", requestId);
+      return;
+    }
+    logEntry({ level: "info", event: "request", method, path, requestId, session: reqSession ? reqSession.slice(0, 4) + "***" : null });
+    const isLegacyPath = !path.startsWith("/v1/") && path !== "/health";
+    if (isLegacyPath) {
+      res.setHeader("x-robinpath-deprecation", "Use /v1/ prefix. Non-versioned paths will be removed in a future release.");
+      logEntry({ level: "warn", event: "deprecated_path", path, requestId });
+    }
+    try {
+      if (method === "POST" && (path === "/v1/execute" || path === "/execute" || path === "/v1/execute/file" || path === "/execute/file")) {
+        let onJobDone = function() {
+          const job = jobs.get(jobId);
+          if (!job) return;
+          logEntry({ level: "info", event: `job.${job.status}`, jobId, duration: job.duration, requestId });
+          if (webhookUrl) {
+            deliverWebhook(webhookUrl, webhookSecret, `job.${job.status}`, {
+              jobId,
+              status: job.status,
+              output: job.output,
+              result: job.result,
+              error: job.error,
+              duration: job.duration
+            });
+          }
+        };
+        const body = await parseBody(req);
+        const resolved = resolveScript(body);
+        if (resolved.error) {
+          jsonError(res, 400, "INVALID_REQUEST", resolved.error, requestId);
+          return;
+        }
+        const script = resolved.script;
+        const source = resolved.source;
+        const dryRun = url.searchParams.get("dry") === "true" || body.dry === true;
+        if (dryRun) {
+          try {
+            const parser = new W(script);
+            await parser.parse();
+            json(res, 200, { ok: true, dry_run: true, source, message: "Script is valid" }, requestId);
+          } catch (err) {
+            const lineMatch = err.message.match(/line (\d+)/i);
+            const colMatch = err.message.match(/column (\d+)/i);
+            json(res, 200, {
+              ok: false,
+              dry_run: true,
+              source,
+              error: { code: "SYNTAX_ERROR", message: err.message, line: lineMatch ? parseInt(lineMatch[1]) : null, column: colMatch ? parseInt(colMatch[1]) : null }
+            }, requestId);
+          }
+          return;
+        }
+        const idempotencyKey = req.headers["x-idempotency-key"];
+        if (idempotencyKey && idempotencyCache.has(idempotencyKey)) {
+          const cached = idempotencyCache.get(idempotencyKey);
+          cached.requestId = requestId;
+          cached.idempotent = true;
+          json(res, 200, cached, requestId);
+          return;
+        }
+        if (getActiveJobCount() >= maxConcurrent) {
+          res.setHeader("retry-after", "2");
+          jsonError(res, 503, "MAX_CONCURRENT", `Server is at max capacity (${maxConcurrent} concurrent jobs)`, requestId);
+          return;
+        }
+        const jobId = generateJobId();
+        const now = (/* @__PURE__ */ new Date()).toISOString();
+        const webhookUrl = body.webhook || null;
+        const webhookSecret = body.webhook_secret || null;
+        const wantsStream = req.headers["accept"] === "text/event-stream";
+        jobs.set(jobId, {
+          status: "running",
+          output: [],
+          result: null,
+          error: null,
+          script,
+          source,
+          startedAt: now,
+          completedAt: null,
+          duration: null,
+          memoryUsed: null,
+          sseClients: []
+        });
+        logEntry({ level: "info", event: "job.started", jobId, source, requestId, mode: wantsStream ? "stream" : webhookUrl ? "webhook" : "sync" });
+        if (wantsStream) {
+          res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "x-request-id": requestId
+          });
+          res.write(`event: job.started
+data: ${JSON.stringify({ jobId, requestId, source })}
+
+`);
+          const job = jobs.get(jobId);
+          job.sseClients.push(res);
+          req.on("close", () => {
+            const j2 = jobs.get(jobId);
+            if (j2) j2.sseClients = j2.sseClients.filter((c) => c !== res);
+          });
+          executeJob(jobId, script).then(onJobDone);
+        } else if (webhookUrl) {
+          json(res, 202, { ok: true, jobId, status: "running", source, message: `Result will be delivered to ${webhookUrl}` }, requestId);
+          executeJob(jobId, script).then(onJobDone);
+        } else {
+          await executeJob(jobId, script);
+          onJobDone();
+          const job = jobs.get(jobId);
+          const processingMs = Math.round(performance.now() - startTime);
+          res.setHeader("x-processing-ms", processingMs);
+          const response = {
+            ok: job.status === "completed",
+            jobId,
+            status: job.status,
+            source,
+            output: job.output,
+            result: job.result,
+            error: job.error,
+            usage: {
+              execution_ms: job.duration,
+              memory_bytes: job.memoryUsed
+            }
+          };
+          if (idempotencyKey) {
+            idempotencyCache.set(idempotencyKey, { ...response });
+            setTimeout(() => idempotencyCache.delete(idempotencyKey), 3e5);
+          }
+          json(res, 200, response, requestId);
+        }
+        return;
+      }
+      if (method === "POST" && (path === "/v1/check" || path === "/check")) {
+        const body = await parseBody(req);
+        const script = body.script;
+        if (!script || typeof script !== "string") {
+          jsonError(res, 400, "INVALID_REQUEST", 'Missing "script" field', requestId);
+          return;
+        }
+        try {
+          const parser = new W(script);
+          await parser.parse();
+          json(res, 200, { ok: true }, requestId);
+        } catch (err) {
+          const lineMatch = err.message.match(/line (\d+)/i);
+          const colMatch = err.message.match(/column (\d+)/i);
+          json(res, 200, {
+            ok: false,
+            error: { code: "SYNTAX_ERROR", message: err.message, line: lineMatch ? parseInt(lineMatch[1]) : null, column: colMatch ? parseInt(colMatch[1]) : null }
+          }, requestId);
+        }
+        return;
+      }
+      if (method === "POST" && (path === "/v1/fmt" || path === "/fmt")) {
+        const body = await parseBody(req);
+        const script = body.script;
+        if (!script || typeof script !== "string") {
+          jsonError(res, 400, "INVALID_REQUEST", 'Missing "script" field', requestId);
+          return;
+        }
+        try {
+          const formatted = await formatScript(script);
+          json(res, 200, { ok: true, formatted }, requestId);
+        } catch (err) {
+          json(res, 200, { ok: false, error: { code: "FORMAT_ERROR", message: err.message } }, requestId);
+        }
+        return;
+      }
+      if (method === "GET" && (path === "/v1/jobs" || path === "/jobs")) {
+        const limit = Math.min(parseInt(url.searchParams.get("limit")) || 50, 200);
+        const offset = parseInt(url.searchParams.get("offset")) || 0;
+        const filterStatus = url.searchParams.get("status") || null;
+        const allJobs = [];
+        for (const [id, job] of jobs) {
+          if (filterStatus && job.status !== filterStatus) continue;
+          allJobs.push({
+            jobId: id,
+            status: job.status,
+            source: job.source || null,
+            startedAt: job.startedAt,
+            completedAt: job.completedAt,
+            duration: job.duration
+          });
+        }
+        const total = allJobs.length;
+        const page = allJobs.slice(offset, offset + limit);
+        json(res, 200, { ok: true, jobs: page, total, limit, offset, has_more: offset + limit < total }, requestId);
+        return;
+      }
+      const jobDetailMatch = path.match(/^\/(?:v1\/)?jobs\/([a-zA-Z0-9_]+)$/);
+      if (method === "GET" && jobDetailMatch) {
+        const jobId = jobDetailMatch[1];
+        const job = jobs.get(jobId);
+        if (!job) {
+          jsonError(res, 404, "JOB_NOT_FOUND", `Job ${jobId} not found`, requestId);
+          return;
+        }
+        json(res, 200, {
+          ok: true,
+          jobId,
+          status: job.status,
+          output: job.output,
+          result: job.result,
+          error: job.error,
+          startedAt: job.startedAt,
+          completedAt: job.completedAt,
+          duration: job.duration,
+          usage: job.memoryUsed ? { execution_ms: job.duration, memory_bytes: job.memoryUsed } : void 0
+        }, requestId);
+        return;
+      }
+      const jobStreamMatch = path.match(/^\/(?:v1\/)?jobs\/([a-zA-Z0-9_]+)\/stream$/);
+      if (method === "GET" && jobStreamMatch) {
+        const jobId = jobStreamMatch[1];
+        const job = jobs.get(jobId);
+        if (!job) {
+          jsonError(res, 404, "JOB_NOT_FOUND", `Job ${jobId} not found`, requestId);
+          return;
+        }
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
+          "x-request-id": requestId
+        });
+        for (const line of job.output) {
+          res.write(`event: output
+data: ${JSON.stringify({ line })}
+
+`);
+        }
+        if (job.status === "completed") {
+          res.write(`event: job.completed
+data: ${JSON.stringify({ result: job.result, duration: job.duration })}
+
+`);
+          res.write(`event: done
+data: null
+
+`);
+          res.end();
+          return;
+        }
+        if (job.status === "failed") {
+          res.write(`event: job.failed
+data: ${JSON.stringify({ error: job.error, duration: job.duration })}
+
+`);
+          res.write(`event: done
+data: null
+
+`);
+          res.end();
+          return;
+        }
+        if (job.status === "cancelled") {
+          res.write(`event: job.cancelled
+data: ${JSON.stringify({ message: "Job was cancelled" })}
+
+`);
+          res.write(`event: done
+data: null
+
+`);
+          res.end();
+          return;
+        }
+        job.sseClients.push(res);
+        req.on("close", () => {
+          job.sseClients = job.sseClients.filter((c) => c !== res);
+        });
+        return;
+      }
+      const jobCancelMatch = path.match(/^\/(?:v1\/)?jobs\/([a-zA-Z0-9_]+)\/cancel$/);
+      if (method === "POST" && jobCancelMatch) {
+        const jobId = jobCancelMatch[1];
+        const job = jobs.get(jobId);
+        if (!job) {
+          jsonError(res, 404, "JOB_NOT_FOUND", `Job ${jobId} not found`, requestId);
+          return;
+        }
+        if (job.status !== "running") {
+          jsonError(res, 409, "JOB_NOT_RUNNING", `Job ${jobId} is already ${job.status}`, requestId);
+          return;
+        }
+        job.status = "cancelled";
+        job.completedAt = (/* @__PURE__ */ new Date()).toISOString();
+        job.error = { code: "JOB_CANCELLED", message: "Job was cancelled by client" };
+        broadcastSSE(jobId, "job.cancelled", { message: "Job was cancelled" });
+        broadcastSSE(jobId, "done", null);
+        json(res, 200, { ok: true, jobId, status: "cancelled" }, requestId);
+        return;
+      }
+      if (method === "GET" && (path === "/v1/modules" || path === "/modules")) {
+        json(res, 200, { ok: true, modules: moduleList }, requestId);
+        return;
+      }
+      if (method === "GET" && (path === "/v1/info" || path === "/info")) {
+        const mem = process.memoryUsage();
+        json(res, 200, {
+          ok: true,
+          version: CLI_VERSION,
+          lang_version: Sn,
+          host,
+          port,
+          uptime_seconds: Math.round(process.uptime()),
+          started_at: serverStartedAt,
+          config: {
+            max_concurrent: maxConcurrent,
+            job_timeout_ms: jobTimeout,
+            rate_limit: RATE_LIMIT
+          },
+          memory: {
+            heap_used: mem.heapUsed,
+            heap_total: mem.heapTotal,
+            rss: mem.rss
+          },
+          jobs: {
+            total: jobs.size,
+            active: getActiveJobCount()
+          }
+        }, requestId);
+        return;
+      }
+      if (method === "GET" && (path === "/v1/metrics" || path === "/metrics")) {
+        let completed = 0, failed = 0, cancelled = 0, running = 0;
+        let totalDuration = 0, durationCount = 0;
+        for (const job of jobs.values()) {
+          if (job.status === "completed") {
+            completed++;
+            if (job.duration) {
+              totalDuration += job.duration;
+              durationCount++;
+            }
+          } else if (job.status === "failed") failed++;
+          else if (job.status === "cancelled") cancelled++;
+          else if (job.status === "running") running++;
+        }
+        const mem = process.memoryUsage();
+        const lines = [
+          `robinpath_jobs_total ${jobs.size}`,
+          `robinpath_jobs_active ${running}`,
+          `robinpath_jobs_completed ${completed}`,
+          `robinpath_jobs_failed ${failed}`,
+          `robinpath_jobs_cancelled ${cancelled}`,
+          `robinpath_request_duration_avg_ms ${durationCount ? Math.round(totalDuration / durationCount) : 0}`,
+          `robinpath_uptime_seconds ${Math.round(process.uptime())}`,
+          `robinpath_memory_heap_bytes ${mem.heapUsed}`,
+          `robinpath_memory_rss_bytes ${mem.rss}`,
+          `robinpath_requests_total ${totalRequests}`,
+          `robinpath_requests_errors ${totalErrors}`
+        ];
+        const payload = lines.join("\n") + "\n";
+        res.writeHead(200, { "Content-Type": "text/plain", "Content-Length": Buffer.byteLength(payload) });
+        res.end(payload);
+        return;
+      }
+      if (method === "GET" && (path === "/v1/openapi.json" || path === "/openapi.json")) {
+        json(res, 200, openApiSpec, requestId);
+        return;
+      }
+      if (method === "POST" && (path === "/v1/stop" || path === "/stop")) {
+        const activeJobs = [];
+        for (const [id, job] of jobs) {
+          if (job.status === "running") activeJobs.push(id);
+        }
+        json(res, 200, {
+          ok: true,
+          message: activeJobs.length > 0 ? `Server stopping after ${activeJobs.length} active job(s) complete` : "Server stopping",
+          active_jobs: activeJobs
+        }, requestId);
+        const shutdownTimeout = setTimeout(() => {
+          server.close();
+          process.exit(0);
+        }, 5e3);
+        if (activeJobs.length === 0) {
+          clearTimeout(shutdownTimeout);
+          server.close();
+          process.exit(0);
+        }
+        const shutdownCheck = setInterval(() => {
+          if (getActiveJobCount() === 0) {
+            clearInterval(shutdownCheck);
+            clearTimeout(shutdownTimeout);
+            server.close();
+            process.exit(0);
+          }
+        }, 200);
+        return;
+      }
+      jsonError(res, 404, "NOT_FOUND", `Unknown endpoint: ${method} ${path}`, requestId);
+    } catch (err) {
+      totalErrors++;
+      const processingMs = Math.round(performance.now() - startTime);
+      logEntry({ level: "error", event: "request.error", method, path, requestId, error: err.message, duration: processingMs });
+      if (res.headersSent) {
+        try {
+          res.end();
+        } catch {
+        }
+      } else {
+        res.setHeader("x-processing-ms", processingMs);
+        jsonError(res, 500, "INTERNAL_ERROR", err.message, requestId);
+      }
+    }
+  });
+  server.on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+      console.log(JSON.stringify({ ok: false, error: `Port ${port} is already in use` }));
+      process.exit(1);
+    }
+    console.log(JSON.stringify({ ok: false, error: err.message }));
+    process.exit(1);
+  });
+  server.listen(port, host, () => {
+    console.log(JSON.stringify({ ok: true, port, host, session, version: CLI_VERSION }));
+    logEntry({ level: "info", event: "server.start", port, host, version: CLI_VERSION, pid: process.pid });
+  });
+  function gracefulShutdown(signal) {
+    logEntry({ level: "info", event: "server.shutdown", signal, active_jobs: getActiveJobCount() });
+    server.close();
+    clearInterval(jobCleanupInterval);
+    const forceExit = setTimeout(() => process.exit(0), 1e4);
+    forceExit.unref();
+    const check = setInterval(() => {
+      if (getActiveJobCount() === 0) {
+        clearInterval(check);
+        clearTimeout(forceExit);
+        process.exit(0);
+      }
+    }, 200);
+  }
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+}
+async function handleStatus(args) {
+  let port = 6372;
+  for (let i = 0; i < args.length; i++) {
+    if ((args[i] === "-p" || args[i] === "--port") && args[i + 1]) {
+      port = parseInt(args[i + 1], 10);
+      i++;
+    }
+  }
+  const pidFile = (0, import_node_path4.join)((0, import_node_os3.homedir)(), ".robinpath", `server-${port}.pid`);
+  let pid = null;
+  if ((0, import_node_fs3.existsSync)(pidFile)) {
+    pid = (0, import_node_fs3.readFileSync)(pidFile, "utf-8").trim();
+  }
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3e3);
+    const res = await fetch(`http://127.0.0.1:${port}/v1/health`, { signal: controller.signal });
+    clearTimeout(timeout);
+    const data = await res.json();
+    if (data.ok) {
+      console.log(JSON.stringify({
+        ok: true,
+        running: true,
+        port,
+        pid: pid || null,
+        version: data.version
+      }));
+    } else {
+      console.log(JSON.stringify({ ok: true, running: false, port, reason: "Unexpected response" }));
+    }
+  } catch {
+    console.log(JSON.stringify({ ok: true, running: false, port, pid: pid || null, reason: "Server not reachable" }));
   }
 }
 function readStdin() {
@@ -19679,10 +20724,225 @@ async function handleSearch(args) {
 }
 async function handleInfo(args) {
   const spec = args.find((a) => !a.startsWith("-"));
+  const jsonOutput = args.includes("--json");
   if (!spec) {
-    console.error(color.red("Error:") + " Usage: robinpath info <module>");
-    console.error("  Example: robinpath info @robinpath/slack");
-    process.exit(2);
+    const modulesInfo = {};
+    for (const mod of nativeModules) {
+      modulesInfo[mod.name] = {
+        functions: Object.keys(mod.functions),
+        description: mod.moduleMetadata?.description || null
+      };
+    }
+    const info = {
+      ok: true,
+      version: CLI_VERSION,
+      lang_version: Sn,
+      platform: (0, import_node_os3.platform)(),
+      arch: process.arch,
+      node_version: process.version,
+      executable: process.execPath,
+      pid: process.pid,
+      paths: {
+        home: getRobinPathHome(),
+        bin: getInstallDir(),
+        modules: MODULES_DIR,
+        modules_manifest: MODULES_MANIFEST,
+        cache: CACHE_DIR,
+        auth: getAuthPath(),
+        history: (0, import_node_path4.join)((0, import_node_os3.homedir)(), ".robinpath", "history"),
+        env: (0, import_node_path4.join)((0, import_node_os3.homedir)(), ".robinpath", "env"),
+        docs: (0, import_node_path4.join)(getRobinPathHome(), "DOCUMENTATION.md")
+      },
+      native_modules: modulesInfo,
+      docs: {
+        overview: "RobinPath is a scripting language for automation and data processing. It can be used as a CLI tool, an embedded SDK for JavaScript apps, or an HTTP server for integration with any programming language.",
+        install: {
+          unix: "curl -fsSL https://dev.robinpath.com/install.sh | bash",
+          windows: "irm https://dev.robinpath.com/install.ps1 | iex"
+        },
+        cli_commands: {
+          run_file: "robinpath <file.rp>",
+          run_inline: `robinpath -e 'log "hello"'`,
+          run_stdin: "echo 'log 1' | robinpath",
+          fmt: "robinpath fmt <file|dir> [--write] [--check] [--diff]",
+          check: "robinpath check <file> [--json]",
+          ast: "robinpath ast <file> [--compact]",
+          test: "robinpath test [dir|file] [--json]",
+          add_module: "robinpath add <@scope/name>[@version]",
+          remove_module: "robinpath remove <@scope/name>",
+          upgrade_module: "robinpath upgrade <@scope/name>",
+          list_modules: "robinpath modules list",
+          upgrade_all: "robinpath modules upgrade",
+          scaffold_module: "robinpath modules init",
+          search: "robinpath search <query> [--category=<cat>]",
+          info_system: "robinpath info [--json]",
+          info_module: "robinpath info <@scope/name>",
+          audit: "robinpath audit",
+          init_project: "robinpath init [--force]",
+          install_deps: "robinpath install",
+          doctor: "robinpath doctor",
+          env_set: "robinpath env set <KEY> <value>",
+          env_list: "robinpath env list",
+          env_remove: "robinpath env remove <KEY>",
+          cache_list: "robinpath cache list",
+          cache_clean: "robinpath cache clean",
+          install_system: "robinpath install",
+          uninstall: "robinpath uninstall",
+          update: "robinpath update",
+          login: "robinpath login",
+          logout: "robinpath logout",
+          whoami: "robinpath whoami",
+          publish: "robinpath publish [dir] [--public|--private] [--org <name>] [--patch|--minor|--major] [--dry-run]",
+          pack: "robinpath pack [dir]",
+          deprecate: 'robinpath deprecate <@scope/name> "reason"',
+          sync: "robinpath sync",
+          start_server: "robinpath start [-p port] [-s session] [--host addr] [--timeout ms] [--max-concurrent n] [--cors-origin origin] [--log-file path] [--max-body bytes]",
+          server_status: "robinpath status [-p port]",
+          watch: "robinpath --watch <file.rp>",
+          repl: "robinpath (no arguments)"
+        },
+        global_flags: {
+          "-q, --quiet": "Suppress non-error output",
+          "--verbose": "Show timing and debug info",
+          "-v, --version": "Show version",
+          "-h, --help": "Show help",
+          "-w, --watch": "Re-run on file changes"
+        },
+        http_server: {
+          description: "Start an HTTP server that exposes the RobinPath engine via REST API. One server handles all requests. Variables persist across requests (conversational execution). Designed for integration with any language (Rust, Python, Go, PHP, Ruby, C#, Java, etc.).",
+          start: "robinpath start -p <port> -s <session-secret>",
+          startup_output: '{"ok":true,"port":6372,"host":"127.0.0.1","session":"<uuid>","version":"1.44.0"}',
+          auth_header: "x-robinpath-session: <session-token> (required on all endpoints except /v1/health)",
+          defaults: {
+            port: 6372,
+            host: "127.0.0.1",
+            timeout_ms: 3e4,
+            max_concurrent: 5,
+            max_body_bytes: 5e6,
+            cors_origin: "*"
+          },
+          endpoints: {
+            "GET /v1/health": { auth: false, description: "Health check", response: '{"ok":true,"version":"...","uptime_ms":...}' },
+            "POST /v1/execute": { auth: true, description: "Execute script", body: '{"code":"log 1"} or Content-Type: text/plain with raw code', response: '{"ok":true,"jobId":"...","status":"completed","output":"1\\n","duration":12}', notes: "Add Accept: text/event-stream for SSE streaming. Add webhook/webhook_secret for fire-and-forget callback." },
+            "POST /v1/execute/file": { auth: true, description: "Execute script file", body: '{"file":"./script.rp"}', response: "Same as /v1/execute" },
+            "POST /v1/check": { auth: true, description: "Syntax check without executing", body: '{"script":"log 1"}', response: '{"ok":true,"message":"No syntax errors"}' },
+            "POST /v1/fmt": { auth: true, description: "Format code", body: '{"script":"set $x as 1"}', response: '{"ok":true,"formatted":"$x = 1\\n"}' },
+            "GET /v1/jobs": { auth: true, description: "List jobs", query: "?status=running&limit=10", response: '{"ok":true,"jobs":[...]}' },
+            "GET /v1/jobs/:id": { auth: true, description: "Get job details", response: "Single job object with output" },
+            "GET /v1/jobs/:id/stream": { auth: true, description: "SSE stream for job progress", notes: "Returns event: started, output, completed, job.failed, done" },
+            "POST /v1/jobs/:id/cancel": { auth: true, description: "Cancel running job", response: '{"ok":true,"jobId":"...","status":"cancelled"}' },
+            "GET /v1/modules": { auth: true, description: "List all loaded modules and functions" },
+            "GET /v1/info": { auth: true, description: "Server runtime info (uptime, memory, config, job counts)" },
+            "GET /v1/metrics": { auth: true, description: "Prometheus-style metrics (text/plain)" },
+            "GET /v1/openapi.json": { auth: true, description: "OpenAPI 3.1 specification" },
+            "POST /v1/stop": { auth: true, description: "Graceful shutdown (waits for active jobs)", response: '{"ok":true,"message":"Server stopping","active_jobs":[]}' }
+          },
+          optional_headers: {
+            "x-request-id": "Client request ID (auto-generated UUID if missing)",
+            "x-idempotency-key": "Prevent duplicate execution on retry (5-min TTL)",
+            "Accept: text/event-stream": "Request SSE streaming on /v1/execute and /v1/jobs/:id/stream",
+            "Content-Type: text/plain": "Send raw code in body without JSON wrapping"
+          },
+          response_headers: {
+            "x-processing-ms": "Processing time in milliseconds",
+            "x-request-id": "Echo of request ID",
+            "x-rate-limit-limit": "Rate limit quota",
+            "x-rate-limit-remaining": "Requests remaining",
+            "x-rate-limit-reset": "When limit resets"
+          },
+          sse_events: ["started", "output", "completed", "job.failed", "job.cancelled", "done"],
+          webhook: {
+            description: "Add webhook URL to /v1/execute for fire-and-forget execution. Returns 202 immediately.",
+            body_fields: "webhook (URL), webhook_secret (for HMAC-SHA256 signature)",
+            signature_header: "X-Webhook-Signature: sha256=<hmac-hex>"
+          },
+          features: ["Session gatekeeper", "API versioning (/v1/)", "SSE streaming", "Webhook callbacks with HMAC-SHA256", "Idempotency keys", "Rate limiting", "Job queue with cancel", "Structured JSON logging", "Prometheus metrics", "OpenAPI spec", "Graceful shutdown", "Persistent runtime state", "Plain text body support", "PID file management"]
+        },
+        sdk: {
+          description: "For JavaScript/TypeScript apps (React, Next.js, Vue, Angular, Express, Node.js). Direct in-process execution, no HTTP server needed.",
+          install: "npm install @robinpath/sdk",
+          usage: [
+            'import { createRuntime } from "@robinpath/sdk";',
+            "const rp = createRuntime();",
+            'const result = await rp.run("log math.add 1 2");',
+            "// result: { ok, output, value, logs, variables, error, stats }"
+          ].join("\n"),
+          options: {
+            timeout: "Max execution time in ms (0 = no limit)",
+            permissions: '"all" | "none" | { fs, net, child, env, crypto } \u2014 restrict what scripts can access',
+            modules: "Whitelist of allowed module names (undefined = all)",
+            customBuiltins: "Record<string, handler> \u2014 add custom functions",
+            customModules: "[{ name, functions }] \u2014 add custom modules"
+          },
+          context: 'await rp.run("log $name", { name: "Robin" }) \u2014 pass variables into scripts',
+          streaming: 'rp.stream(code).on("log", handler).on("done", handler)',
+          state: "Variables persist across run() calls on the same runtime instance",
+          engine_access: "rp.engine \u2014 access underlying RobinPath instance for advanced use"
+        },
+        integration: {
+          description: "For non-JS languages (Rust, Python, Go, PHP, Ruby, C#, Java), use robinpath start HTTP server.",
+          pattern: [
+            "1. Spawn: robinpath start -p <port> [-s <secret>]",
+            "2. Parse startup JSON from stdout to get session token",
+            "3. Send HTTP requests with x-robinpath-session header",
+            "4. Stop: POST /v1/stop or send SIGTERM"
+          ],
+          rust_example: 'let child = Command::new("robinpath").args(["start","-p","6372"]).stdout(Stdio::piped()).spawn()?;\n// Read first line for session, then use reqwest to POST /v1/execute',
+          python_example: 'proc = subprocess.Popen(["robinpath","start","-p","6372"], stdout=subprocess.PIPE)\nstartup = json.loads(proc.stdout.readline())\nsession = startup["session"]\nrequests.post(f"http://127.0.0.1:6372/v1/execute", headers={"x-robinpath-session": session}, json={"code": "log 1"})',
+          js_note: "For JavaScript apps, prefer @robinpath/sdk (direct, no server needed) over HTTP."
+        },
+        language_syntax: {
+          variables: "set $x = 1  OR  $x = 1",
+          log: 'log "hello"  OR  log $x',
+          module_call: "set $r = math.add 1 2  OR  math.add 1 2",
+          string_concat: 'set $s = "hello " + $name',
+          if_block: 'if $x > 5\n  log "big"\nend',
+          for_loop: "for $i in array.create 1 2 3\n  log $i\nend",
+          function_def: 'def greet $name\n  log "Hello " + $name\nenddef',
+          events: 'on "myEvent" $data\n  log $data\nend',
+          comments: "# This is a comment",
+          file_extensions: ".rp, .robin (both recognized)"
+        },
+        file_structure: {
+          "~/.robinpath/": "Home directory",
+          "~/.robinpath/bin/": "Binary installation",
+          "~/.robinpath/modules/": "Installed modules",
+          "~/.robinpath/modules/modules.json": "Module manifest",
+          "~/.robinpath/cache/": "Download cache",
+          "~/.robinpath/auth.json": "Auth credentials",
+          "~/.robinpath/history": "REPL history",
+          "~/.robinpath/env": "Environment secrets",
+          "~/.robinpath/server-<port>.pid": "Server PID file",
+          "robinpath.json": "Project config",
+          "robinpath-lock.json": "Lock file"
+        }
+      }
+    };
+    if (jsonOutput || !isTTY) {
+      console.log(JSON.stringify(info, null, 2));
+    } else {
+      console.log(`RobinPath v${CLI_VERSION} (lang v${Sn})`);
+      console.log("");
+      console.log(`  Platform:     ${info.platform} (${info.arch})`);
+      console.log(`  Node:         ${info.node_version}`);
+      console.log(`  Executable:   ${info.executable}`);
+      console.log("");
+      console.log("Paths:");
+      console.log(`  Home:         ${info.paths.home}`);
+      console.log(`  Binary:       ${info.paths.bin}`);
+      console.log(`  Modules:      ${info.paths.modules}`);
+      console.log(`  Manifest:     ${info.paths.modules_manifest}`);
+      console.log(`  Cache:        ${info.paths.cache}`);
+      console.log(`  Auth:         ${info.paths.auth}`);
+      console.log(`  History:      ${info.paths.history}`);
+      console.log(`  Env:          ${info.paths.env}`);
+      console.log(`  Docs:         ${info.paths.docs}`);
+      console.log("");
+      console.log(`Native Modules: ${Object.keys(modulesInfo).join(", ")}`);
+      console.log("");
+      console.log(color.dim("Use --json for machine-readable output (includes full docs for AI agents)"));
+    }
+    return;
   }
   const parsed = parsePackageSpec(spec);
   if (!parsed || !parsed.scope) {
@@ -20598,7 +21858,8 @@ MODULE MANAGEMENT:
   remove <pkg>       Uninstall a module
   upgrade <pkg>      Upgrade a single module to latest
   search <query>     Search the module registry
-  info <pkg>         Show module details
+  info               Show system paths (--json for machines)
+  info <pkg>         Show module details from registry
   modules list       List installed modules
   modules upgrade    Upgrade all installed modules
   modules init       Scaffold a new module (interactive wizard)
@@ -20615,6 +21876,29 @@ SYSTEM:
   install            Install robinpath to system PATH (if no robinpath.json)
   uninstall          Remove robinpath from system
   update             Update robinpath to the latest version
+
+SERVER (HTTP API):
+  start              Start HTTP server for app integration
+                     -p, --port <port>        Port (default: 6372)
+                     -s, --session <token>    Session secret (auto-generated if omitted)
+                     --host <addr>            Bind address (default: 127.0.0.1)
+                     --timeout <ms>           Max script execution time (default: 30000)
+                     --max-concurrent <n>     Max parallel jobs (default: 5)
+                     --log-file <path>        Write JSON logs to file
+                     --max-body <bytes>       Max request body (default: 5MB)
+  status             Check if server is running on a port
+
+  Endpoints:  /v1/health, /v1/execute, /v1/execute/file, /v1/check,
+              /v1/fmt, /v1/jobs, /v1/jobs/:id, /v1/jobs/:id/stream,
+              /v1/jobs/:id/cancel, /v1/modules, /v1/info,
+              /v1/metrics, /v1/stop
+
+  Features:   Session gatekeeper, SSE streaming, webhook callbacks,
+              idempotency keys, rate limiting, structured logging,
+              job management, API versioning (/v1/)
+
+  All endpoints require x-robinpath-session header (except /v1/health).
+  Use 'robinpath help start' for full details.
 
 CLOUD:
   login              Sign in to RobinPath Cloud via browser
@@ -20657,6 +21941,8 @@ EXAMPLES:
   robinpath test tests/           Run tests in specific dir
   robinpath --watch app.rp        Re-run on file changes
   echo 'log "hi"' | robinpath    Pipe script via stdin
+  robinpath start                 Start HTTP server (auto session)
+  robinpath start -p 8080 -s my-secret   Start server on port 8080
 
 FILE EXTENSIONS:
   .rp, .robin        Both recognized (auto-resolved without extension)
@@ -20944,16 +22230,27 @@ DESCRIPTION:
 EXAMPLES:
   robinpath search slack
   robinpath search crm --category=crm`,
-    info: `robinpath info \u2014 Show module details
+    info: `robinpath info \u2014 System info & module details
 
 USAGE:
-  robinpath info <module>
+  robinpath info                Show system paths and environment info
+  robinpath info --json         Machine-readable JSON output
+  robinpath info <module>       Show module details from registry
 
 DESCRIPTION:
-  Displays detailed information about a module from the registry,
+  Without arguments, displays system information including version,
+  platform, paths to home dir, modules, cache, auth, and more.
+  Useful for external tools that need to discover where RobinPath lives.
+
+  With a module name, displays detailed information from the registry,
   including version, author, license, downloads, and install status.
 
+FLAGS:
+  --json       Output as JSON (system info mode, no args)
+
 EXAMPLES:
+  robinpath info                 Show system paths
+  robinpath info --json          JSON output for external tools
   robinpath info @robinpath/slack`,
     init: `robinpath init \u2014 Create a new RobinPath project
 
@@ -21020,14 +22317,105 @@ DESCRIPTION:
   will see a warning when running 'robinpath audit'.
 
 EXAMPLES:
-  robinpath deprecate @myorg/old-module "Use @myorg/new-module instead"`
+  robinpath deprecate @myorg/old-module "Use @myorg/new-module instead"`,
+    start: `robinpath start \u2014 Start HTTP server for app integration
+
+USAGE:
+  robinpath start [flags]
+
+DESCRIPTION:
+  Starts a local HTTP API server that exposes RobinPath as a service.
+  Any application can execute scripts, check syntax, format code,
+  and manage jobs via REST API. Session token acts as a secret
+  gatekeeper \u2014 requests without a valid token are rejected (403).
+
+  Outputs JSON to stdout on startup:
+    {"ok":true,"port":6372,"host":"127.0.0.1","session":"...","version":"..."}
+
+  If the port is already in use, outputs:
+    {"ok":false,"error":"Port 6372 is already in use"}
+
+FLAGS:
+  -p, --port <port>             Port to listen on (default: 6372)
+  -s, --session <token>         Session secret (default: auto-generated UUID)
+  --host <address>              Bind address (default: 127.0.0.1)
+  --timeout <ms>                Max script execution time (default: 30000)
+  --max-concurrent <n>          Max parallel jobs (default: 5)
+  --cors-origin <origin>        CORS origin (default: *)
+  --log-file <path>             Write structured JSON logs to file
+  --max-body <bytes>            Max request body size (default: 5000000)
+
+ENDPOINTS:
+  GET  /v1/health               Health check (no auth required)
+  POST /v1/execute/file         Execute a .rp file by path
+  POST /v1/execute              Execute a RobinPath script (returns job)
+  POST /v1/check                Syntax check without executing
+  POST /v1/fmt                  Format code
+  GET  /v1/jobs                 List all jobs
+  GET  /v1/jobs/:id             Job detail with output
+  GET  /v1/jobs/:id/stream      SSE real-time progress stream
+  POST /v1/jobs/:id/cancel      Cancel a running job
+  GET  /v1/modules              List loaded modules
+  GET  /v1/info                 Server info and config
+  GET  /v1/metrics              Prometheus-style metrics
+  POST /v1/stop                 Graceful server shutdown
+
+HEADERS:
+  x-robinpath-session           Required on all endpoints (except /health)
+  x-request-id                  Optional client request ID (auto-generated if missing)
+  x-idempotency-key             Prevents duplicate execution on retry
+  accept: text/event-stream     On /v1/execute to get SSE streaming
+
+EXECUTE BODY:
+  { "script": "log \\"hi\\"" }                 Inline script
+  { "file": "./send-emails.rp" }              Run a file by path
+  { "script": "...", "webhook": "url" }       Fire-and-forget with webhook callback
+  { "script": "...", "webhook": "url",
+    "webhook_secret": "whsec_..." }           Webhook with signature verification
+
+EXAMPLES:
+  robinpath start                                Start with defaults
+  robinpath start -p 8080 -s my-secret           Custom port and session
+  robinpath start --timeout 60000                Allow 60s scripts
+  robinpath start --max-concurrent 10            Allow 10 parallel jobs
+
+CURL EXAMPLES:
+  curl http://localhost:6372/v1/health
+
+  curl -X POST http://localhost:6372/v1/execute \\
+    -H "x-robinpath-session: <token>" \\
+    -H "Content-Type: application/json" \\
+    -d '{"script":"print(\\"hello\\")"}'
+
+  curl -X POST http://localhost:6372/v1/stop \\
+    -H "x-robinpath-session: <token>"`,
+    status: `robinpath status \u2014 Check if a server is running
+
+USAGE:
+  robinpath status [-p port]
+
+DESCRIPTION:
+  Checks if a robinpath server is running on the given port.
+  Queries the /v1/health endpoint and checks the PID file.
+  Outputs JSON with running status, port, PID, and version.
+
+FLAGS:
+  -p, --port <port>    Port to check (default: 6372)
+
+OUTPUT:
+  Running:  {"ok":true,"running":true,"port":6372,"pid":"12345","version":"1.42.0"}
+  Stopped:  {"ok":true,"running":false,"port":6372,"reason":"Server not reachable"}
+
+EXAMPLES:
+  robinpath status              Check default port
+  robinpath status -p 8080      Check specific port`
   };
   const page = helpPages[command];
   if (page) {
     console.log(page);
   } else {
     console.error(color.red("Error:") + ` Unknown command: ${command}`);
-    console.error("Available: add, remove, upgrade, search, info, modules, init, doctor, env, cache, audit, deprecate, pack, fmt, check, ast, test, install, uninstall, login, logout, whoami, publish, sync");
+    console.error("Available: add, remove, upgrade, search, info, modules, init, doctor, env, cache, audit, deprecate, pack, fmt, check, ast, test, install, uninstall, login, logout, whoami, publish, sync, start, status");
     process.exit(2);
   }
 }
@@ -21377,6 +22765,14 @@ async function main() {
   }
   if (command === "sync") {
     await handleSync();
+    return;
+  }
+  if (command === "start") {
+    await handleStart(args.slice(1));
+    return;
+  }
+  if (command === "status") {
+    await handleStatus(args.slice(1));
     return;
   }
   const evalIdx = args.indexOf("-e") !== -1 ? args.indexOf("-e") : args.indexOf("--eval");

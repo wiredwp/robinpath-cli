@@ -14,7 +14,7 @@ import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErr
 import { nativeModules } from './modules/index.js';
 
 // Injected by esbuild at build time via --define, fallback for dev mode
-const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.45.0';
+const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.46.0';
 
 // ============================================================================
 // Global flags
@@ -2946,6 +2946,27 @@ async function handleInfo(args) {
             };
         }
 
+        // Collect installed (external) module info from manifest
+        const installedModulesInfo = {};
+        const manifest = readModulesManifest();
+        for (const [packageName, mInfo] of Object.entries(manifest)) {
+            const entry = {
+                version: mInfo.version,
+                installed_at: mInfo.installedAt || null,
+                path: getModulePath(packageName),
+            };
+            // Try to read module's package.json for description & functions
+            try {
+                const pkgPath = join(getModulePath(packageName), 'package.json');
+                if (existsSync(pkgPath)) {
+                    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+                    if (pkg.description) entry.description = pkg.description;
+                    if (pkg.keywords) entry.keywords = pkg.keywords;
+                }
+            } catch { /* ignore */ }
+            installedModulesInfo[packageName] = entry;
+        }
+
         // No args — show system/environment info for external tools and AI agents
         const info = {
             ok: true,
@@ -2968,6 +2989,7 @@ async function handleInfo(args) {
                 docs: join(getRobinPathHome(), 'DOCUMENTATION.md'),
             },
             native_modules: modulesInfo,
+            installed_modules: installedModulesInfo,
             docs: {
                 overview: 'RobinPath is a scripting language for automation and data processing. It can be used as a CLI tool, an embedded SDK for JavaScript apps, or an HTTP server for integration with any programming language.',
                 install: {
@@ -3025,7 +3047,7 @@ async function handleInfo(args) {
                 http_server: {
                     description: 'Start an HTTP server that exposes the RobinPath engine via REST API. One server handles all requests. Variables persist across requests (conversational execution). Designed for integration with any language (Rust, Python, Go, PHP, Ruby, C#, Java, etc.).',
                     start: 'robinpath start -p <port> -s <session-secret>',
-                    startup_output: '{"ok":true,"port":6372,"host":"127.0.0.1","session":"<uuid>","version":"1.44.0"}',
+                    startup_output: `{"ok":true,"port":6372,"host":"127.0.0.1","session":"<uuid>","version":"${CLI_VERSION}"}`,
                     auth_header: 'x-robinpath-session: <session-token> (required on all endpoints except /v1/health)',
                     defaults: {
                         port: 6372,
@@ -3152,7 +3174,14 @@ async function handleInfo(args) {
             console.log(`  Env:          ${info.paths.env}`);
             console.log(`  Docs:         ${info.paths.docs}`);
             console.log('');
-            console.log(`Native Modules: ${Object.keys(modulesInfo).join(', ')}`);
+            console.log(`Native Modules (${Object.keys(modulesInfo).length}): ${Object.keys(modulesInfo).join(', ')}`);
+            console.log('');
+            const installedNames = Object.keys(installedModulesInfo);
+            if (installedNames.length > 0) {
+                console.log(`Installed Modules (${installedNames.length}): ${installedNames.join(', ')}`);
+            } else {
+                console.log('Installed Modules: (none)');
+            }
             console.log('');
             console.log(color.dim('Use --json for machine-readable output (includes full docs for AI agents)'));
         }
