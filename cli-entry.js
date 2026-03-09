@@ -14,7 +14,7 @@ import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErr
 import { nativeModules } from './modules/index.js';
 
 // Injected by esbuild at build time via --define, fallback for dev mode
-const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.44.0';
+const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.45.0';
 
 // ============================================================================
 // Global flags
@@ -108,6 +108,245 @@ function handleUpdate() {
 }
 
 /**
+ * Write DOCUMENTATION.md to ~/.robinpath/ for AI agents and external tools
+ */
+function writeDocsFile() {
+    const docsPath = join(getRobinPathHome(), 'DOCUMENTATION.md');
+    const modulesList = nativeModules.map(m => {
+        const fns = Object.keys(m.functions).join(', ');
+        const desc = m.moduleMetadata?.description || '';
+        return `### \`${m.name}\` — ${desc}\nFunctions: ${fns}`;
+    }).join('\n\n');
+
+    const content = `# RobinPath CLI — Documentation
+> Version: ${CLI_VERSION} | Language: ${ROBINPATH_VERSION} | Binary: robinpath, rp
+
+## Installation
+- macOS/Linux: \`curl -fsSL https://dev.robinpath.com/install.sh | bash\`
+- Windows: \`irm https://dev.robinpath.com/install.ps1 | iex\`
+
+## Quick Start
+\`\`\`bash
+robinpath app.rp              # Run a script
+robinpath -e 'log "hello"'    # Inline execution
+robinpath                      # Start REPL
+robinpath start                # Start HTTP server
+\`\`\`
+
+## CLI Commands
+| Command | Description |
+|---------|-------------|
+| \`<file.rp>\` | Run a script (.rp, .robin, auto-resolved) |
+| \`-e <code>\` | Execute inline code |
+| \`-w, --watch <file>\` | Re-run on file changes |
+| \`fmt <file\\|dir>\` | Format code (--write, --check, --diff) |
+| \`check <file>\` | Syntax check (--json) |
+| \`ast <file>\` | Dump AST (--compact) |
+| \`test [dir\\|file]\` | Run *.test.rp tests (--json) |
+| \`add <pkg>[@ver]\` | Install module |
+| \`remove <pkg>\` | Uninstall module |
+| \`upgrade <pkg>\` | Upgrade module |
+| \`modules list\` | List installed modules |
+| \`modules upgrade\` | Upgrade all modules |
+| \`modules init\` | Scaffold new module |
+| \`search <query>\` | Search registry (--category) |
+| \`info\` | System info & paths (--json) |
+| \`info <pkg>\` | Module details |
+| \`audit\` | Check module health |
+| \`init\` | Create project (robinpath.json) |
+| \`install\` | Install project dependencies |
+| \`doctor\` | Diagnose environment |
+| \`env set\\|list\\|remove\` | Manage environment secrets |
+| \`cache list\\|clean\` | Manage download cache |
+| \`login / logout / whoami\` | Authentication |
+| \`publish [dir]\` | Publish module (--public, --private, --org, --dry-run, --patch/--minor/--major) |
+| \`pack [dir]\` | Create tarball |
+| \`deprecate <pkg>\` | Deprecate module |
+| \`sync\` | List published modules |
+| \`start\` | Start HTTP server |
+| \`status\` | Check server status |
+| \`update\` | Update CLI to latest |
+| \`install\` | Install to system PATH |
+| \`uninstall\` | Remove from system |
+
+## Global Flags
+| Flag | Description |
+|------|-------------|
+| \`-q, --quiet\` | Suppress non-error output |
+| \`--verbose\` | Show timing and debug info |
+| \`-v, --version\` | Show version |
+| \`-h, --help\` | Show help |
+
+## HTTP Server (\`robinpath start\`)
+
+Start an HTTP server exposing the RobinPath engine via REST API. One server handles all requests. Variables persist across requests (conversational execution).
+
+### Server Flags
+| Flag | Default | Description |
+|------|---------|-------------|
+| \`-p, --port\` | 6372 | Port |
+| \`-s, --session\` | auto UUID | Session secret (gatekeeper) |
+| \`--host\` | 127.0.0.1 | Bind address |
+| \`--timeout\` | 30000 | Script timeout (ms) |
+| \`--max-concurrent\` | 5 | Max parallel jobs |
+| \`--cors-origin\` | * | CORS origin |
+| \`--log-file\` | (none) | JSON log file |
+| \`--max-body\` | 5000000 | Max body (bytes) |
+
+### Startup
+\`\`\`bash
+robinpath start -p 6372 -s my-secret
+# Output: {"ok":true,"port":6372,"host":"127.0.0.1","session":"...","version":"${CLI_VERSION}"}
+\`\`\`
+
+### Authentication
+All endpoints (except GET /v1/health) require: \`x-robinpath-session: <token>\`
+
+### Endpoints
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | /v1/health | No | Health check |
+| POST | /v1/execute | Yes | Execute script (JSON: {"code":"..."} or text/plain body) |
+| POST | /v1/execute/file | Yes | Execute file ({"file":"./script.rp"}) |
+| POST | /v1/check | Yes | Syntax check ({"script":"..."}) |
+| POST | /v1/fmt | Yes | Format code ({"script":"..."}) |
+| GET | /v1/jobs | Yes | List jobs (?status=running&limit=10) |
+| GET | /v1/jobs/:id | Yes | Job details |
+| GET | /v1/jobs/:id/stream | Yes | SSE stream for job |
+| POST | /v1/jobs/:id/cancel | Yes | Cancel job |
+| GET | /v1/modules | Yes | List loaded modules |
+| GET | /v1/info | Yes | Server runtime info |
+| GET | /v1/metrics | Yes | Prometheus metrics |
+| GET | /v1/openapi.json | Yes | OpenAPI 3.1 spec |
+| POST | /v1/stop | Yes | Graceful shutdown |
+
+### Execute Response
+\`\`\`json
+{"ok":true,"jobId":"...","status":"completed","output":"...","duration":12}
+\`\`\`
+
+### SSE Streaming
+Add \`Accept: text/event-stream\` header. Events: started, output, completed, job.failed, job.cancelled, done.
+
+### Webhooks
+Add \`webhook\` (URL) and \`webhook_secret\` to request body. Returns 202 immediately. Signature: \`X-Webhook-Signature: sha256=<hmac-hex>\`
+
+### Optional Headers
+| Header | Description |
+|--------|-------------|
+| \`x-request-id\` | Client request ID (auto UUID if missing) |
+| \`x-idempotency-key\` | Prevent duplicate execution (5-min TTL) |
+| \`Accept: text/event-stream\` | SSE streaming |
+| \`Content-Type: text/plain\` | Raw code body (no JSON) |
+
+### Response Headers
+\`x-processing-ms\`, \`x-request-id\`, \`x-rate-limit-limit\`, \`x-rate-limit-remaining\`, \`x-rate-limit-reset\`
+
+### Features
+Session gatekeeper, API versioning (/v1/), SSE streaming, webhook callbacks (HMAC-SHA256), idempotency keys, rate limiting, job queue with cancel, structured JSON logging, Prometheus metrics, OpenAPI spec, graceful shutdown, persistent runtime state, plain text body support, PID file management.
+
+## SDK (@robinpath/sdk)
+
+For JavaScript/TypeScript apps. Direct in-process execution, no HTTP server.
+
+\`\`\`bash
+npm install @robinpath/sdk
+\`\`\`
+
+\`\`\`javascript
+import { createRuntime } from '@robinpath/sdk';
+
+const rp = createRuntime();                              // full access
+const rp = createRuntime({ timeout: 5000 });             // with timeout
+const rp = createRuntime({ permissions: 'none' });       // sandboxed
+const rp = createRuntime({ modules: ['math', 'string'] }); // whitelist
+
+const result = await rp.run('log math.add 1 2');
+// { ok, output, value, logs, variables, error, stats }
+
+const result = await rp.run('log $name', { name: 'Robin' }); // context
+
+const stream = rp.stream(code);
+stream.on('log', (log) => console.log(log.message));
+const result = await stream.result;
+\`\`\`
+
+## Integration (non-JS languages)
+
+For Rust, Python, Go, PHP, Ruby, C#, Java — use \`robinpath start\` HTTP server:
+
+1. Spawn: \`robinpath start -p <port> [-s <secret>]\`
+2. Parse startup JSON from stdout to get session token
+3. Send HTTP requests with \`x-robinpath-session\` header
+4. Stop: \`POST /v1/stop\` or send SIGTERM
+
+### Rust Example
+\`\`\`rust
+let child = Command::new("robinpath").args(["start", "-p", "6372"]).stdout(Stdio::piped()).spawn()?;
+// Read first line → parse JSON → get session
+// reqwest::Client POST /v1/execute with x-robinpath-session header
+\`\`\`
+
+### Python Example
+\`\`\`python
+proc = subprocess.Popen(["robinpath", "start", "-p", "6372"], stdout=subprocess.PIPE)
+startup = json.loads(proc.stdout.readline())
+session = startup["session"]
+requests.post("http://127.0.0.1:6372/v1/execute",
+    headers={"x-robinpath-session": session}, json={"code": "log 1"})
+\`\`\`
+
+## Language Syntax
+\`\`\`
+set $x = 1                          # Variable assignment
+$x = 1                              # Short form
+log "hello"                         # Print output
+set $r = math.add 1 2               # Module function call
+set $s = "hello " + $name           # String concatenation
+if $x > 5                           # If block
+  log "big"
+end
+for $i in array.create 1 2 3        # For loop
+  log $i
+end
+def greet $name                     # Function definition
+  log "Hello " + $name
+enddef
+on "myEvent" $data                  # Event handler
+  log $data
+end
+# This is a comment                 # Comments
+\`\`\`
+
+File extensions: .rp, .robin (both recognized, auto-resolved)
+
+## File Structure
+| Path | Purpose |
+|------|---------|
+| ~/.robinpath/ | Home directory |
+| ~/.robinpath/bin/ | Binary installation |
+| ~/.robinpath/modules/ | Installed modules |
+| ~/.robinpath/modules/modules.json | Module manifest |
+| ~/.robinpath/cache/ | Download cache |
+| ~/.robinpath/auth.json | Auth credentials |
+| ~/.robinpath/history | REPL history |
+| ~/.robinpath/env | Environment secrets |
+| ~/.robinpath/server-<port>.pid | Server PID file |
+| robinpath.json | Project config |
+| robinpath-lock.json | Lock file |
+
+## Native Modules
+
+${modulesList}
+
+---
+Generated by RobinPath v${CLI_VERSION}
+`;
+    mkdirSync(getRobinPathHome(), { recursive: true });
+    writeFileSync(docsPath, content, 'utf-8');
+}
+
+/**
  * Install: copy this exe to ~/.robinpath/bin and add to PATH
  */
 function handleInstall() {
@@ -133,6 +372,9 @@ function handleInstall() {
 
     // Copy alias binary (rp)
     copyFileSync(src, rpDest);
+
+    // Write documentation file
+    try { writeDocsFile(); } catch { /* ignore docs write failure */ }
 
     // Make executable on Unix
     if (!isWindows) {
@@ -2695,7 +2937,16 @@ async function handleInfo(args) {
     const spec = args.find(a => !a.startsWith('-'));
     const jsonOutput = args.includes('--json');
     if (!spec) {
-        // No args — show system/environment info for external tools
+        // Collect native module info
+        const modulesInfo = {};
+        for (const mod of nativeModules) {
+            modulesInfo[mod.name] = {
+                functions: Object.keys(mod.functions),
+                description: mod.moduleMetadata?.description || null,
+            };
+        }
+
+        // No args — show system/environment info for external tools and AI agents
         const info = {
             ok: true,
             version: CLI_VERSION,
@@ -2714,6 +2965,171 @@ async function handleInfo(args) {
                 auth: getAuthPath(),
                 history: join(homedir(), '.robinpath', 'history'),
                 env: join(homedir(), '.robinpath', 'env'),
+                docs: join(getRobinPathHome(), 'DOCUMENTATION.md'),
+            },
+            native_modules: modulesInfo,
+            docs: {
+                overview: 'RobinPath is a scripting language for automation and data processing. It can be used as a CLI tool, an embedded SDK for JavaScript apps, or an HTTP server for integration with any programming language.',
+                install: {
+                    unix: 'curl -fsSL https://dev.robinpath.com/install.sh | bash',
+                    windows: 'irm https://dev.robinpath.com/install.ps1 | iex',
+                },
+                cli_commands: {
+                    run_file: 'robinpath <file.rp>',
+                    run_inline: 'robinpath -e \'log "hello"\'',
+                    run_stdin: 'echo \'log 1\' | robinpath',
+                    fmt: 'robinpath fmt <file|dir> [--write] [--check] [--diff]',
+                    check: 'robinpath check <file> [--json]',
+                    ast: 'robinpath ast <file> [--compact]',
+                    test: 'robinpath test [dir|file] [--json]',
+                    add_module: 'robinpath add <@scope/name>[@version]',
+                    remove_module: 'robinpath remove <@scope/name>',
+                    upgrade_module: 'robinpath upgrade <@scope/name>',
+                    list_modules: 'robinpath modules list',
+                    upgrade_all: 'robinpath modules upgrade',
+                    scaffold_module: 'robinpath modules init',
+                    search: 'robinpath search <query> [--category=<cat>]',
+                    info_system: 'robinpath info [--json]',
+                    info_module: 'robinpath info <@scope/name>',
+                    audit: 'robinpath audit',
+                    init_project: 'robinpath init [--force]',
+                    install_deps: 'robinpath install',
+                    doctor: 'robinpath doctor',
+                    env_set: 'robinpath env set <KEY> <value>',
+                    env_list: 'robinpath env list',
+                    env_remove: 'robinpath env remove <KEY>',
+                    cache_list: 'robinpath cache list',
+                    cache_clean: 'robinpath cache clean',
+                    install_system: 'robinpath install',
+                    uninstall: 'robinpath uninstall',
+                    update: 'robinpath update',
+                    login: 'robinpath login',
+                    logout: 'robinpath logout',
+                    whoami: 'robinpath whoami',
+                    publish: 'robinpath publish [dir] [--public|--private] [--org <name>] [--patch|--minor|--major] [--dry-run]',
+                    pack: 'robinpath pack [dir]',
+                    deprecate: 'robinpath deprecate <@scope/name> "reason"',
+                    sync: 'robinpath sync',
+                    start_server: 'robinpath start [-p port] [-s session] [--host addr] [--timeout ms] [--max-concurrent n] [--cors-origin origin] [--log-file path] [--max-body bytes]',
+                    server_status: 'robinpath status [-p port]',
+                    watch: 'robinpath --watch <file.rp>',
+                    repl: 'robinpath (no arguments)',
+                },
+                global_flags: {
+                    '-q, --quiet': 'Suppress non-error output',
+                    '--verbose': 'Show timing and debug info',
+                    '-v, --version': 'Show version',
+                    '-h, --help': 'Show help',
+                    '-w, --watch': 'Re-run on file changes',
+                },
+                http_server: {
+                    description: 'Start an HTTP server that exposes the RobinPath engine via REST API. One server handles all requests. Variables persist across requests (conversational execution). Designed for integration with any language (Rust, Python, Go, PHP, Ruby, C#, Java, etc.).',
+                    start: 'robinpath start -p <port> -s <session-secret>',
+                    startup_output: '{"ok":true,"port":6372,"host":"127.0.0.1","session":"<uuid>","version":"1.44.0"}',
+                    auth_header: 'x-robinpath-session: <session-token> (required on all endpoints except /v1/health)',
+                    defaults: {
+                        port: 6372,
+                        host: '127.0.0.1',
+                        timeout_ms: 30000,
+                        max_concurrent: 5,
+                        max_body_bytes: 5000000,
+                        cors_origin: '*',
+                    },
+                    endpoints: {
+                        'GET /v1/health': { auth: false, description: 'Health check', response: '{"ok":true,"version":"...","uptime_ms":...}' },
+                        'POST /v1/execute': { auth: true, description: 'Execute script', body: '{"code":"log 1"} or Content-Type: text/plain with raw code', response: '{"ok":true,"jobId":"...","status":"completed","output":"1\\n","duration":12}', notes: 'Add Accept: text/event-stream for SSE streaming. Add webhook/webhook_secret for fire-and-forget callback.' },
+                        'POST /v1/execute/file': { auth: true, description: 'Execute script file', body: '{"file":"./script.rp"}', response: 'Same as /v1/execute' },
+                        'POST /v1/check': { auth: true, description: 'Syntax check without executing', body: '{"script":"log 1"}', response: '{"ok":true,"message":"No syntax errors"}' },
+                        'POST /v1/fmt': { auth: true, description: 'Format code', body: '{"script":"set $x as 1"}', response: '{"ok":true,"formatted":"$x = 1\\n"}' },
+                        'GET /v1/jobs': { auth: true, description: 'List jobs', query: '?status=running&limit=10', response: '{"ok":true,"jobs":[...]}' },
+                        'GET /v1/jobs/:id': { auth: true, description: 'Get job details', response: 'Single job object with output' },
+                        'GET /v1/jobs/:id/stream': { auth: true, description: 'SSE stream for job progress', notes: 'Returns event: started, output, completed, job.failed, done' },
+                        'POST /v1/jobs/:id/cancel': { auth: true, description: 'Cancel running job', response: '{"ok":true,"jobId":"...","status":"cancelled"}' },
+                        'GET /v1/modules': { auth: true, description: 'List all loaded modules and functions' },
+                        'GET /v1/info': { auth: true, description: 'Server runtime info (uptime, memory, config, job counts)' },
+                        'GET /v1/metrics': { auth: true, description: 'Prometheus-style metrics (text/plain)' },
+                        'GET /v1/openapi.json': { auth: true, description: 'OpenAPI 3.1 specification' },
+                        'POST /v1/stop': { auth: true, description: 'Graceful shutdown (waits for active jobs)', response: '{"ok":true,"message":"Server stopping","active_jobs":[]}' },
+                    },
+                    optional_headers: {
+                        'x-request-id': 'Client request ID (auto-generated UUID if missing)',
+                        'x-idempotency-key': 'Prevent duplicate execution on retry (5-min TTL)',
+                        'Accept: text/event-stream': 'Request SSE streaming on /v1/execute and /v1/jobs/:id/stream',
+                        'Content-Type: text/plain': 'Send raw code in body without JSON wrapping',
+                    },
+                    response_headers: {
+                        'x-processing-ms': 'Processing time in milliseconds',
+                        'x-request-id': 'Echo of request ID',
+                        'x-rate-limit-limit': 'Rate limit quota',
+                        'x-rate-limit-remaining': 'Requests remaining',
+                        'x-rate-limit-reset': 'When limit resets',
+                    },
+                    sse_events: ['started', 'output', 'completed', 'job.failed', 'job.cancelled', 'done'],
+                    webhook: {
+                        description: 'Add webhook URL to /v1/execute for fire-and-forget execution. Returns 202 immediately.',
+                        body_fields: 'webhook (URL), webhook_secret (for HMAC-SHA256 signature)',
+                        signature_header: 'X-Webhook-Signature: sha256=<hmac-hex>',
+                    },
+                    features: ['Session gatekeeper', 'API versioning (/v1/)', 'SSE streaming', 'Webhook callbacks with HMAC-SHA256', 'Idempotency keys', 'Rate limiting', 'Job queue with cancel', 'Structured JSON logging', 'Prometheus metrics', 'OpenAPI spec', 'Graceful shutdown', 'Persistent runtime state', 'Plain text body support', 'PID file management'],
+                },
+                sdk: {
+                    description: 'For JavaScript/TypeScript apps (React, Next.js, Vue, Angular, Express, Node.js). Direct in-process execution, no HTTP server needed.',
+                    install: 'npm install @robinpath/sdk',
+                    usage: [
+                        'import { createRuntime } from "@robinpath/sdk";',
+                        'const rp = createRuntime();',
+                        'const result = await rp.run("log math.add 1 2");',
+                        '// result: { ok, output, value, logs, variables, error, stats }',
+                    ].join('\n'),
+                    options: {
+                        timeout: 'Max execution time in ms (0 = no limit)',
+                        permissions: '"all" | "none" | { fs, net, child, env, crypto } — restrict what scripts can access',
+                        modules: 'Whitelist of allowed module names (undefined = all)',
+                        customBuiltins: 'Record<string, handler> — add custom functions',
+                        customModules: '[{ name, functions }] — add custom modules',
+                    },
+                    context: 'await rp.run("log $name", { name: "Robin" }) — pass variables into scripts',
+                    streaming: 'rp.stream(code).on("log", handler).on("done", handler)',
+                    state: 'Variables persist across run() calls on the same runtime instance',
+                    engine_access: 'rp.engine — access underlying RobinPath instance for advanced use',
+                },
+                integration: {
+                    description: 'For non-JS languages (Rust, Python, Go, PHP, Ruby, C#, Java), use robinpath start HTTP server.',
+                    pattern: [
+                        '1. Spawn: robinpath start -p <port> [-s <secret>]',
+                        '2. Parse startup JSON from stdout to get session token',
+                        '3. Send HTTP requests with x-robinpath-session header',
+                        '4. Stop: POST /v1/stop or send SIGTERM',
+                    ],
+                    rust_example: 'let child = Command::new("robinpath").args(["start","-p","6372"]).stdout(Stdio::piped()).spawn()?;\n// Read first line for session, then use reqwest to POST /v1/execute',
+                    python_example: 'proc = subprocess.Popen(["robinpath","start","-p","6372"], stdout=subprocess.PIPE)\nstartup = json.loads(proc.stdout.readline())\nsession = startup["session"]\nrequests.post(f"http://127.0.0.1:6372/v1/execute", headers={"x-robinpath-session": session}, json={"code": "log 1"})',
+                    js_note: 'For JavaScript apps, prefer @robinpath/sdk (direct, no server needed) over HTTP.',
+                },
+                language_syntax: {
+                    variables: 'set $x = 1  OR  $x = 1',
+                    log: 'log "hello"  OR  log $x',
+                    module_call: 'set $r = math.add 1 2  OR  math.add 1 2',
+                    string_concat: 'set $s = "hello " + $name',
+                    if_block: 'if $x > 5\n  log "big"\nend',
+                    for_loop: 'for $i in array.create 1 2 3\n  log $i\nend',
+                    function_def: 'def greet $name\n  log "Hello " + $name\nenddef',
+                    events: 'on "myEvent" $data\n  log $data\nend',
+                    comments: '# This is a comment',
+                    file_extensions: '.rp, .robin (both recognized)',
+                },
+                file_structure: {
+                    '~/.robinpath/': 'Home directory',
+                    '~/.robinpath/bin/': 'Binary installation',
+                    '~/.robinpath/modules/': 'Installed modules',
+                    '~/.robinpath/modules/modules.json': 'Module manifest',
+                    '~/.robinpath/cache/': 'Download cache',
+                    '~/.robinpath/auth.json': 'Auth credentials',
+                    '~/.robinpath/history': 'REPL history',
+                    '~/.robinpath/env': 'Environment secrets',
+                    '~/.robinpath/server-<port>.pid': 'Server PID file',
+                    'robinpath.json': 'Project config',
+                    'robinpath-lock.json': 'Lock file',
+                },
             },
         };
         if (jsonOutput || !isTTY) {
@@ -2734,8 +3150,11 @@ async function handleInfo(args) {
             console.log(`  Auth:         ${info.paths.auth}`);
             console.log(`  History:      ${info.paths.history}`);
             console.log(`  Env:          ${info.paths.env}`);
+            console.log(`  Docs:         ${info.paths.docs}`);
             console.log('');
-            console.log(color.dim('Use --json for machine-readable output'));
+            console.log(`Native Modules: ${Object.keys(modulesInfo).join(', ')}`);
+            console.log('');
+            console.log(color.dim('Use --json for machine-readable output (includes full docs for AI agents)'));
         }
         return;
     }
