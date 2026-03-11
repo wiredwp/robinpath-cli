@@ -14,7 +14,7 @@ import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErr
 import { nativeModules } from './modules/index.js';
 
 // Injected by esbuild at build time via --define, fallback for dev mode
-const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.47.0';
+const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.48.0';
 
 // ============================================================================
 // Global flags
@@ -149,7 +149,7 @@ robinpath start                # Start HTTP server
 | \`modules list\` | List installed modules |
 | \`modules upgrade\` | Upgrade all modules |
 | \`modules init\` | Scaffold new module |
-| \`search <query>\` | Search registry (--category) |
+| \`search [query]\` | Search registry (--category, --sort, --page, --limit, --json) |
 | \`info\` | System info & paths (--json) |
 | \`info <pkg>\` | Module details |
 | \`audit\` | Check module health |
@@ -2876,29 +2876,94 @@ async function handlePack(args) {
 }
 
 /**
- * robinpath search <query> — Search the module registry
+ * Format a number with K/M suffixes for compact display
+ */
+function formatCompactNumber(n) {
+    if (n == null) return '-';
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
+    if (n >= 1_000) return (n / 1_000).toFixed(1).replace(/\.0$/, '') + 'K';
+    return String(n);
+}
+
+/**
+ * Format a relative time string (e.g. "3 days ago")
+ */
+function formatTimeAgo(dateStr) {
+    if (!dateStr) return '-';
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const secs = Math.floor(diff / 1000);
+    if (secs < 60) return 'just now';
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 30) return `${days}d ago`;
+    const months = Math.floor(days / 30);
+    if (months < 12) return `${months}mo ago`;
+    return `${Math.floor(months / 12)}y ago`;
+}
+
+const VALID_CATEGORIES = ['utilities', 'devops', 'productivity', 'web', 'sales', 'marketing', 'data', 'communication', 'ai'];
+const VALID_SORTS = ['downloads', 'stars', 'updated', 'created', 'name'];
+
+/**
+ * robinpath search [query] — Search the module registry
  */
 async function handleSearch(args) {
     const query = args.filter(a => !a.startsWith('-')).join(' ');
-    if (!query) {
-        console.error(color.red('Error:') + ' Usage: robinpath search <query>');
-        console.error('  Example: robinpath search slack');
+    const category = args.find(a => a.startsWith('--category='))?.split('=')[1];
+    const sort = args.find(a => a.startsWith('--sort='))?.split('=')[1];
+    const page = args.find(a => a.startsWith('--page='))?.split('=')[1];
+    const limit = args.find(a => a.startsWith('--limit='))?.split('=')[1];
+    const jsonOutput = args.includes('--json');
+
+    if (!query && !category) {
+        console.error(color.red('Error:') + ' Usage: robinpath search <query> [options]');
+        console.error('');
+        console.error('  Options:');
+        console.error('    --category=<cat>   Filter by category (' + VALID_CATEGORIES.join(', ') + ')');
+        console.error('    --sort=<key>       Sort by: ' + VALID_SORTS.join(', ') + ' (default: downloads)');
+        console.error('    --page=<n>         Page number (default: 1)');
+        console.error('    --limit=<n>        Results per page (default: 20)');
+        console.error('    --json             Machine-readable JSON output');
+        console.error('');
+        console.error('  Examples:');
+        console.error('    robinpath search slack');
+        console.error('    robinpath search --category=ai');
+        console.error('    robinpath search crm --category=sales --sort=stars');
         process.exit(2);
     }
 
-    const category = args.find(a => a.startsWith('--category='))?.split('=')[1];
+    if (category && !VALID_CATEGORIES.includes(category)) {
+        console.error(color.red('Error:') + ` Invalid category: ${category}`);
+        console.error('  Valid categories: ' + VALID_CATEGORIES.join(', '));
+        process.exit(2);
+    }
+
+    if (sort && !VALID_SORTS.includes(sort)) {
+        console.error(color.red('Error:') + ` Invalid sort: ${sort}`);
+        console.error('  Valid sorts: ' + VALID_SORTS.join(', '));
+        process.exit(2);
+    }
+
     const token = getAuthToken();
 
-    log(`Searching for "${query}"...\n`);
+    const searchLabel = query ? `"${query}"` : `category: ${category}`;
+    log(`Searching for ${searchLabel}...\n`);
 
     try {
-        let url = `${PLATFORM_URL}/v1/registry/search?q=${encodeURIComponent(query)}`;
-        if (category) url += `&category=${encodeURIComponent(category)}`;
+        const params = new URLSearchParams();
+        if (query) params.set('q', query);
+        if (category) params.set('category', category);
+        if (sort) params.set('sort', sort);
+        if (page) params.set('page', page);
+        if (limit) params.set('limit', limit);
 
         const headers = {};
         if (token) headers.Authorization = `Bearer ${token}`;
 
-        const res = await fetch(url, { headers });
+        const res = await fetch(`${PLATFORM_URL}/v1/registry/search?${params}`, { headers });
         if (!res.ok) {
             console.error(color.red('Error:') + ` Search failed (HTTP ${res.status})`);
             process.exit(1);
@@ -2906,24 +2971,51 @@ async function handleSearch(args) {
 
         const body = await res.json();
         const modules = body.data || body.modules || [];
+        const pagination = body.pagination || null;
+
+        if (jsonOutput) {
+            console.log(JSON.stringify({ modules, pagination }, null, 2));
+            return;
+        }
 
         if (modules.length === 0) {
             log('No modules found.');
             return;
         }
 
-        log(color.bold('  Name'.padEnd(35) + 'Version'.padEnd(10) + 'Description'));
-        log(color.dim('  ' + '─'.repeat(72)));
+        // Rich table output
+        const nameW = 30;
+        const verW = 10;
+        const dlW = 10;
+        const starW = 7;
+        const updW = 10;
+        log(color.bold('  ' + 'Name'.padEnd(nameW) + 'Version'.padEnd(verW) + 'Downloads'.padEnd(dlW) + 'Stars'.padEnd(starW) + 'Updated'.padEnd(updW) + 'Description'));
+        log(color.dim('  ' + '─'.repeat(nameW + verW + dlW + starW + updW + 25)));
 
         for (const mod of modules) {
             const modName = (mod.scope ? `@${mod.scope}/${mod.name}` : mod.name) || mod.id || '?';
             const ver = mod.version || mod.latestVersion || '-';
-            const desc = (mod.description || '').slice(0, 35);
-            log(`  ${modName.padEnd(33)}${ver.padEnd(10)}${color.dim(desc)}`);
+            const dl = formatCompactNumber(mod.downloadsTotal ?? mod.downloadsWeekly ?? mod.downloads ?? mod.downloadCount);
+            const stars = formatCompactNumber(mod.stars);
+            const updated = formatTimeAgo(mod.updatedAt);
+            const desc = (mod.description || '').slice(0, 25);
+            const badges = [];
+            if (mod.isOfficial) badges.push(color.cyan('●'));
+            if (mod.isVerified) badges.push(color.green('✓'));
+            const badgeStr = badges.length ? ' ' + badges.join('') : '';
+
+            log(`  ${(modName + badgeStr).padEnd(nameW + (badgeStr.length - badges.length))}${ver.padEnd(verW)}${dl.padEnd(dlW)}${('★ ' + stars).padEnd(starW)}${color.dim(updated.padEnd(updW))}${color.dim(desc)}`);
         }
 
         log('');
-        log(color.dim(`${modules.length} result${modules.length !== 1 ? 's' : ''}`));
+        if (pagination && pagination.pages > 1) {
+            log(color.dim(`  Page ${pagination.page} of ${pagination.pages} (${pagination.total} total)`));
+            if (pagination.page < pagination.pages) {
+                log(color.dim(`  Use --page=${pagination.page + 1} for next page`));
+            }
+        } else {
+            log(color.dim(`  ${modules.length} result${modules.length !== 1 ? 's' : ''}`));
+        }
     } catch (err) {
         console.error(color.red('Error:') + ` Search failed: ${err.message}`);
         process.exit(1);
@@ -3010,7 +3102,7 @@ async function handleInfo(args) {
                     list_modules: 'robinpath modules list',
                     upgrade_all: 'robinpath modules upgrade',
                     scaffold_module: 'robinpath modules init',
-                    search: 'robinpath search <query> [--category=<cat>]',
+                    search: 'robinpath search [query] [--category=<cat>] [--sort=<key>] [--page=<n>] [--limit=<n>] [--json]',
                     info_system: 'robinpath info [--json]',
                     info_module: 'robinpath info <@scope/name>',
                     audit: 'robinpath audit',
@@ -3201,7 +3293,12 @@ async function handleInfo(args) {
         const headers = {};
         if (token) headers.Authorization = `Bearer ${token}`;
 
-        const res = await fetch(`${PLATFORM_URL}/v1/registry/${scope}/${name}`, { headers });
+        // Fetch module info and versions in parallel
+        const [res, versionsRes] = await Promise.all([
+            fetch(`${PLATFORM_URL}/v1/registry/${scope}/${name}`, { headers }),
+            fetch(`${PLATFORM_URL}/v1/registry/${scope}/${name}/versions`, { headers }).catch(() => null),
+        ]);
+
         if (!res.ok) {
             if (res.status === 404) {
                 console.error(color.red('Error:') + ` Module not found: ${fullName}`);
@@ -3214,21 +3311,90 @@ async function handleInfo(args) {
         const body = await res.json();
         const data = body.data || body;
 
+        if (jsonOutput) {
+            let versionsData = null;
+            if (versionsRes?.ok) {
+                const vBody = await versionsRes.json();
+                versionsData = vBody.data || vBody;
+            }
+            console.log(JSON.stringify({ module: data, versions: versionsData }, null, 2));
+            return;
+        }
+
+        // Header
         log('');
-        log(`  ${color.bold(fullName)} ${color.cyan('v' + (data.latestVersion || data.version || '-'))}`);
+        const badges = [];
+        if (data.isOfficial) badges.push(color.cyan(' official'));
+        if (data.isVerified) badges.push(color.green(' verified'));
+        log(`  ${color.bold(fullName)} ${color.cyan('v' + (data.latestVersion || data.version || '-'))}${badges.join('')}`);
         if (data.description) log(`  ${data.description}`);
         log('');
-        if (data.author) log(`  Author:      ${data.author}`);
-        if (data.license) log(`  License:     ${data.license}`);
-        if (data.category) log(`  Category:    ${data.category}`);
-        const downloads = data.downloads ?? data.downloadCount;
-        if (downloads !== undefined) log(`  Downloads:   ${downloads}`);
+
+        // Metadata
+        if (data.author || data.publisher?.name) log(`  Author:       ${data.author || data.publisher?.name || '-'}`);
+        if (data.license) log(`  License:      ${data.license}`);
+        if (data.category) log(`  Category:     ${data.category}`);
         const visibility = data.visibility || (data.isPublic === false ? 'private' : 'public');
-        log(`  Visibility:  ${visibility}`);
-        if (data.keywords?.length) log(`  Keywords:    ${data.keywords.join(', ')}`);
+        log(`  Visibility:   ${visibility}`);
         log('');
 
-        // Show installed status
+        // Stats
+        const dlWeekly = data.downloadsWeekly ?? data.downloads ?? data.downloadCount;
+        const dlTotal = data.downloadsTotal;
+        const stars = data.stars;
+        if (dlWeekly !== undefined || dlTotal !== undefined || stars !== undefined) {
+            const parts = [];
+            if (dlTotal !== undefined) parts.push(`${formatCompactNumber(dlTotal)} total downloads`);
+            if (dlWeekly !== undefined) parts.push(`${formatCompactNumber(dlWeekly)} weekly`);
+            if (stars !== undefined) parts.push(`★ ${formatCompactNumber(stars)}`);
+            log(`  Stats:        ${parts.join('  │  ')}`);
+        }
+
+        if (data.createdAt) log(`  Created:      ${formatTimeAgo(data.createdAt)}`);
+        if (data.updatedAt) log(`  Updated:      ${formatTimeAgo(data.updatedAt)}`);
+
+        let parsedKeywords = data.keywords;
+        if (typeof parsedKeywords === 'string') {
+            try { parsedKeywords = JSON.parse(parsedKeywords); } catch { parsedKeywords = null; }
+        }
+        if (parsedKeywords?.length) log(`  Keywords:     ${parsedKeywords.join(', ')}`);
+        log('');
+
+        // Version history
+        if (versionsRes?.ok) {
+            const vBody = await versionsRes.json();
+            const vData = vBody.data || vBody;
+            const versions = vData.versions || vData;
+            const distTags = vData.distTags || vData.dist_tags || [];
+
+            if (Array.isArray(versions) && versions.length > 0) {
+                const tagMap = {};
+                if (Array.isArray(distTags)) {
+                    for (const dt of distTags) {
+                        tagMap[dt.version] = tagMap[dt.version] || [];
+                        tagMap[dt.version].push(dt.tag);
+                    }
+                }
+
+                log(color.bold('  Versions'));
+                log(color.dim('  ' + '─'.repeat(55)));
+                const shown = versions.slice(0, 10);
+                for (const v of shown) {
+                    const tags = tagMap[v.version];
+                    const tagStr = tags ? ` ${color.cyan(tags.join(', '))}` : '';
+                    const size = v.tarballSize ? ` (${(v.tarballSize / 1024).toFixed(1)}KB)` : '';
+                    const deprecated = v.deprecated ? color.red(' DEPRECATED') : '';
+                    const published = formatTimeAgo(v.createdAt);
+                    log(`  ${('v' + v.version).padEnd(14)}${color.dim(published.padEnd(12))}${color.dim(size)}${tagStr}${deprecated}`);
+                }
+                if (versions.length > 10) {
+                    log(color.dim(`  ... and ${versions.length - 10} more version${versions.length - 10 !== 1 ? 's' : ''}`));
+                }
+                log('');
+            }
+        }
+
+        // Install status
         const manifest = readModulesManifest();
         if (manifest[fullName]) {
             log(`  ${color.green('Installed')} v${manifest[fullName].version}`);
@@ -4313,7 +4479,7 @@ MODULE MANAGEMENT:
   add <pkg>[@ver]    Install a module from the registry
   remove <pkg>       Uninstall a module
   upgrade <pkg>      Upgrade a single module to latest
-  search <query>     Search the module registry
+  search [query]     Search the module registry (--category, --sort, --page, --limit)
   info               Show system paths (--json for machines)
   info <pkg>         Show module details from registry
   modules list       List installed modules
@@ -4695,14 +4861,29 @@ EXAMPLES:
         search: `robinpath search — Search the module registry
 
 USAGE:
-  robinpath search <query> [--category=<cat>]
+  robinpath search <query> [options]
+  robinpath search --category=<cat> [options]
+
+OPTIONS:
+  --category=<cat>   Filter by category (utilities, devops, productivity, web,
+                     sales, marketing, data, communication, ai)
+  --sort=<key>       Sort results by: downloads, stars, updated, created, name
+                     (default: downloads)
+  --page=<n>         Page number (default: 1)
+  --limit=<n>        Results per page (default: 20)
+  --json             Machine-readable JSON output
 
 DESCRIPTION:
   Searches the RobinPath module registry and displays matching modules.
+  You can search by keyword, browse by category, or combine both.
+  Results show name, version, download count, stars, and last update.
 
 EXAMPLES:
   robinpath search slack
-  robinpath search crm --category=crm`,
+  robinpath search --category=ai
+  robinpath search crm --category=sales --sort=stars
+  robinpath search http --limit=5 --page=2
+  robinpath search --category=utilities --json`,
 
         info: `robinpath info — System info & module details
 
