@@ -613,7 +613,7 @@ async function handleStart(args) {
     // Collect module info for /v1/modules endpoint
     const moduleList = [];
     for (const mod of nativeModules) {
-        moduleList.push({ name: mod.name, type: 'native', methods: mod.moduleMetadata?.methods || [] });
+        moduleList.push({ name: mod.name, type: 'native', methods: mod.moduleMetadata?.methods || [], functionMetadata: mod.functionMetadata || null });
     }
 
     // Server start time for uptime tracking
@@ -3035,6 +3035,7 @@ async function handleInfo(args) {
             modulesInfo[mod.name] = {
                 functions: Object.keys(mod.functions),
                 description: mod.moduleMetadata?.description || null,
+                function_metadata: mod.functionMetadata || null,
             };
         }
 

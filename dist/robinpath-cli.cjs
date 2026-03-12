@@ -18360,7 +18360,7 @@ var nativeModules = [
 ];
 
 // cli-entry.js
-var CLI_VERSION = true ? "1.45.0" : "1.45.0";
+var CLI_VERSION = true ? "1.48.0" : "1.48.0";
 var FLAG_QUIET = false;
 var FLAG_VERBOSE = false;
 function log(...args) {
@@ -18458,7 +18458,7 @@ robinpath start                # Start HTTP server
 | \`modules list\` | List installed modules |
 | \`modules upgrade\` | Upgrade all modules |
 | \`modules init\` | Scaffold new module |
-| \`search <query>\` | Search registry (--category) |
+| \`search [query]\` | Search registry (--category, --sort, --page, --limit, --json) |
 | \`info\` | System info & paths (--json) |
 | \`info <pkg>\` | Module details |
 | \`audit\` | Check module health |
@@ -18844,7 +18844,7 @@ async function handleStart(args) {
   }
   const moduleList = [];
   for (const mod of nativeModules) {
-    moduleList.push({ name: mod.name, type: "native", methods: mod.moduleMetadata?.methods || [] });
+    moduleList.push({ name: mod.name, type: "native", methods: mod.moduleMetadata?.methods || [], functionMetadata: mod.functionMetadata || null });
   }
   const serverStartedAt = (/* @__PURE__ */ new Date()).toISOString();
   const RATE_LIMIT = 100;
@@ -20680,43 +20680,120 @@ async function handlePack(args) {
   const size = (0, import_node_fs3.statSync)(outputPath).size;
   log(color.green("Created") + ` ${outputFile} (${(size / 1024).toFixed(1)}KB)`);
 }
+function formatCompactNumber(n) {
+  if (n == null) return "-";
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "K";
+  return String(n);
+}
+function formatTimeAgo(dateStr) {
+  if (!dateStr) return "-";
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const secs = Math.floor(diff / 1e3);
+  if (secs < 60) return "just now";
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.floor(months / 12)}y ago`;
+}
+var VALID_CATEGORIES = ["utilities", "devops", "productivity", "web", "sales", "marketing", "data", "communication", "ai"];
+var VALID_SORTS = ["downloads", "stars", "updated", "created", "name"];
 async function handleSearch(args) {
   const query = args.filter((a) => !a.startsWith("-")).join(" ");
-  if (!query) {
-    console.error(color.red("Error:") + " Usage: robinpath search <query>");
-    console.error("  Example: robinpath search slack");
+  const category = args.find((a) => a.startsWith("--category="))?.split("=")[1];
+  const sort = args.find((a) => a.startsWith("--sort="))?.split("=")[1];
+  const page = args.find((a) => a.startsWith("--page="))?.split("=")[1];
+  const limit = args.find((a) => a.startsWith("--limit="))?.split("=")[1];
+  const jsonOutput = args.includes("--json");
+  if (!query && !category) {
+    console.error(color.red("Error:") + " Usage: robinpath search <query> [options]");
+    console.error("");
+    console.error("  Options:");
+    console.error("    --category=<cat>   Filter by category (" + VALID_CATEGORIES.join(", ") + ")");
+    console.error("    --sort=<key>       Sort by: " + VALID_SORTS.join(", ") + " (default: downloads)");
+    console.error("    --page=<n>         Page number (default: 1)");
+    console.error("    --limit=<n>        Results per page (default: 20)");
+    console.error("    --json             Machine-readable JSON output");
+    console.error("");
+    console.error("  Examples:");
+    console.error("    robinpath search slack");
+    console.error("    robinpath search --category=ai");
+    console.error("    robinpath search crm --category=sales --sort=stars");
     process.exit(2);
   }
-  const category = args.find((a) => a.startsWith("--category="))?.split("=")[1];
+  if (category && !VALID_CATEGORIES.includes(category)) {
+    console.error(color.red("Error:") + ` Invalid category: ${category}`);
+    console.error("  Valid categories: " + VALID_CATEGORIES.join(", "));
+    process.exit(2);
+  }
+  if (sort && !VALID_SORTS.includes(sort)) {
+    console.error(color.red("Error:") + ` Invalid sort: ${sort}`);
+    console.error("  Valid sorts: " + VALID_SORTS.join(", "));
+    process.exit(2);
+  }
   const token = getAuthToken();
-  log(`Searching for "${query}"...
+  const searchLabel = query ? `"${query}"` : `category: ${category}`;
+  log(`Searching for ${searchLabel}...
 `);
   try {
-    let url = `${PLATFORM_URL}/v1/registry/search?q=${encodeURIComponent(query)}`;
-    if (category) url += `&category=${encodeURIComponent(category)}`;
+    const params = new URLSearchParams();
+    if (query) params.set("q", query);
+    if (category) params.set("category", category);
+    if (sort) params.set("sort", sort);
+    if (page) params.set("page", page);
+    if (limit) params.set("limit", limit);
     const headers = {};
     if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(url, { headers });
+    const res = await fetch(`${PLATFORM_URL}/v1/registry/search?${params}`, { headers });
     if (!res.ok) {
       console.error(color.red("Error:") + ` Search failed (HTTP ${res.status})`);
       process.exit(1);
     }
     const body = await res.json();
     const modules = body.data || body.modules || [];
+    const pagination = body.pagination || null;
+    if (jsonOutput) {
+      console.log(JSON.stringify({ modules, pagination }, null, 2));
+      return;
+    }
     if (modules.length === 0) {
       log("No modules found.");
       return;
     }
-    log(color.bold("  Name".padEnd(35) + "Version".padEnd(10) + "Description"));
-    log(color.dim("  " + "\u2500".repeat(72)));
+    const nameW = 30;
+    const verW = 10;
+    const dlW = 10;
+    const starW = 7;
+    const updW = 10;
+    log(color.bold("  " + "Name".padEnd(nameW) + "Version".padEnd(verW) + "Downloads".padEnd(dlW) + "Stars".padEnd(starW) + "Updated".padEnd(updW) + "Description"));
+    log(color.dim("  " + "\u2500".repeat(nameW + verW + dlW + starW + updW + 25)));
     for (const mod of modules) {
       const modName = (mod.scope ? `@${mod.scope}/${mod.name}` : mod.name) || mod.id || "?";
       const ver = mod.version || mod.latestVersion || "-";
-      const desc = (mod.description || "").slice(0, 35);
-      log(`  ${modName.padEnd(33)}${ver.padEnd(10)}${color.dim(desc)}`);
+      const dl = formatCompactNumber(mod.downloadsTotal ?? mod.downloadsWeekly ?? mod.downloads ?? mod.downloadCount);
+      const stars = formatCompactNumber(mod.stars);
+      const updated = formatTimeAgo(mod.updatedAt);
+      const desc = (mod.description || "").slice(0, 25);
+      const badges = [];
+      if (mod.isOfficial) badges.push(color.cyan("\u25CF"));
+      if (mod.isVerified) badges.push(color.green("\u2713"));
+      const badgeStr = badges.length ? " " + badges.join("") : "";
+      log(`  ${(modName + badgeStr).padEnd(nameW + (badgeStr.length - badges.length))}${ver.padEnd(verW)}${dl.padEnd(dlW)}${("\u2605 " + stars).padEnd(starW)}${color.dim(updated.padEnd(updW))}${color.dim(desc)}`);
     }
     log("");
-    log(color.dim(`${modules.length} result${modules.length !== 1 ? "s" : ""}`));
+    if (pagination && pagination.pages > 1) {
+      log(color.dim(`  Page ${pagination.page} of ${pagination.pages} (${pagination.total} total)`));
+      if (pagination.page < pagination.pages) {
+        log(color.dim(`  Use --page=${pagination.page + 1} for next page`));
+      }
+    } else {
+      log(color.dim(`  ${modules.length} result${modules.length !== 1 ? "s" : ""}`));
+    }
   } catch (err) {
     console.error(color.red("Error:") + ` Search failed: ${err.message}`);
     process.exit(1);
@@ -20730,8 +20807,28 @@ async function handleInfo(args) {
     for (const mod of nativeModules) {
       modulesInfo[mod.name] = {
         functions: Object.keys(mod.functions),
-        description: mod.moduleMetadata?.description || null
+        description: mod.moduleMetadata?.description || null,
+        function_metadata: mod.functionMetadata || null
       };
+    }
+    const installedModulesInfo = {};
+    const manifest = readModulesManifest();
+    for (const [packageName, mInfo] of Object.entries(manifest)) {
+      const entry = {
+        version: mInfo.version,
+        installed_at: mInfo.installedAt || null,
+        path: getModulePath(packageName)
+      };
+      try {
+        const pkgPath = (0, import_node_path4.join)(getModulePath(packageName), "package.json");
+        if ((0, import_node_fs3.existsSync)(pkgPath)) {
+          const pkg = JSON.parse((0, import_node_fs3.readFileSync)(pkgPath, "utf-8"));
+          if (pkg.description) entry.description = pkg.description;
+          if (pkg.keywords) entry.keywords = pkg.keywords;
+        }
+      } catch {
+      }
+      installedModulesInfo[packageName] = entry;
     }
     const info = {
       ok: true,
@@ -20754,6 +20851,7 @@ async function handleInfo(args) {
         docs: (0, import_node_path4.join)(getRobinPathHome(), "DOCUMENTATION.md")
       },
       native_modules: modulesInfo,
+      installed_modules: installedModulesInfo,
       docs: {
         overview: "RobinPath is a scripting language for automation and data processing. It can be used as a CLI tool, an embedded SDK for JavaScript apps, or an HTTP server for integration with any programming language.",
         install: {
@@ -20774,7 +20872,7 @@ async function handleInfo(args) {
           list_modules: "robinpath modules list",
           upgrade_all: "robinpath modules upgrade",
           scaffold_module: "robinpath modules init",
-          search: "robinpath search <query> [--category=<cat>]",
+          search: "robinpath search [query] [--category=<cat>] [--sort=<key>] [--page=<n>] [--limit=<n>] [--json]",
           info_system: "robinpath info [--json]",
           info_module: "robinpath info <@scope/name>",
           audit: "robinpath audit",
@@ -20811,7 +20909,7 @@ async function handleInfo(args) {
         http_server: {
           description: "Start an HTTP server that exposes the RobinPath engine via REST API. One server handles all requests. Variables persist across requests (conversational execution). Designed for integration with any language (Rust, Python, Go, PHP, Ruby, C#, Java, etc.).",
           start: "robinpath start -p <port> -s <session-secret>",
-          startup_output: '{"ok":true,"port":6372,"host":"127.0.0.1","session":"<uuid>","version":"1.44.0"}',
+          startup_output: `{"ok":true,"port":6372,"host":"127.0.0.1","session":"<uuid>","version":"${CLI_VERSION}"}`,
           auth_header: "x-robinpath-session: <session-token> (required on all endpoints except /v1/health)",
           defaults: {
             port: 6372,
@@ -20938,7 +21036,14 @@ async function handleInfo(args) {
       console.log(`  Env:          ${info.paths.env}`);
       console.log(`  Docs:         ${info.paths.docs}`);
       console.log("");
-      console.log(`Native Modules: ${Object.keys(modulesInfo).join(", ")}`);
+      console.log(`Native Modules (${Object.keys(modulesInfo).length}): ${Object.keys(modulesInfo).join(", ")}`);
+      console.log("");
+      const installedNames = Object.keys(installedModulesInfo);
+      if (installedNames.length > 0) {
+        console.log(`Installed Modules (${installedNames.length}): ${installedNames.join(", ")}`);
+      } else {
+        console.log("Installed Modules: (none)");
+      }
       console.log("");
       console.log(color.dim("Use --json for machine-readable output (includes full docs for AI agents)"));
     }
@@ -20954,7 +21059,10 @@ async function handleInfo(args) {
   try {
     const headers = {};
     if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(`${PLATFORM_URL}/v1/registry/${scope}/${name}`, { headers });
+    const [res, versionsRes] = await Promise.all([
+      fetch(`${PLATFORM_URL}/v1/registry/${scope}/${name}`, { headers }),
+      fetch(`${PLATFORM_URL}/v1/registry/${scope}/${name}/versions`, { headers }).catch(() => null)
+    ]);
     if (!res.ok) {
       if (res.status === 404) {
         console.error(color.red("Error:") + ` Module not found: ${fullName}`);
@@ -20965,19 +21073,80 @@ async function handleInfo(args) {
     }
     const body = await res.json();
     const data = body.data || body;
+    if (jsonOutput) {
+      let versionsData = null;
+      if (versionsRes?.ok) {
+        const vBody = await versionsRes.json();
+        versionsData = vBody.data || vBody;
+      }
+      console.log(JSON.stringify({ module: data, versions: versionsData }, null, 2));
+      return;
+    }
     log("");
-    log(`  ${color.bold(fullName)} ${color.cyan("v" + (data.latestVersion || data.version || "-"))}`);
+    const badges = [];
+    if (data.isOfficial) badges.push(color.cyan(" official"));
+    if (data.isVerified) badges.push(color.green(" verified"));
+    log(`  ${color.bold(fullName)} ${color.cyan("v" + (data.latestVersion || data.version || "-"))}${badges.join("")}`);
     if (data.description) log(`  ${data.description}`);
     log("");
-    if (data.author) log(`  Author:      ${data.author}`);
-    if (data.license) log(`  License:     ${data.license}`);
-    if (data.category) log(`  Category:    ${data.category}`);
-    const downloads = data.downloads ?? data.downloadCount;
-    if (downloads !== void 0) log(`  Downloads:   ${downloads}`);
+    if (data.author || data.publisher?.name) log(`  Author:       ${data.author || data.publisher?.name || "-"}`);
+    if (data.license) log(`  License:      ${data.license}`);
+    if (data.category) log(`  Category:     ${data.category}`);
     const visibility = data.visibility || (data.isPublic === false ? "private" : "public");
-    log(`  Visibility:  ${visibility}`);
-    if (data.keywords?.length) log(`  Keywords:    ${data.keywords.join(", ")}`);
+    log(`  Visibility:   ${visibility}`);
     log("");
+    const dlWeekly = data.downloadsWeekly ?? data.downloads ?? data.downloadCount;
+    const dlTotal = data.downloadsTotal;
+    const stars = data.stars;
+    if (dlWeekly !== void 0 || dlTotal !== void 0 || stars !== void 0) {
+      const parts = [];
+      if (dlTotal !== void 0) parts.push(`${formatCompactNumber(dlTotal)} total downloads`);
+      if (dlWeekly !== void 0) parts.push(`${formatCompactNumber(dlWeekly)} weekly`);
+      if (stars !== void 0) parts.push(`\u2605 ${formatCompactNumber(stars)}`);
+      log(`  Stats:        ${parts.join("  \u2502  ")}`);
+    }
+    if (data.createdAt) log(`  Created:      ${formatTimeAgo(data.createdAt)}`);
+    if (data.updatedAt) log(`  Updated:      ${formatTimeAgo(data.updatedAt)}`);
+    let parsedKeywords = data.keywords;
+    if (typeof parsedKeywords === "string") {
+      try {
+        parsedKeywords = JSON.parse(parsedKeywords);
+      } catch {
+        parsedKeywords = null;
+      }
+    }
+    if (parsedKeywords?.length) log(`  Keywords:     ${parsedKeywords.join(", ")}`);
+    log("");
+    if (versionsRes?.ok) {
+      const vBody = await versionsRes.json();
+      const vData = vBody.data || vBody;
+      const versions = vData.versions || vData;
+      const distTags = vData.distTags || vData.dist_tags || [];
+      if (Array.isArray(versions) && versions.length > 0) {
+        const tagMap = {};
+        if (Array.isArray(distTags)) {
+          for (const dt2 of distTags) {
+            tagMap[dt2.version] = tagMap[dt2.version] || [];
+            tagMap[dt2.version].push(dt2.tag);
+          }
+        }
+        log(color.bold("  Versions"));
+        log(color.dim("  " + "\u2500".repeat(55)));
+        const shown = versions.slice(0, 10);
+        for (const v of shown) {
+          const tags = tagMap[v.version];
+          const tagStr = tags ? ` ${color.cyan(tags.join(", "))}` : "";
+          const size = v.tarballSize ? ` (${(v.tarballSize / 1024).toFixed(1)}KB)` : "";
+          const deprecated = v.deprecated ? color.red(" DEPRECATED") : "";
+          const published = formatTimeAgo(v.createdAt);
+          log(`  ${("v" + v.version).padEnd(14)}${color.dim(published.padEnd(12))}${color.dim(size)}${tagStr}${deprecated}`);
+        }
+        if (versions.length > 10) {
+          log(color.dim(`  ... and ${versions.length - 10} more version${versions.length - 10 !== 1 ? "s" : ""}`));
+        }
+        log("");
+      }
+    }
     const manifest = readModulesManifest();
     if (manifest[fullName]) {
       log(`  ${color.green("Installed")} v${manifest[fullName].version}`);
@@ -21857,7 +22026,7 @@ MODULE MANAGEMENT:
   add <pkg>[@ver]    Install a module from the registry
   remove <pkg>       Uninstall a module
   upgrade <pkg>      Upgrade a single module to latest
-  search <query>     Search the module registry
+  search [query]     Search the module registry (--category, --sort, --page, --limit)
   info               Show system paths (--json for machines)
   info <pkg>         Show module details from registry
   modules list       List installed modules
@@ -22222,14 +22391,29 @@ EXAMPLES:
     search: `robinpath search \u2014 Search the module registry
 
 USAGE:
-  robinpath search <query> [--category=<cat>]
+  robinpath search <query> [options]
+  robinpath search --category=<cat> [options]
+
+OPTIONS:
+  --category=<cat>   Filter by category (utilities, devops, productivity, web,
+                     sales, marketing, data, communication, ai)
+  --sort=<key>       Sort results by: downloads, stars, updated, created, name
+                     (default: downloads)
+  --page=<n>         Page number (default: 1)
+  --limit=<n>        Results per page (default: 20)
+  --json             Machine-readable JSON output
 
 DESCRIPTION:
   Searches the RobinPath module registry and displays matching modules.
+  You can search by keyword, browse by category, or combine both.
+  Results show name, version, download count, stars, and last update.
 
 EXAMPLES:
   robinpath search slack
-  robinpath search crm --category=crm`,
+  robinpath search --category=ai
+  robinpath search crm --category=sales --sort=stars
+  robinpath search http --limit=5 --page=2
+  robinpath search --category=utilities --json`,
     info: `robinpath info \u2014 System info & module details
 
 USAGE:
