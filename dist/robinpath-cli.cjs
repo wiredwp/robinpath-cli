@@ -19599,7 +19599,7 @@ function readStdin() {
   });
 }
 var CLOUD_URL = process.env.ROBINPATH_CLOUD_URL || "https://dev.robinpath.com";
-var PLATFORM_URL = process.env.ROBINPATH_PLATFORM_URL || "https://robinpath-platform.nabivogedu.workers.dev";
+var PLATFORM_URL = process.env.ROBINPATH_PLATFORM_URL || "https://api.robinpath.com";
 function getAuthPath() {
   return (0, import_node_path4.join)((0, import_node_os3.homedir)(), ".robinpath", "auth.json");
 }

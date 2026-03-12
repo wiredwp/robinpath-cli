@@ -14,7 +14,7 @@ import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErr
 import { nativeModules } from './modules/index.js';
 
 // Injected by esbuild at build time via --define, fallback for dev mode
-const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.48.0';
+const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.49.1';
 
 // ============================================================================
 // Global flags
@@ -1528,7 +1528,7 @@ function readStdin() {
 // ============================================================================
 
 const CLOUD_URL = process.env.ROBINPATH_CLOUD_URL || 'https://dev.robinpath.com';
-const PLATFORM_URL = process.env.ROBINPATH_PLATFORM_URL || 'https://robinpath-platform.nabivogedu.workers.dev';
+const PLATFORM_URL = process.env.ROBINPATH_PLATFORM_URL || 'https://api.robinpath.com';
 
 function getAuthPath() {
     return join(homedir(), '.robinpath', 'auth.json');
@@ -2132,6 +2132,1495 @@ async function handleSync() {
         console.error(color.red('Error:') + ` Failed to list modules: ${err.message}`);
         process.exit(1);
     }
+}
+
+// ============================================================================
+// Snippet commands
+// ============================================================================
+
+const SNIPPET_CATEGORIES = ['forms', 'notifications', 'crm', 'e-commerce', 'data-processing', 'auth', 'ai', 'webhooks', 'utilities', 'other'];
+const SNIPPET_SORTS = ['popular', 'stars', 'newest', 'updated'];
+
+function parseSnippetFlags(args) {
+    const flags = { json: args.includes('--json'), force: args.includes('--force'), codeOnly: args.includes('--code-only') || args.includes('--code') };
+    for (const a of args) {
+        if (a.startsWith('--page='))        flags.page = a.split('=')[1];
+        if (a.startsWith('--limit='))       flags.limit = a.split('=')[1];
+        if (a.startsWith('--name='))        flags.name = a.split('=')[1];
+        if (a.startsWith('--description=')) flags.description = a.split('=')[1];
+        if (a.startsWith('--visibility='))  flags.visibility = a.split('=')[1];
+        if (a.startsWith('--category='))    flags.category = a.split('=')[1];
+        if (a.startsWith('--tags='))        flags.tags = a.split('=')[1];
+        if (a.startsWith('--status='))      flags.status = a.split('=')[1];
+        if (a.startsWith('--license='))     flags.license = a.split('=')[1];
+        if (a.startsWith('--version='))     flags.version = a.split('=')[1];
+        if (a.startsWith('--sort='))        flags.sort = a.split('=')[1];
+        if (a.startsWith('--code='))        flags.code = a.split('=')[1];
+        if (a.startsWith('--changelog='))   flags.changelog = a.split('=')[1];
+        if (a.startsWith('--format='))      flags.format = a.split('=')[1];
+        if (a.startsWith('--readme='))      flags.readme = a.split('=')[1];
+    }
+    flags.positional = args.filter(a => a === '-' || !a.startsWith('-'));
+    return flags;
+}
+
+/**
+ * Fetch a snippet — tries authenticated endpoint first (own + public),
+ * falls back to public endpoint if not logged in.
+ */
+async function fetchSnippet(id) {
+    const token = getAuthToken();
+    if (token) {
+        const res = await fetch(`${PLATFORM_URL}/v1/snippets/${encodeURIComponent(id)}`, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) return res;
+    }
+    // Fallback: try public endpoint (no auth)
+    return fetch(`${PLATFORM_URL}/public/snippets/${encodeURIComponent(id)}`);
+}
+
+/**
+ * Resolve a partial snippet ID to a full ID.
+ * If the input is already a full ULID (26 chars), returns it as-is.
+ * Otherwise, fetches the user's snippets and matches by prefix.
+ * Falls back to the input if no auth or no match (let the API return 404).
+ */
+async function resolveSnippetId(partialId) {
+    if (!partialId) return partialId;
+    // Full ULID — skip resolution
+    if (partialId.length >= 26) return partialId;
+
+    const token = getAuthToken();
+    if (!token) return partialId; // Can't resolve without auth
+
+    try {
+        // Fetch user's snippets to match prefix
+        const res = await fetch(`${PLATFORM_URL}/v1/snippets?limit=100`, {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return partialId;
+
+        const body = await res.json();
+        const snippets = body.data || [];
+        const upper = partialId.toUpperCase();
+        const matches = snippets.filter(s => s.id && s.id.toUpperCase().startsWith(upper));
+
+        if (matches.length === 1) return matches[0].id;
+        if (matches.length > 1) {
+            console.error(color.yellow('Warning:') + ` Ambiguous ID '${partialId}' matches ${matches.length} snippets:`);
+            for (const m of matches.slice(0, 5)) {
+                console.error(`  ${color.cyan(m.id)}  ${m.name || 'untitled'}`);
+            }
+            console.error('Please use a longer prefix.');
+            process.exit(2);
+        }
+        // No match in own snippets — return as-is, let the API try (might be a public snippet)
+        return partialId;
+    } catch {
+        return partialId;
+    }
+}
+
+async function handleSnippet(args) {
+    const sub = args[0];
+    const subArgs = args.slice(1);
+
+    if (!sub || sub === 'list')                             return snippetList(subArgs);
+    if (sub === 'create' || sub === 'new')                  return snippetCreate(subArgs);
+    if (sub === 'init')                                     return snippetInit(subArgs);
+    if (sub === 'get' || sub === 'view' || sub === 'show')  return snippetGet(subArgs);
+    if (sub === 'update' || sub === 'edit')                 return snippetUpdate(subArgs);
+    if (sub === 'delete' || sub === 'rm')                   return snippetDelete(subArgs);
+    if (sub === 'explore' || sub === 'browse')              return snippetExplore(subArgs);
+    if (sub === 'search')                                   return snippetExplore(subArgs);
+    if (sub === 'star')                                     return snippetStar(subArgs);
+    if (sub === 'unstar')                                   return snippetUnstar(subArgs);
+    if (sub === 'fork')                                     return snippetFork(subArgs);
+    if (sub === 'publish')                                  return snippetPublish(subArgs);
+    if (sub === 'unpublish')                                return snippetUnpublish(subArgs);
+    if (sub === 'copy' || sub === 'cp')                      return snippetCopy(subArgs);
+    if (sub === 'run' || sub === 'exec')                    return snippetRun(subArgs);
+    if (sub === 'pull' || sub === 'download')               return snippetPull(subArgs);
+    if (sub === 'push')                                     return snippetPush(subArgs);
+    if (sub === 'version')                                  return snippetVersion(subArgs);
+    if (sub === 'export')                                   return snippetExport(subArgs);
+    if (sub === 'import')                                   return snippetImport(subArgs);
+    if (sub === 'diff')                                     return snippetDiff(subArgs);
+    if (sub === 'trending')                                 return snippetExplore(['--sort=popular', ...subArgs]);
+
+    console.error(color.red('Error:') + ` Unknown snippet subcommand: ${sub}`);
+    console.error('Available: list, create, get, update, delete, explore, search, star, unstar, fork, publish, unpublish, copy, run, pull, push, version, diff, export, import, trending');
+    process.exit(2);
+}
+
+// ── snippet list ──
+
+async function snippetList(args) {
+    const flags = parseSnippetFlags(args);
+    const query = flags.positional.join(' ');
+
+    const params = new URLSearchParams();
+    if (flags.page) params.set('page', flags.page);
+    if (flags.limit) params.set('limit', flags.limit);
+    if (flags.visibility) params.set('visibility', flags.visibility);
+    if (flags.status) params.set('status', flags.status);
+    if (flags.category) params.set('category', flags.category);
+    if (query) params.set('q', query);
+
+    try {
+        const res = await platformFetch(`/v1/snippets?${params}`);
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            console.error(color.red('Error:') + ` Failed to list snippets (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+            process.exit(1);
+        }
+
+        const body = await res.json();
+        const snippets = body.data || [];
+        const pagination = body.pagination || null;
+
+        if (flags.json) {
+            console.log(JSON.stringify({ snippets, pagination }, null, 2));
+            return;
+        }
+
+        // Active filters summary
+        const filters = [];
+        if (flags.visibility) filters.push(`visibility=${flags.visibility}`);
+        if (flags.status) filters.push(`status=${flags.status}`);
+        if (flags.category) filters.push(`category=${flags.category}`);
+        if (query) filters.push(`search="${query}"`);
+        if (filters.length) log(color.dim('  Filters: ' + filters.join(', ')) + '\n');
+
+        if (snippets.length === 0) {
+            log('No snippets found.');
+            if (filters.length) {
+                log(`Try removing some filters, or run ${color.cyan('robinpath snippet list')} to see all.`);
+            } else {
+                log(`Run ${color.cyan('robinpath snippet create <file>')} to create your first snippet.`);
+            }
+            return;
+        }
+
+        for (const s of snippets) {
+            const vis = s.visibility === 'public' ? color.green('● public') : color.dim('○ private');
+            const status = s.status || 'draft';
+            const updated = formatTimeAgo(s.updatedAt);
+            const cat = s.category ? color.dim(` [${s.category}]`) : '';
+
+            log(color.bold('  ' + (s.name || 'Untitled')) + cat);
+            log(`    ${vis}  ${color.dim('|')}  ${status}  ${color.dim('|')}  ${color.dim(updated)}  ${color.dim('|')}  ★ ${formatCompactNumber(s.starCount)}`);
+            if (s.description) log(`    ${color.dim(s.description.slice(0, 80))}`);
+            log(`    ${color.dim('ID:')} ${color.cyan(s.id)}`);
+            log('');
+        }
+
+        if (pagination && pagination.pages > 1) {
+            log(color.dim(`  Page ${pagination.page} of ${pagination.pages} (${pagination.total} total)`));
+            if (pagination.page < pagination.pages) {
+                log(color.dim(`  Use --page=${pagination.page + 1} for next page`));
+            }
+        } else {
+            log(color.dim(`  ${snippets.length} snippet${snippets.length !== 1 ? 's' : ''}`));
+        }
+
+        log('');
+        log(color.dim('  Filter: --visibility=public|private  --status=draft|published|archived  --category=<cat>'));
+    } catch (err) {
+        console.error(color.red('Error:') + ` Failed to list snippets: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// ── snippet create ──
+
+async function snippetCreate(args) {
+    const flags = parseSnippetFlags(args);
+    const fileArg = flags.positional[0];
+
+    if (!fileArg) {
+        console.error(color.red('Error:') + ' Usage: robinpath snippet create <file|-> [options]');
+        console.error('');
+        console.error('  Options:');
+        console.error('    --name=<name>            Snippet name (defaults to filename)');
+        console.error('    --description=<desc>     Description');
+        console.error('    --visibility=<v>         public or private (default: private)');
+        console.error('    --category=<cat>         Category (' + SNIPPET_CATEGORIES.join(', ') + ')');
+        console.error('    --tags=<t1,t2>           Comma-separated tags');
+        console.error('    --status=<s>             draft, published, or archived (default: draft)');
+        console.error('    --license=<lic>          License (MIT, Apache-2.0, etc.)');
+        console.error('    --version=<ver>          Version string');
+        console.error('    --readme=<file>          Readme file path');
+        console.error('    --json                   Machine-readable JSON output');
+        console.error('');
+        console.error('  Examples:');
+        console.error('    robinpath snippet create app.rp');
+        console.error('    robinpath snippet create app.rp --name="My Tool" --visibility=public');
+        console.error('    robinpath snippet create - < script.rp --name="Piped"');
+        process.exit(2);
+    }
+
+    let code;
+    let defaultName;
+
+    if (fileArg === '-') {
+        code = await readStdin();
+        defaultName = 'untitled';
+    } else {
+        const filePath = resolve(fileArg);
+        if (!existsSync(filePath)) {
+            console.error(color.red('Error:') + ` File not found: ${fileArg}`);
+            process.exit(1);
+        }
+        code = readFileSync(filePath, 'utf-8');
+        defaultName = basename(filePath, extname(filePath));
+    }
+
+    if (!code || !code.trim()) {
+        console.error(color.red('Error:') + ' Code cannot be empty.');
+        process.exit(1);
+    }
+
+    const payload = {
+        name: flags.name || defaultName,
+        code,
+        language: 'robinpath',
+    };
+    if (flags.description) payload.description = flags.description;
+    if (flags.visibility)  payload.visibility = flags.visibility;
+    if (flags.category)    payload.category = flags.category;
+    if (flags.tags)        payload.tags = flags.tags.split(',').map(t => t.trim()).filter(Boolean);
+    if (flags.status)      payload.status = flags.status;
+    if (flags.license)     payload.license = flags.license;
+    if (flags.version)     payload.version = flags.version;
+    if (flags.readme) {
+        const readmePath = resolve(flags.readme);
+        if (existsSync(readmePath)) {
+            payload.readme = readFileSync(readmePath, 'utf-8');
+        }
+    }
+
+    try {
+        const res = await platformFetch('/v1/snippets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            console.error(color.red('Error:') + ` Failed to create snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+            process.exit(1);
+        }
+
+        const body = await res.json();
+        const id = body.id || body.data?.id;
+
+        if (flags.json) {
+            console.log(JSON.stringify({ id, name: payload.name, visibility: payload.visibility || 'private' }, null, 2));
+            return;
+        }
+
+        log(color.green('✓') + ' Snippet created: ' + color.cyan(id));
+        log('  Name: ' + payload.name);
+        log('  Visibility: ' + (payload.visibility || 'private'));
+        log('');
+        log('  View:    ' + color.cyan(`robinpath snippet get ${id}`));
+        log('  Run:     ' + color.cyan(`robinpath snippet run ${id}`));
+        if (payload.visibility !== 'public') {
+            log('  Publish: ' + color.cyan(`robinpath snippet publish ${id}`));
+        }
+    } catch (err) {
+        console.error(color.red('Error:') + ` Failed to create snippet: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// ── snippet init (interactive wizard) ──
+
+async function snippetInit(args) {
+    requireAuth();
+
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    const ask = (q, def) => new Promise(resolve => {
+        const suffix = def ? color.dim(` (${def})`) : '';
+        rl.question(`  ${q}${suffix}: `, answer => resolve(answer.trim() || def || ''));
+    });
+
+    log(color.bold('Create a new snippet') + '\n');
+
+    const name = await ask('Name', '');
+    if (!name) {
+        console.error(color.red('Error:') + ' Name is required.');
+        rl.close();
+        process.exit(2);
+    }
+
+    const description = await ask('Description', '');
+
+    log('');
+    log(color.dim('  Visibility: 1) private  2) public'));
+    const visChoice = await ask('Choose', '1');
+    const visibility = visChoice === '2' ? 'public' : 'private';
+
+    log('');
+    log(color.dim('  Categories: ' + SNIPPET_CATEGORIES.join(', ')));
+    const category = await ask('Category', '');
+
+    const tagsRaw = await ask('Tags (comma-separated)', '');
+    const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
+
+    log('');
+    log(color.dim('  Status: 1) published  2) draft'));
+    const statusChoice = await ask('Choose', '1');
+    const status = statusChoice === '2' ? 'draft' : 'published';
+
+    const license = await ask('License', 'MIT');
+    const version = await ask('Version', '1.0.0');
+
+    log('');
+    log(color.dim('  Code source: 1) file  2) type inline'));
+    const codeChoice = await ask('Choose', '1');
+
+    let code = '';
+    if (codeChoice === '2') {
+        log(color.dim('  Type your code (end with an empty line):'));
+        const codeLines = [];
+        while (true) {
+            const line = await ask('', '');
+            if (!line && codeLines.length > 0) break;
+            if (line) codeLines.push(line);
+        }
+        code = codeLines.join('\n');
+    } else {
+        const filePath = await ask('File path', '');
+        if (!filePath || !existsSync(resolve(filePath))) {
+            console.error(color.red('Error:') + ' File not found.');
+            rl.close();
+            process.exit(1);
+        }
+        code = readFileSync(resolve(filePath), 'utf-8');
+    }
+
+    rl.close();
+
+    if (!code.trim()) {
+        console.error(color.red('Error:') + ' Code cannot be empty.');
+        process.exit(1);
+    }
+
+    log('');
+    log(color.dim('Creating snippet...'));
+
+    const payload = { name, code, language: 'robinpath', visibility, status, license, version };
+    if (description) payload.description = description;
+    if (category) payload.category = category;
+    if (tags.length) payload.tags = tags;
+
+    try {
+        const res = await platformFetch('/v1/snippets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            console.error(color.red('Error:') + ` Failed to create snippet: ${body.error?.message || res.statusText}`);
+            process.exit(1);
+        }
+
+        const body = await res.json();
+        const id = body.id || body.data?.id;
+
+        log('');
+        log(color.green('✓') + ' Snippet created: ' + color.cyan(id));
+        log('  Name:       ' + name);
+        log('  Visibility: ' + (visibility === 'public' ? color.green(visibility) : color.dim(visibility)));
+        log('  Status:     ' + status);
+        log('');
+        log('  View: ' + color.cyan(`robinpath snippet get ${id}`));
+        log('  Run:  ' + color.cyan(`robinpath snippet run ${id}`));
+        if (visibility === 'public') {
+            log('  CDN:  ' + color.cyan(`https://cdn.robinpath.com/s/${id}`));
+        }
+    } catch (err) {
+        console.error(color.red('Error:') + ` Failed to create snippet: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// ── snippet get ──
+
+async function snippetGet(args) {
+    const flags = parseSnippetFlags(args);
+    let id = flags.positional[0];
+
+    if (!id) {
+        console.error(color.red('Error:') + ' Usage: robinpath snippet get <id> [--json]');
+        process.exit(2);
+    }
+    id = await resolveSnippetId(id);
+
+    try {
+        const res = await fetchSnippet(id);
+        if (!res.ok) {
+            if (res.status === 404) {
+                console.error(color.red('Error:') + ` Snippet '${id}' not found. Private snippets require login (${color.cyan('robinpath login')}).`);
+            } else {
+                console.error(color.red('Error:') + ` Failed to fetch snippet (HTTP ${res.status})`);
+            }
+            process.exit(1);
+        }
+
+        const body = await res.json();
+        const s = body.data || body;
+
+        if (flags.json) {
+            console.log(JSON.stringify(s, null, 2));
+            return;
+        }
+
+        // --code-only: just output raw code (pipeable)
+        if (flags.codeOnly) {
+            console.log(s.code || '');
+            return;
+        }
+
+        // Pretty print
+        log(color.bold(s.name || 'Untitled'));
+        if (s.description) log(color.dim(s.description));
+        log('');
+        log('  ID:         ' + (s.id || id));
+        log('  Visibility: ' + (s.visibility === 'public' ? color.green('public') : color.dim('private')));
+        log('  Status:     ' + (s.status || 'draft'));
+        log('  Language:   ' + (s.language || 'robinpath'));
+        if (s.category)  log('  Category:   ' + s.category);
+        if (s.version)   log('  Version:    ' + s.version);
+        if (s.license)   log('  License:    ' + s.license);
+        if (s.tags) {
+            const tags = typeof s.tags === 'string' ? JSON.parse(s.tags) : s.tags;
+            if (tags && tags.length) log('  Tags:       ' + tags.join(', '));
+        }
+        if (s.starCount != null) log('  Stars:      ' + formatCompactNumber(s.starCount));
+        if (s.viewCount != null) log('  Views:      ' + formatCompactNumber(s.viewCount));
+        if (s.forkCount != null) log('  Forks:      ' + formatCompactNumber(s.forkCount));
+        if (s.isStarred != null) log('  Starred:    ' + (s.isStarred ? color.yellow('★ yes') : '☆ no'));
+        if (s.isOwner != null)   log('  Owner:      ' + (s.isOwner ? 'yes' : 'no'));
+        if (s.author)            log('  Author:     ' + (s.author.name || s.author.username || '-'));
+        if (s.forkedFrom)        log('  Forked from: ' + s.forkedFrom);
+        if (s.createdAt) log('  Created:    ' + formatTimeAgo(s.createdAt));
+        if (s.updatedAt) log('  Updated:    ' + formatTimeAgo(s.updatedAt));
+        log('');
+        log(color.bold('Code:'));
+        log(color.dim('─'.repeat(60)));
+        log(s.code || '');
+        log(color.dim('─'.repeat(60)));
+
+        // Actionable hints
+        const sid = s.id || id;
+        log('');
+        log(color.dim('  Actions:'));
+        log(color.dim(`    robinpath snippet run  ${sid}`) + color.dim('     Execute this snippet'));
+        log(color.dim(`    robinpath snippet copy ${sid}`) + color.dim('    Copy code to clipboard'));
+        log(color.dim(`    robinpath snippet pull ${sid}`) + color.dim('    Save to local file'));
+        if (s.isOwner) {
+            log(color.dim(`    robinpath snippet push <file> ${sid}`) + color.dim('  Update code from file'));
+        } else {
+            log(color.dim(`    robinpath snippet fork ${sid}`) + color.dim('    Fork to your account'));
+            log(color.dim(`    robinpath snippet star ${sid}`) + color.dim('    Star this snippet'));
+        }
+    } catch (err) {
+        console.error(color.red('Error:') + ` Failed to fetch snippet: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// ── snippet update ──
+
+async function snippetUpdate(args) {
+    const flags = parseSnippetFlags(args);
+    let id = flags.positional[0];
+
+    if (!id) {
+        console.error(color.red('Error:') + ' Usage: robinpath snippet update <id> [options]');
+        console.error('');
+        console.error('  Options:');
+        console.error('    --name=<name>            Update name');
+        console.error('    --description=<desc>     Update description');
+        console.error('    --code=<file>            Update code from file');
+        console.error('    --visibility=<v>         public or private');
+        console.error('    --category=<cat>         Category');
+        console.error('    --tags=<t1,t2>           Comma-separated tags');
+        console.error('    --status=<s>             draft, published, or archived');
+        console.error('    --license=<lic>          License');
+        console.error('    --version=<ver>          Version string');
+        console.error('    --changelog=<text>       Changelog text');
+        console.error('    --readme=<file>          Readme from file');
+        console.error('    --json                   Machine-readable output');
+        console.error('');
+        console.error('  Examples:');
+        console.error('    robinpath snippet update abc123 --name="New Name"');
+        console.error('    robinpath snippet update abc123 --visibility=public --status=published');
+        console.error('    robinpath snippet update abc123 --code=updated.rp');
+        process.exit(2);
+    }
+    id = await resolveSnippetId(id);
+
+    const payload = {};
+    if (flags.name)        payload.name = flags.name;
+    if (flags.description) payload.description = flags.description;
+    if (flags.visibility)  payload.visibility = flags.visibility;
+    if (flags.category)    payload.category = flags.category;
+    if (flags.status)      payload.status = flags.status;
+    if (flags.license)     payload.license = flags.license;
+    if (flags.version)     payload.version = flags.version;
+    if (flags.changelog)   payload.changelog = flags.changelog;
+    if (flags.tags)        payload.tags = flags.tags.split(',').map(t => t.trim()).filter(Boolean);
+    if (flags.code) {
+        const codePath = resolve(flags.code);
+        if (!existsSync(codePath)) {
+            console.error(color.red('Error:') + ` Code file not found: ${flags.code}`);
+            process.exit(1);
+        }
+        payload.code = readFileSync(codePath, 'utf-8');
+    }
+    if (flags.readme) {
+        const readmePath = resolve(flags.readme);
+        if (existsSync(readmePath)) {
+            payload.readme = readFileSync(readmePath, 'utf-8');
+        }
+    }
+
+    if (Object.keys(payload).length === 0) {
+        console.error(color.red('Error:') + ' No fields to update. Provide at least one --flag.');
+        process.exit(2);
+    }
+
+    try {
+        const res = await platformFetch(`/v1/snippets/${encodeURIComponent(id)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            console.error(color.red('Error:') + ` Failed to update snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+            process.exit(1);
+        }
+
+        if (flags.json) {
+            console.log(JSON.stringify({ updated: true, id, fields: Object.keys(payload) }, null, 2));
+            return;
+        }
+
+        log(color.green('✓') + ' Snippet updated: ' + color.cyan(id));
+        log('  Updated fields: ' + Object.keys(payload).join(', '));
+    } catch (err) {
+        console.error(color.red('Error:') + ` Failed to update snippet: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// ── snippet delete ──
+
+async function snippetDelete(args) {
+    const flags = parseSnippetFlags(args);
+    let id = flags.positional[0];
+
+    if (!id) {
+        console.error(color.red('Error:') + ' Usage: robinpath snippet delete <id> [--force]');
+        process.exit(2);
+    }
+    id = await resolveSnippetId(id);
+
+    if (!flags.force) {
+        console.error(color.yellow('Warning:') + ` This will permanently delete snippet '${id}'.`);
+        console.error('Run again with ' + color.cyan('--force') + ' to confirm.');
+        process.exit(0);
+    }
+
+    try {
+        const res = await platformFetch(`/v1/snippets/${encodeURIComponent(id)}`, {
+            method: 'DELETE',
+        });
+
+        if (!res.ok) {
+            if (res.status === 404) {
+                console.error(color.red('Error:') + ` Snippet '${id}' not found.`);
+            } else {
+                const body = await res.json().catch(() => ({}));
+                console.error(color.red('Error:') + ` Failed to delete snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+            }
+            process.exit(1);
+        }
+
+        if (flags.json) {
+            console.log(JSON.stringify({ deleted: true, id }, null, 2));
+            return;
+        }
+
+        log(color.green('✓') + ' Snippet deleted: ' + id);
+    } catch (err) {
+        console.error(color.red('Error:') + ` Failed to delete snippet: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// ── snippet explore / search / trending ──
+
+async function snippetExplore(args) {
+    const flags = parseSnippetFlags(args);
+    const query = flags.positional.join(' ');
+
+    if (flags.sort && !SNIPPET_SORTS.includes(flags.sort)) {
+        console.error(color.red('Error:') + ` Invalid sort: ${flags.sort}`);
+        console.error('  Valid sorts: ' + SNIPPET_SORTS.join(', '));
+        process.exit(2);
+    }
+
+    if (flags.category && !SNIPPET_CATEGORIES.includes(flags.category)) {
+        console.error(color.red('Error:') + ` Invalid category: ${flags.category}`);
+        console.error('  Valid categories: ' + SNIPPET_CATEGORIES.join(', '));
+        process.exit(2);
+    }
+
+    const params = new URLSearchParams();
+    if (query) params.set('q', query);
+    if (flags.category) params.set('category', flags.category);
+    if (flags.sort) params.set('sort', flags.sort);
+    if (flags.tags) params.set('tags', flags.tags);
+    if (flags.page) params.set('page', flags.page);
+    if (flags.limit) params.set('limit', flags.limit);
+
+    const searchLabel = query ? `"${query}"` : (flags.category ? `category: ${flags.category}` : 'public snippets');
+    log(`Searching ${searchLabel}...\n`);
+
+    try {
+        // Public endpoint — no auth required
+        const res = await fetch(`${PLATFORM_URL}/public/snippets?${params}`);
+        if (!res.ok) {
+            console.error(color.red('Error:') + ` Failed to search snippets (HTTP ${res.status})`);
+            process.exit(1);
+        }
+
+        const body = await res.json();
+        const snippets = body.data || [];
+        const pagination = body.pagination || null;
+
+        if (flags.json) {
+            console.log(JSON.stringify({ snippets, pagination }, null, 2));
+            return;
+        }
+
+        if (snippets.length === 0) {
+            log('No public snippets found.');
+            return;
+        }
+
+        for (const s of snippets) {
+            const name = s.name || 'untitled';
+            const author = s.author?.username || s.author?.name || '-';
+            const cat = s.category || '-';
+            const stars = formatCompactNumber(s.starCount);
+            const views = formatCompactNumber(s.viewCount);
+            const updated = formatTimeAgo(s.updatedAt);
+            const badges = [];
+            if (s.featured) badges.push(color.yellow('★'));
+            if (s.verified) badges.push(color.green('✓'));
+            const badgeStr = badges.length ? ' ' + badges.join(' ') : '';
+
+            log(color.bold('  ' + name) + badgeStr);
+            log(`    ${color.dim('by')} ${author}  ${color.dim('|')} ${cat}  ${color.dim('|')} ★ ${stars}  ${color.dim('|')} ${color.dim(updated)}`);
+            if (s.description) log(`    ${color.dim(s.description.slice(0, 80))}`);
+            // Code preview — first 2 non-empty lines
+            if (s.code) {
+                const previewLines = s.code.split('\n').filter(l => l.trim()).slice(0, 2);
+                if (previewLines.length) {
+                    log(color.dim('    ┌ ') + color.dim(previewLines[0].trim().slice(0, 70)));
+                    if (previewLines[1]) log(color.dim('    │ ') + color.dim(previewLines[1].trim().slice(0, 70)));
+                    const totalLines = s.code.split('\n').filter(l => l.trim()).length;
+                    if (totalLines > 2) log(color.dim(`    └ ... ${totalLines - 2} more line${totalLines - 2 !== 1 ? 's' : ''}`));
+                    else log(color.dim('    └'));
+                }
+            }
+            log(`    ${color.dim('ID:')} ${color.cyan(s.id)}`);
+            log('');
+        }
+
+        if (pagination && pagination.pages > 1) {
+            log(color.dim(`  Page ${pagination.page} of ${pagination.pages} (${pagination.total} total)`));
+            if (pagination.page < pagination.pages) {
+                log(color.dim(`  Use --page=${pagination.page + 1} for next page`));
+            }
+        } else {
+            log(color.dim(`  ${snippets.length} snippet${snippets.length !== 1 ? 's' : ''}`));
+        }
+
+        log('');
+        log(color.dim('  Quick actions:'));
+        log(color.dim('    robinpath snippet get  <id>     View full code'));
+        log(color.dim('    robinpath snippet run  <id>     Execute it'));
+        log(color.dim('    robinpath snippet pull <id>     Save to local file'));
+        log(color.dim('    robinpath snippet copy <id>     Copy code to clipboard'));
+        log(color.dim('    robinpath snippet fork <id>     Fork to your account'));
+    } catch (err) {
+        console.error(color.red('Error:') + ` Failed to search snippets: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// ── snippet star ──
+
+async function snippetStar(args) {
+    const flags = parseSnippetFlags(args);
+    let id = flags.positional[0];
+
+    if (!id) {
+        console.error(color.red('Error:') + ' Usage: robinpath snippet star <id>');
+        process.exit(2);
+    }
+    id = await resolveSnippetId(id);
+
+    try {
+        const res = await platformFetch(`/v1/snippets/${encodeURIComponent(id)}/star`, {
+            method: 'POST',
+        });
+
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            console.error(color.red('Error:') + ` Failed to star snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+            process.exit(1);
+        }
+
+        if (flags.json) {
+            console.log(JSON.stringify({ starred: true, id }, null, 2));
+            return;
+        }
+
+        log(color.yellow('★') + ' Starred snippet: ' + color.cyan(id));
+    } catch (err) {
+        console.error(color.red('Error:') + ` Failed to star snippet: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// ── snippet unstar ──
+
+async function snippetUnstar(args) {
+    const flags = parseSnippetFlags(args);
+    let id = flags.positional[0];
+
+    if (!id) {
+        console.error(color.red('Error:') + ' Usage: robinpath snippet unstar <id>');
+        process.exit(2);
+    }
+    id = await resolveSnippetId(id);
+
+    try {
+        const res = await platformFetch(`/v1/snippets/${encodeURIComponent(id)}/star`, {
+            method: 'DELETE',
+        });
+
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            console.error(color.red('Error:') + ` Failed to unstar snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+            process.exit(1);
+        }
+
+        if (flags.json) {
+            console.log(JSON.stringify({ starred: false, id }, null, 2));
+            return;
+        }
+
+        log('☆ Unstarred snippet: ' + color.cyan(id));
+    } catch (err) {
+        console.error(color.red('Error:') + ` Failed to unstar snippet: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// ── snippet fork ──
+
+async function snippetFork(args) {
+    const flags = parseSnippetFlags(args);
+    let id = flags.positional[0];
+
+    if (!id) {
+        console.error(color.red('Error:') + ' Usage: robinpath snippet fork <id> [--json]');
+        process.exit(2);
+    }
+    id = await resolveSnippetId(id);
+
+    try {
+        const res = await platformFetch(`/v1/snippets/${encodeURIComponent(id)}/fork`, {
+            method: 'POST',
+        });
+
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            console.error(color.red('Error:') + ` Failed to fork snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+            process.exit(1);
+        }
+
+        const body = await res.json();
+        const newId = body.id || body.data?.id;
+
+        if (flags.json) {
+            console.log(JSON.stringify({ id: newId, forkedFrom: id }, null, 2));
+            return;
+        }
+
+        log(color.green('✓') + ' Snippet forked!');
+        log('  New ID:      ' + color.cyan(newId));
+        log('  Forked from: ' + id);
+        log('');
+        log('  View: ' + color.cyan(`robinpath snippet get ${newId}`));
+    } catch (err) {
+        console.error(color.red('Error:') + ` Failed to fork snippet: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// ── snippet publish ──
+
+async function snippetPublish(args) {
+    const flags = parseSnippetFlags(args);
+    let id = flags.positional[0];
+
+    if (!id) {
+        console.error(color.red('Error:') + ' Usage: robinpath snippet publish <id>');
+        process.exit(2);
+    }
+    id = await resolveSnippetId(id);
+
+    try {
+        const res = await platformFetch(`/v1/snippets/${encodeURIComponent(id)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'published', visibility: 'public' }),
+        });
+
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            console.error(color.red('Error:') + ` Failed to publish snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+            process.exit(1);
+        }
+
+        if (flags.json) {
+            console.log(JSON.stringify({ published: true, id, visibility: 'public', status: 'published' }, null, 2));
+            return;
+        }
+
+        log(color.green('✓') + ' Snippet published: ' + color.cyan(id));
+        log('  Visibility: ' + color.green('public'));
+        log('  Status:     published');
+        log('  CDN:        ' + color.cyan(`https://cdn.robinpath.com/s/${id}`));
+    } catch (err) {
+        console.error(color.red('Error:') + ` Failed to publish snippet: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// ── snippet unpublish ──
+
+async function snippetUnpublish(args) {
+    const flags = parseSnippetFlags(args);
+    let id = flags.positional[0];
+
+    if (!id) {
+        console.error(color.red('Error:') + ' Usage: robinpath snippet unpublish <id>');
+        process.exit(2);
+    }
+    id = await resolveSnippetId(id);
+
+    try {
+        const res = await platformFetch(`/v1/snippets/${encodeURIComponent(id)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'draft', visibility: 'private' }),
+        });
+
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            console.error(color.red('Error:') + ` Failed to unpublish snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+            process.exit(1);
+        }
+
+        if (flags.json) {
+            console.log(JSON.stringify({ published: false, id, visibility: 'private', status: 'draft' }, null, 2));
+            return;
+        }
+
+        log(color.green('✓') + ' Snippet unpublished: ' + color.cyan(id));
+        log('  Visibility: ' + color.dim('private'));
+        log('  Status:     draft');
+    } catch (err) {
+        console.error(color.red('Error:') + ` Failed to unpublish snippet: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// ── snippet copy ──
+
+async function snippetCopy(args) {
+    const flags = parseSnippetFlags(args);
+    let id = flags.positional[0];
+
+    if (!id) {
+        console.error(color.red('Error:') + ' Usage: robinpath snippet copy <id>');
+        process.exit(2);
+    }
+    id = await resolveSnippetId(id);
+
+    try {
+        const res = await fetchSnippet(id);
+        if (!res.ok) {
+            if (res.status === 404) {
+                console.error(color.red('Error:') + ` Snippet '${id}' not found. Private snippets require login (${color.cyan('robinpath login')}).`);
+            } else {
+                console.error(color.red('Error:') + ` Failed to fetch snippet (HTTP ${res.status})`);
+            }
+            process.exit(1);
+        }
+
+        const body = await res.json();
+        const s = body.data || body;
+        const code = s.code || '';
+
+        if (!code.trim()) {
+            console.error(color.red('Error:') + ' Snippet has no code to copy.');
+            process.exit(1);
+        }
+
+        // Cross-platform clipboard copy
+        const isWin = platform() === 'win32';
+        const isMac = platform() === 'darwin';
+        let clipCmd;
+        if (isWin) clipCmd = 'clip';
+        else if (isMac) clipCmd = 'pbcopy';
+        else clipCmd = 'xclip -selection clipboard';
+
+        try {
+            const { execSync: exec } = await import('node:child_process');
+            exec(clipCmd, { input: code, stdio: ['pipe', 'ignore', 'ignore'] });
+
+            if (flags.json) {
+                console.log(JSON.stringify({ copied: true, id, name: s.name, bytes: Buffer.byteLength(code) }, null, 2));
+                return;
+            }
+
+            log(color.green('✓') + ' Code copied to clipboard!');
+            log('  Snippet: ' + (s.name || id));
+            log('  Size:    ' + Buffer.byteLength(code) + ' bytes');
+            log('');
+            log(color.dim('  Paste it anywhere, or run it:'));
+            log(color.dim(`    robinpath snippet run ${s.id || id}`));
+        } catch (clipErr) {
+            // Clipboard not available — print code to stdout as fallback
+            console.error(color.yellow('Warning:') + ' Could not access clipboard. Printing code to stdout:\n');
+            console.log(code);
+        }
+    } catch (err) {
+        console.error(color.red('Error:') + ` Failed to copy snippet: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// ── snippet run ──
+
+// ── snippet cache helpers ──
+
+const SNIPPET_CACHE_DIR = join(homedir(), '.robinpath', 'cache', 'snippets');
+const SNIPPET_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function getSnippetCachePath(id) {
+    return join(SNIPPET_CACHE_DIR, `${id}.json`);
+}
+
+function readSnippetCache(id) {
+    try {
+        const cachePath = getSnippetCachePath(id);
+        if (!existsSync(cachePath)) return null;
+        const raw = JSON.parse(readFileSync(cachePath, 'utf-8'));
+        if (Date.now() - raw._cachedAt > SNIPPET_CACHE_TTL) return null; // expired
+        return raw;
+    } catch {
+        return null;
+    }
+}
+
+function writeSnippetCache(id, data) {
+    try {
+        if (!existsSync(SNIPPET_CACHE_DIR)) {
+            mkdirSync(SNIPPET_CACHE_DIR, { recursive: true });
+        }
+        writeFileSync(getSnippetCachePath(id), JSON.stringify({ ...data, _cachedAt: Date.now() }), 'utf-8');
+    } catch {
+        // ignore cache write failures
+    }
+}
+
+async function snippetRun(args) {
+    const flags = parseSnippetFlags(args);
+    const noCache = args.includes('--no-cache');
+    let id = flags.positional[0];
+
+    if (!id) {
+        console.error(color.red('Error:') + ' Usage: robinpath snippet run <id> [--no-cache]');
+        process.exit(2);
+    }
+    id = await resolveSnippetId(id);
+
+    try {
+        // Try cache first
+        let s = null;
+        if (!noCache) {
+            s = readSnippetCache(id);
+            if (s) logVerbose(`Using cached snippet (${id})`);
+        }
+
+        if (!s) {
+            const res = await fetchSnippet(id);
+            if (!res.ok) {
+                // If network fails, try stale cache as fallback
+                const stale = readSnippetCache(id);
+                if (stale) {
+                    log(color.yellow('Warning:') + ' Network unavailable, using cached version.');
+                    s = stale;
+                } else {
+                    if (res.status === 404) {
+                        console.error(color.red('Error:') + ` Snippet '${id}' not found. Private snippets require login (${color.cyan('robinpath login')}).`);
+                    } else {
+                        console.error(color.red('Error:') + ` Failed to fetch snippet (HTTP ${res.status})`);
+                    }
+                    process.exit(1);
+                }
+            } else {
+                const body = await res.json();
+                s = body.data || body;
+                writeSnippetCache(id, s);
+            }
+        }
+
+        const code = s.code;
+        if (!code || !code.trim()) {
+            console.error(color.red('Error:') + ' Snippet has no code to execute.');
+            process.exit(1);
+        }
+
+        log(color.dim(`Running snippet: ${s.name || id}`));
+        log(color.dim('─'.repeat(40)));
+
+        await runScript(code);
+    } catch (err) {
+        if (err.code === 'ERR_SCRIPT') throw err;
+        console.error(color.red('Error:') + ` Failed to run snippet: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// ── snippet pull ──
+
+async function snippetPull(args) {
+    const flags = parseSnippetFlags(args);
+    let id = flags.positional[0];
+    const outputFile = flags.positional[1];
+
+    if (!id) {
+        console.error(color.red('Error:') + ' Usage: robinpath snippet pull <id> [output-file]');
+        process.exit(2);
+    }
+    id = await resolveSnippetId(id);
+
+    try {
+        const res = await fetchSnippet(id);
+        if (!res.ok) {
+            if (res.status === 404) {
+                console.error(color.red('Error:') + ` Snippet '${id}' not found. Private snippets require login (${color.cyan('robinpath login')}).`);
+            } else {
+                console.error(color.red('Error:') + ` Failed to fetch snippet (HTTP ${res.status})`);
+            }
+            process.exit(1);
+        }
+
+        const body = await res.json();
+        const s = body.data || body;
+        const code = s.code || '';
+
+        // Determine output filename
+        const sanitizedName = (s.name || 'snippet').replace(/[^a-zA-Z0-9_\-]/g, '_').toLowerCase();
+        const fileName = outputFile || `${sanitizedName}.rp`;
+        const filePath = resolve(fileName);
+
+        writeFileSync(filePath, code, 'utf-8');
+
+        if (flags.json) {
+            console.log(JSON.stringify({ id, name: s.name, file: filePath, bytes: Buffer.byteLength(code) }, null, 2));
+            return;
+        }
+
+        log(color.green('✓') + ' Snippet pulled to: ' + color.cyan(fileName));
+        log('  Snippet: ' + (s.name || id));
+        log('  Size:    ' + Buffer.byteLength(code) + ' bytes');
+    } catch (err) {
+        console.error(color.red('Error:') + ` Failed to pull snippet: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// ── snippet push ──
+
+async function snippetPush(args) {
+    const flags = parseSnippetFlags(args);
+    const fileArg = flags.positional[0];
+    let id = flags.positional[1];
+
+    if (!fileArg || !id) {
+        console.error(color.red('Error:') + ' Usage: robinpath snippet push <file> <id>');
+        console.error('');
+        console.error('  Uploads a local file as the snippet\'s code.');
+        console.error('');
+        console.error('  Examples:');
+        console.error('    robinpath snippet push app.rp abc123');
+        process.exit(2);
+    }
+    id = await resolveSnippetId(id);
+
+    const filePath = resolve(fileArg);
+    if (!existsSync(filePath)) {
+        console.error(color.red('Error:') + ` File not found: ${fileArg}`);
+        process.exit(1);
+    }
+
+    const code = readFileSync(filePath, 'utf-8');
+    if (!code.trim()) {
+        console.error(color.red('Error:') + ' File is empty.');
+        process.exit(1);
+    }
+
+    try {
+        const res = await platformFetch(`/v1/snippets/${encodeURIComponent(id)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code }),
+        });
+
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            console.error(color.red('Error:') + ` Failed to push code (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+            process.exit(1);
+        }
+
+        if (flags.json) {
+            console.log(JSON.stringify({ pushed: true, id, file: fileArg, bytes: Buffer.byteLength(code) }, null, 2));
+            return;
+        }
+
+        log(color.green('✓') + ' Code pushed to snippet: ' + color.cyan(id));
+        log('  File: ' + fileArg);
+        log('  Size: ' + Buffer.byteLength(code) + ' bytes');
+    } catch (err) {
+        console.error(color.red('Error:') + ` Failed to push code: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// ── snippet version ──
+
+async function snippetVersion(args) {
+    const flags = parseSnippetFlags(args);
+    let id = flags.positional[0];
+    const ver = flags.positional[1] || flags.version;
+
+    if (!id || !ver) {
+        console.error(color.red('Error:') + ' Usage: robinpath snippet version <id> <version> [--changelog=<text>]');
+        console.error('');
+        console.error('  Examples:');
+        console.error('    robinpath snippet version abc123 1.2.0');
+        console.error('    robinpath snippet version abc123 2.0.0 --changelog="Breaking changes"');
+        process.exit(2);
+    }
+    id = await resolveSnippetId(id);
+
+    const payload = { version: ver };
+    if (flags.changelog) payload.changelog = flags.changelog;
+
+    try {
+        const res = await platformFetch(`/v1/snippets/${encodeURIComponent(id)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            console.error(color.red('Error:') + ` Failed to set version (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+            process.exit(1);
+        }
+
+        if (flags.json) {
+            console.log(JSON.stringify({ id, version: ver, changelog: flags.changelog || null }, null, 2));
+            return;
+        }
+
+        log(color.green('✓') + ' Version set: ' + color.cyan(ver) + ' for snippet ' + id);
+        if (flags.changelog) log('  Changelog: ' + flags.changelog);
+    } catch (err) {
+        console.error(color.red('Error:') + ` Failed to set version: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// ── snippet diff ──
+
+async function snippetDiff(args) {
+    const flags = parseSnippetFlags(args);
+    const fileArg = flags.positional[0];
+    let id = flags.positional[1];
+
+    if (!fileArg || !id) {
+        console.error(color.red('Error:') + ' Usage: robinpath snippet diff <file> <id>');
+        console.error('');
+        console.error('  Compare a local file with a remote snippet\'s code.');
+        console.error('');
+        console.error('  Examples:');
+        console.error('    robinpath snippet diff app.rp abc123');
+        process.exit(2);
+    }
+    id = await resolveSnippetId(id);
+
+    const filePath = resolve(fileArg);
+    if (!existsSync(filePath)) {
+        console.error(color.red('Error:') + ` File not found: ${fileArg}`);
+        process.exit(1);
+    }
+
+    const localCode = readFileSync(filePath, 'utf-8');
+
+    try {
+        const res = await fetchSnippet(id);
+        if (!res.ok) {
+            if (res.status === 404) {
+                console.error(color.red('Error:') + ` Snippet '${id}' not found.`);
+            } else {
+                console.error(color.red('Error:') + ` Failed to fetch snippet (HTTP ${res.status})`);
+            }
+            process.exit(1);
+        }
+
+        const body = await res.json();
+        const s = body.data || body;
+        const remoteCode = s.code || '';
+
+        if (localCode === remoteCode) {
+            log(color.green('✓') + ' No differences — local file matches remote snippet.');
+            return;
+        }
+
+        // Simple line-by-line diff
+        const localLines = localCode.split('\n');
+        const remoteLines = remoteCode.split('\n');
+        const maxLines = Math.max(localLines.length, remoteLines.length);
+
+        log(color.bold(`Diff: ${fileArg} (local) vs ${s.name || id} (remote)`));
+        log(color.dim('─'.repeat(60)));
+
+        let additions = 0, deletions = 0, unchanged = 0;
+
+        for (let i = 0; i < maxLines; i++) {
+            const local = localLines[i];
+            const remote = remoteLines[i];
+            const lineNum = String(i + 1).padStart(4);
+
+            if (local === remote) {
+                // Only show context around changes (3 lines)
+                unchanged++;
+            } else if (local !== undefined && remote !== undefined) {
+                // Changed line
+                log(color.red(`${lineNum} - ${remote}`));
+                log(color.green(`${lineNum} + ${local}`));
+                deletions++;
+                additions++;
+            } else if (local === undefined) {
+                // Line only in remote
+                log(color.red(`${lineNum} - ${remote}`));
+                deletions++;
+            } else {
+                // Line only in local
+                log(color.green(`${lineNum} + ${local}`));
+                additions++;
+            }
+        }
+
+        log(color.dim('─'.repeat(60)));
+        log(`${color.green(`+${additions}`)} additions, ${color.red(`-${deletions}`)} deletions, ${unchanged} unchanged`);
+
+        if (additions > 0 || deletions > 0) {
+            log('');
+            log(color.dim(`  Push local changes: robinpath snippet push ${fileArg} ${id}`));
+            log(color.dim(`  Pull remote version: robinpath snippet pull ${id} ${fileArg}`));
+        }
+    } catch (err) {
+        console.error(color.red('Error:') + ` Failed to diff snippet: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// ── snippet export ──
+
+async function snippetExport(args) {
+    const flags = parseSnippetFlags(args);
+
+    log('Exporting all snippets...\n');
+
+    try {
+        const allSnippets = [];
+        let page = 1;
+        const limit = 50;
+
+        while (true) {
+            const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+            const res = await platformFetch(`/v1/snippets?${params}`);
+            if (!res.ok) {
+                console.error(color.red('Error:') + ` Failed to fetch snippets (HTTP ${res.status})`);
+                process.exit(1);
+            }
+
+            const body = await res.json();
+            const snippets = body.data || [];
+            allSnippets.push(...snippets);
+
+            const pagination = body.pagination;
+            if (!pagination || page >= pagination.pages) break;
+            page++;
+        }
+
+        if (allSnippets.length === 0) {
+            log('No snippets to export.');
+            return;
+        }
+
+        const exportData = {
+            exportedAt: new Date().toISOString(),
+            count: allSnippets.length,
+            snippets: allSnippets.map(s => ({
+                name: s.name,
+                description: s.description,
+                code: s.code,
+                language: s.language,
+                tags: s.tags,
+                visibility: s.visibility,
+                category: s.category,
+                status: s.status,
+                readme: s.readme,
+                version: s.version,
+                license: s.license,
+            })),
+        };
+
+        if (flags.json || !flags.format || flags.format === 'json') {
+            const outputFile = flags.positional[0] || 'snippets-export.json';
+            const filePath = resolve(outputFile);
+            writeFileSync(filePath, JSON.stringify(exportData, null, 2), 'utf-8');
+            log(color.green('✓') + ` Exported ${allSnippets.length} snippet${allSnippets.length !== 1 ? 's' : ''} to: ${color.cyan(outputFile)}`);
+        }
+    } catch (err) {
+        console.error(color.red('Error:') + ` Failed to export snippets: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+// ── snippet import ──
+
+async function snippetImport(args) {
+    const flags = parseSnippetFlags(args);
+    const fileArg = flags.positional[0];
+
+    if (!fileArg) {
+        console.error(color.red('Error:') + ' Usage: robinpath snippet import <file.json> [--json]');
+        process.exit(2);
+    }
+
+    const filePath = resolve(fileArg);
+    if (!existsSync(filePath)) {
+        console.error(color.red('Error:') + ` File not found: ${fileArg}`);
+        process.exit(1);
+    }
+
+    let importData;
+    try {
+        importData = JSON.parse(readFileSync(filePath, 'utf-8'));
+    } catch {
+        console.error(color.red('Error:') + ' Invalid JSON file.');
+        process.exit(1);
+    }
+
+    const snippets = importData.snippets || importData;
+    if (!Array.isArray(snippets)) {
+        console.error(color.red('Error:') + ' Expected JSON with a "snippets" array.');
+        process.exit(1);
+    }
+
+    log(`Importing ${snippets.length} snippet${snippets.length !== 1 ? 's' : ''}...\n`);
+
+    let created = 0, failed = 0;
+    const results = [];
+
+    for (const s of snippets) {
+        if (!s.name || !s.code) {
+            failed++;
+            results.push({ name: s.name || '(unnamed)', status: 'skipped', reason: 'missing name or code' });
+            continue;
+        }
+
+        try {
+            const payload = {
+                name: s.name,
+                code: s.code,
+                language: s.language || 'robinpath',
+            };
+            if (s.description) payload.description = s.description;
+            if (s.visibility)  payload.visibility = s.visibility;
+            if (s.category)    payload.category = s.category;
+            if (s.tags)        payload.tags = typeof s.tags === 'string' ? JSON.parse(s.tags) : s.tags;
+            if (s.status)      payload.status = s.status;
+            if (s.license)     payload.license = s.license;
+            if (s.version)     payload.version = s.version;
+            if (s.readme)      payload.readme = s.readme;
+
+            const res = await platformFetch('/v1/snippets', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+
+            if (res.ok) {
+                const body = await res.json();
+                created++;
+                results.push({ name: s.name, status: 'created', id: body.id || body.data?.id });
+                log(color.green('  ✓') + ' ' + s.name);
+            } else {
+                failed++;
+                results.push({ name: s.name, status: 'failed', httpStatus: res.status });
+                log(color.red('  ✗') + ' ' + s.name + color.dim(` (HTTP ${res.status})`));
+            }
+        } catch (err) {
+            failed++;
+            results.push({ name: s.name, status: 'failed', error: err.message });
+            log(color.red('  ✗') + ' ' + s.name + color.dim(` (${err.message})`));
+        }
+    }
+
+    log('');
+    if (flags.json) {
+        console.log(JSON.stringify({ created, failed, total: snippets.length, results }, null, 2));
+        return;
+    }
+
+    log(color.green(`✓ Imported: ${created}`) + (failed > 0 ? color.red(` | Failed: ${failed}`) : '') + ` | Total: ${snippets.length}`);
 }
 
 // ============================================================================
@@ -4532,6 +6021,32 @@ CLOUD:
   deprecate <pkg>    Mark a module as deprecated
   sync               List your published modules
 
+SNIPPETS:
+  snippet list           List your snippets (--visibility, --status, --category)
+  snippet create <file>  Create a snippet from a file (or - for stdin)
+  snippet init           Interactive snippet creation wizard
+  snippet get <id>       View a snippet (--code-only for raw code)
+  snippet update <id>    Update a snippet's metadata or code
+  snippet delete <id>    Delete a snippet (--force to confirm)
+  snippet explore [q]    Browse public snippets (marketplace)
+  snippet search <q>     Search public snippets
+  snippet star <id>      Star a snippet
+  snippet unstar <id>    Unstar a snippet
+  snippet fork <id>      Fork a snippet to your account
+  snippet publish <id>   Make a snippet public + published
+  snippet unpublish <id> Revert to private draft
+  snippet copy <id>      Copy snippet code to clipboard
+  snippet run <id>       Fetch and execute (cached, --no-cache to refresh)
+  snippet pull <id>      Download snippet code to a local file
+  snippet push <f> <id>  Update snippet code from a local file
+  snippet diff <f> <id>  Compare local file with remote snippet
+  snippet version <id> <v>  Set snippet version
+  snippet trending       Browse trending snippets
+  snippet export         Export all your snippets to JSON
+  snippet import <file>  Import snippets from a JSON export
+
+  Supports partial IDs: robinpath snippet get 01KJ8 (resolves automatically)
+
 FLAGS:
   -e, --eval <code>  Execute inline script
   -w, --watch        Re-run script on file changes
@@ -5073,6 +6588,100 @@ OUTPUT:
 EXAMPLES:
   robinpath status              Check default port
   robinpath status -p 8080      Check specific port`,
+
+        snippet: `robinpath snippet — Manage code snippets
+
+USAGE:
+  robinpath snippet <subcommand> [options]
+
+  Supports partial IDs — use just the first few characters:
+    robinpath snippet get 01KJ8     (resolves to full ID automatically)
+
+SUBCOMMANDS:
+  list                    List your saved snippets
+  create <file|->         Create a snippet from a file or stdin
+  init                    Interactive snippet creation wizard
+  get <id>                View a snippet (code + metadata)
+  update <id>             Update a snippet
+  delete <id>             Delete a snippet (--force required)
+  explore [query]         Browse public snippets (marketplace)
+  search <query>          Search public snippets
+  star <id>               Star a snippet
+  unstar <id>             Unstar a snippet
+  fork <id>               Fork a snippet to your account
+  publish <id>            Make public + set status to published
+  unpublish <id>          Revert to private draft
+  copy <id>               Copy snippet code to clipboard
+  run <id>                Fetch and execute (cached locally for 5 min)
+  pull <id> [file]        Download snippet code to a local file
+  push <file> <id>        Update snippet code from local file
+  diff <file> <id>        Compare local file with remote snippet
+  version <id> <ver>      Set version (--changelog=<text>)
+  trending                Browse trending snippets (alias: explore --sort=popular)
+  export [file]           Export all snippets to JSON
+  import <file>           Import snippets from JSON export
+
+COMMON FLAGS:
+  --json                  Machine-readable JSON output
+  --page=<n>              Page number (default: 1)
+  --limit=<n>             Results per page (default: 20)
+
+GET FLAGS:
+  --code-only             Output only the raw code (pipeable)
+                          Example: robinpath snippet get <id> --code-only | robinpath
+
+LIST FLAGS:
+  --visibility=<v>        Filter: public or private
+  --status=<s>            Filter: draft, published, or archived
+  --category=<cat>        Filter by category
+  [query]                 Search by name/description
+
+CREATE FLAGS:
+  --name=<name>           Snippet name (defaults to filename)
+  --description=<desc>    Description
+  --visibility=<v>        public or private (default: private)
+  --category=<cat>        Category (forms, notifications, crm, e-commerce,
+                          data-processing, auth, ai, webhooks, utilities, other)
+  --tags=<t1,t2>          Comma-separated tags
+  --status=<s>            draft, published, or archived
+  --license=<lic>         License (MIT, Apache-2.0, GPL-3.0, etc.)
+  --version=<ver>         Version string
+  --readme=<file>         Readme from file
+
+RUN FLAGS:
+  --no-cache              Skip local cache, always fetch from network
+
+EXPLORE FLAGS:
+  --category=<cat>        Filter by category
+  --sort=<key>            Sort: popular, stars, newest, updated
+  --tags=<t1,t2>          Filter by tags
+
+EXAMPLES:
+  robinpath snippet list
+  robinpath snippet list --visibility=public --status=published
+  robinpath snippet list contact                          Search your snippets
+  robinpath snippet init                                  Interactive wizard
+  robinpath snippet create app.rp --name="My Tool" --visibility=public
+  robinpath snippet create - < script.rp --name="Piped Snippet"
+  robinpath snippet get 01KJ8                             Partial ID works
+  robinpath snippet get abc123 --code-only                Raw code only
+  robinpath snippet get abc123 --code-only | robinpath    Pipe to execute
+  robinpath snippet update abc123 --name="New Name" --tags=utils,helpers
+  robinpath snippet delete abc123 --force
+  robinpath snippet explore --category=ai --sort=popular
+  robinpath snippet search "slack notification"
+  robinpath snippet star abc123
+  robinpath snippet fork abc123
+  robinpath snippet publish abc123
+  robinpath snippet run abc123                            Cached for 5 min
+  robinpath snippet run abc123 --no-cache                 Force fresh fetch
+  robinpath snippet pull abc123 my-local.rp
+  robinpath snippet push updated.rp abc123
+  robinpath snippet diff app.rp abc123                    Compare before push
+  robinpath snippet version abc123 2.0.0 --changelog="Major rewrite"
+  robinpath snippet trending --limit=10
+  robinpath snippet export my-backup.json
+  robinpath snippet import my-backup.json`,
     };
 
     const page = helpPages[command];
@@ -5080,7 +6689,7 @@ EXAMPLES:
         console.log(page);
     } else {
         console.error(color.red('Error:') + ` Unknown command: ${command}`);
-        console.error('Available: add, remove, upgrade, search, info, modules, init, doctor, env, cache, audit, deprecate, pack, fmt, check, ast, test, install, uninstall, login, logout, whoami, publish, sync, start, status');
+        console.error('Available: add, remove, upgrade, search, info, modules, init, doctor, env, cache, audit, deprecate, pack, fmt, check, ast, test, install, uninstall, login, logout, whoami, publish, sync, snippet, start, status');
         process.exit(2);
     }
 }
@@ -5531,6 +7140,12 @@ async function main() {
     // sync
     if (command === 'sync') {
         await handleSync();
+        return;
+    }
+
+    // snippet <subcommand>
+    if (command === 'snippet' || command === 'snippets') {
+        await handleSnippet(args.slice(1));
         return;
     }
 

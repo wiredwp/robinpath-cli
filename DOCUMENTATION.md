@@ -2603,7 +2603,7 @@ const result = await rp.run('log $counter');
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ROBINPATH_CLOUD_URL` | `https://dev.robinpath.com` | Cloud app URL |
-| `ROBINPATH_PLATFORM_URL` | `https://robinpath-platform.nabivogedu.workers.dev` | Registry API URL |
+| `ROBINPATH_PLATFORM_URL` | `https://api.robinpath.com` | Registry API URL |
 | `ROBINPATH_CURRENT_VERSION` | (none) | Set during update |
 
 ### Server Defaults
