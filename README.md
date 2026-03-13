@@ -6,12 +6,12 @@ Scripting language for automation — with built-in AI that understands your cod
 
 **Windows** (PowerShell):
 ```powershell
-irm https://raw.githubusercontent.com/nabivogedu/robinpath-cli/main/install.ps1 | iex
+irm https://dev.robinpath.com/install.ps1 | iex
 ```
 
 **macOS / Linux**:
 ```sh
-curl -fsSL https://raw.githubusercontent.com/nabivogedu/robinpath-cli/main/install.sh | sh
+curl -fsSL https://dev.robinpath.com/install.sh | bash
 ```
 
 Then restart your terminal and verify:
