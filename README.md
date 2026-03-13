@@ -1,204 +1,111 @@
 # RobinPath CLI
 
-Standalone command-line binary for the RobinPath scripting language. No runtime dependencies needed — just one executable.
+Scripting language for automation — with built-in AI that understands your code.
 
 ## Install
 
-### Windows
-
-Open **PowerShell** and run:
-
+**Windows** (PowerShell):
 ```powershell
 irm https://raw.githubusercontent.com/nabivogedu/robinpath-cli/main/install.ps1 | iex
 ```
 
-Then **restart your terminal** and verify:
-
-```
-robinpath --version
-```
-
-### macOS
-
-Open **Terminal** and run:
-
+**macOS / Linux**:
 ```sh
 curl -fsSL https://raw.githubusercontent.com/nabivogedu/robinpath-cli/main/install.sh | sh
 ```
 
-Then restart your terminal or run:
-
-```sh
-source ~/.zshrc
-```
-
-Verify:
-
+Then restart your terminal and verify:
 ```
 robinpath --version
 ```
 
-> Works on both Apple Silicon (M1/M2/M3/M4) and Intel Macs.
-
-### Linux
-
-Open a terminal and run:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/nabivogedu/robinpath-cli/main/install.sh | sh
-```
-
-Then restart your terminal or run:
-
-```sh
-source ~/.bashrc
-```
-
-Verify:
-
-```
-robinpath --version
-```
-
-### Manual Install
-
-If you prefer to install manually:
-
-1. Download the binary for your OS from the [Releases](https://github.com/nabivogedu/robinpath-cli/releases) page:
-   - **Windows** — `robinpath-windows-x64.exe`
-   - **macOS** — `robinpath-macos-arm64`
-   - **Linux** — `robinpath-linux-x64`
-
-2. Run the self-installer:
-
-```
-./robinpath install
-```
-
-This copies the binary to `~/.robinpath/bin/` and adds it to your PATH automatically.
-
-3. Restart your terminal.
-
-## Uninstall
-
-```
-robinpath uninstall
-```
-
-Removes the binary and cleans it from your PATH. Restart your terminal after.
-
-## Usage
-
-```
-robinpath [command] [options] [file]
-rp [command] [options] [file]          # shorthand alias
-```
-
-> `rp` is a shorthand alias for `robinpath`. Both commands are identical.
-
-### Run a script file
-
-```
-robinpath hello.rp
-```
-
-The `.rp` and `.robin` extensions are auto-resolved, so you can also just write:
-
-```
-robinpath hello
-```
-
-### Execute inline code
-
-```
-robinpath -e "log \"Hello World\""
-```
-
-### Pipe from stdin
-
-```sh
-echo 'log "Hello"' | robinpath
-```
-
-### Interactive REPL
-
-Run `robinpath` with no arguments to start the REPL:
-
-```
-$ robinpath
-RobinPath v0.40.0
-Type "help" for commands, "exit" to quit
-
-default> log "Hello!"
-Hello!
-default> math.add 2 3
-5
-default> exit
-Goodbye!
-```
-
-## Commands
-
-| Command     | Description                              |
-|-------------|------------------------------------------|
-| `install`   | Install robinpath to your system PATH    |
-| `uninstall` | Remove robinpath from your system        |
-| `update`    | Update robinpath to the latest version   |
-
-## Options
-
-| Flag              | Description              |
-|-------------------|--------------------------|
-| `-e`, `--eval`    | Execute a script string  |
-| `-v`, `--version` | Show version             |
-| `-h`, `--help`    | Show help                |
-
-## REPL Commands
-
-Once inside the interactive REPL:
-
-| Command        | Description                        |
-|----------------|------------------------------------|
-| `help`         | Show REPL help                     |
-| `exit`, `quit` | Exit the REPL                      |
-| `clear`        | Clear the screen                   |
-| `..`           | List all available commands        |
-| `\` at end     | Continue on next line (multi-line) |
-
-Multi-line blocks (`if`, `def`, `for`, `do`) are detected automatically — the REPL will show `...` and wait for the block to close.
-
-## Examples
+## Quick Start
 
 ```sh
 # Run a script
 robinpath app.rp
 
-# Inline one-liner
-robinpath -e "log \"2 + 2 =\"; log math.add 2 2"
+# Inline code
+robinpath -e 'log "Hello World"'
 
-# Auto-resolve extension (runs hello.rp or hello.robin)
-robinpath hello
+# AI code generation (streaming)
+robinpath -p "read a csv and send email to each row"
 
-# Files starting with a dash
-robinpath -- -weird-name.rp
+# AI + save to file
+robinpath -p "implement quicksort" --save
 
-# Check version
-robinpath -v
+# AI + save and run
+robinpath -p "fetch weather for London" --save --run
+
+# Interactive AI assistant
+robinpath
 ```
 
-## Install Location
+## AI Mode
 
-| OS      | Path                                |
-|---------|-------------------------------------|
-| Windows | `%USERPROFILE%\.robinpath\bin\`     |
-| macOS   | `~/.robinpath/bin/`                 |
-| Linux   | `~/.robinpath/bin/`                 |
+RobinPath has a built-in AI assistant that knows the entire language and all 210+ modules.
 
-## Supported Platforms
+```
+robinpath -p "your question"     # Headless (streaming output)
+robinpath -p "..." --save        # Generate and save to .rp file
+robinpath -p "..." --run         # Generate, save, and run
+robinpath -p "..." -o app.rp     # Save to specific file
+robinpath                        # Interactive AI REPL
+```
 
-| Platform         | Binary                      | Runner       |
-|------------------|-----------------------------|--------------|
-| Windows x64      | `robinpath-windows-x64.exe` | Free         |
-| Linux x64        | `robinpath-linux-x64`       | Free         |
-| macOS ARM64      | `robinpath-macos-arm64`     | Free         |
-| macOS Intel x64  | Via Rosetta (uses ARM64)    | —            |
+The AI works in any language — English, Russian, Romanian, Spanish, Chinese, etc.
+
+To use the interactive REPL with your own model:
+```
+robinpath ai config set-key <your-openrouter-key>
+robinpath ai config set-model anthropic/claude-sonnet-4-20250514
+```
+
+## Modules
+
+210+ built-in and installable modules for common tasks:
+
+```sh
+robinpath add @robinpath/slack      # Install a module
+robinpath remove @robinpath/slack   # Remove a module
+robinpath search slack              # Search the registry
+robinpath info @robinpath/slack     # Module details
+```
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `<file.rp>` | Run a script |
+| `-p "prompt"` | AI code generation |
+| `-e "code"` | Execute inline code |
+| `add <pkg>` | Install a module |
+| `remove <pkg>` | Remove a module |
+| `search <query>` | Search modules |
+| `fmt <file>` | Format a script |
+| `check <file>` | Syntax check |
+| `test [dir]` | Run test files |
+| `update` | Update CLI to latest |
+| `install` / `uninstall` | System install/remove |
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `-p "prompt"` | AI headless mode |
+| `--save` | Save generated code to .rp file |
+| `--run` | Save and run generated code |
+| `-o <file>` | Output filename for --save |
+| `-e` | Execute inline code |
+| `-v` | Show version |
+| `-h` | Show help |
+
+## Platforms
+
+| Platform | Binary |
+|----------|--------|
+| Windows x64 | `robinpath-windows-x64.exe` |
+| macOS ARM64 | `robinpath-macos-arm64` |
+| Linux x64 | `robinpath-linux-x64` |
+
+Binaries install to `~/.robinpath/bin/`. Shorthand `rp` works everywhere.
