@@ -14,7 +14,7 @@ import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErr
 import { nativeModules } from './modules/index.js';
 
 // Injected by esbuild at build time via --define, fallback for dev mode
-const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.50.0';
+const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.51.0';
 
 // ============================================================================
 // Global flags
@@ -6313,186 +6313,61 @@ async function handleAiConfig(args) {
     }
 }
 
-// AI tool definitions (OpenAI function calling format used by OpenRouter)
-const AI_TOOLS = [
-    {
-        type: 'function',
-        function: {
-            name: 'read_file',
-            description: 'Read the contents of a file from disk. Use this to understand existing code before modifying it.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    path: { type: 'string', description: 'The file path to read (relative or absolute)' },
-                },
-                required: ['path'],
-            },
-        },
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'write_file',
-            description: 'Create a new file or completely overwrite an existing file with new content.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    path: { type: 'string', description: 'The file path to write' },
-                    content: { type: 'string', description: 'The full file content to write' },
-                },
-                required: ['path', 'content'],
-            },
-        },
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'edit_file',
-            description: 'Edit a file by replacing a specific string with new content. The old_string must match exactly (including whitespace). Read the file first to get the exact content.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    path: { type: 'string', description: 'The file path to edit' },
-                    old_string: { type: 'string', description: 'The exact string to find and replace' },
-                    new_string: { type: 'string', description: 'The replacement string' },
-                },
-                required: ['path', 'old_string', 'new_string'],
-            },
-        },
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'run_script',
-            description: 'Execute a RobinPath script (.rp file) or inline code and return the output.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    code: { type: 'string', description: 'Inline RobinPath code to execute (use this OR file, not both)' },
-                    file: { type: 'string', description: 'Path to a .rp file to execute (use this OR code, not both)' },
-                },
-            },
-        },
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'list_files',
-            description: 'List files in a directory to understand the project structure.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    path: { type: 'string', description: 'Directory path to list (defaults to current directory)' },
-                    pattern: { type: 'string', description: 'Glob pattern to filter files (e.g. "*.rp")' },
-                },
-            },
-        },
-    },
-];
-
-function executeAiTool(name, args) {
-    try {
-        if (name === 'read_file') {
-            const filePath = resolve(args.path);
-            if (!existsSync(filePath)) {
-                return { error: `File not found: ${args.path}` };
-            }
-            const stat = statSync(filePath);
-            if (stat.size > 100000) {
-                return { error: `File too large (${(stat.size / 1024).toFixed(1)}KB). Try a smaller file.` };
-            }
-            const content = readFileSync(filePath, 'utf-8');
-            return { content, path: filePath, size: stat.size };
+// Shell command execution — like Claude Code, AI generates shell commands and CLI executes them
+function getShellConfig() {
+    const p = platform();
+    if (p === 'win32') {
+        // Prefer Git Bash on Windows, fall back to cmd
+        const gitBash = 'C:\\Program Files\\Git\\bin\\bash.exe';
+        if (existsSync(gitBash)) {
+            return { shell: gitBash, name: 'bash', isUnix: true };
         }
-
-        if (name === 'write_file') {
-            const filePath = resolve(args.path);
-            const dir = dirname(filePath);
-            if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-            writeFileSync(filePath, args.content, 'utf-8');
-            return { success: true, path: filePath, size: args.content.length };
-        }
-
-        if (name === 'edit_file') {
-            const filePath = resolve(args.path);
-            if (!existsSync(filePath)) {
-                return { error: `File not found: ${args.path}` };
-            }
-            const content = readFileSync(filePath, 'utf-8');
-            if (!content.includes(args.old_string)) {
-                return { error: 'old_string not found in file. Read the file first to get exact content.' };
-            }
-            const newContent = content.replace(args.old_string, args.new_string);
-            writeFileSync(filePath, newContent, 'utf-8');
-            return { success: true, path: filePath };
-        }
-
-        if (name === 'run_script') {
-            let script;
-            if (args.file) {
-                const filePath = resolve(args.file);
-                if (!existsSync(filePath)) {
-                    return { error: `File not found: ${args.file}` };
-                }
-                script = readFileSync(filePath, 'utf-8');
-            } else if (args.code) {
-                script = args.code;
-            } else {
-                return { error: 'Provide either code or file parameter' };
-            }
-
-            // Capture output by temporarily overriding console.log
-            const output = [];
-            const origLog = console.log;
-            console.log = (...a) => output.push(a.map(String).join(' '));
-            try {
-                const rp = new RobinPath();
-                for (const mod of nativeModules) {
-                    rp.registerModule(mod);
-                }
-                return rp.executeScript(script).then(result => {
-                    console.log = origLog;
-                    return { output: output.join('\n'), result };
-                }).catch(e => {
-                    console.log = origLog;
-                    return { error: e.message, output: output.join('\n') };
-                });
-            } catch (e) {
-                console.log = origLog;
-                return { error: e.message, output: output.join('\n') };
-            }
-        }
-
-        if (name === 'list_files') {
-            const dirPath = resolve(args.path || '.');
-            if (!existsSync(dirPath)) {
-                return { error: `Directory not found: ${args.path || '.'}` };
-            }
-            const entries = readdirSync(dirPath);
-            const files = [];
-            for (const entry of entries.slice(0, 100)) {
-                try {
-                    const full = join(dirPath, entry);
-                    const s = statSync(full);
-                    files.push({
-                        name: entry,
-                        type: s.isDirectory() ? 'directory' : 'file',
-                        size: s.isFile() ? s.size : undefined,
-                    });
-                } catch { /* skip */ }
-            }
-            if (args.pattern) {
-                const pat = args.pattern.replace(/\*/g, '.*').replace(/\?/g, '.');
-                const re = new RegExp('^' + pat + '$', 'i');
-                return { files: files.filter(f => re.test(f.name)), directory: dirPath };
-            }
-            return { files, directory: dirPath };
-        }
-
-        return { error: `Unknown tool: ${name}` };
-    } catch (e) {
-        return { error: e.message };
+        return { shell: 'cmd.exe', name: 'cmd', isUnix: false };
     }
+    // macOS / Linux — use user's shell or default to bash
+    const userShell = process.env.SHELL || '/bin/bash';
+    return { shell: userShell, name: basename(userShell), isUnix: true };
+}
+
+function executeShellCommand(command, timeout = 30000) {
+    const { shell, name: shellName, isUnix } = getShellConfig();
+    try {
+        const args = isUnix ? ['-c', command] : ['/c', command];
+        const result = execSync(command, {
+            shell,
+            cwd: process.cwd(),
+            timeout,
+            maxBuffer: 1024 * 1024,
+            encoding: 'utf-8',
+            stdio: ['pipe', 'pipe', 'pipe'],
+            env: { ...process.env, LANG: 'en_US.UTF-8' },
+        });
+        return { stdout: (result || '').slice(0, 50000), exitCode: 0 };
+    } catch (e) {
+        return {
+            stdout: (e.stdout || '').slice(0, 50000),
+            stderr: (e.stderr || '').slice(0, 10000),
+            exitCode: e.status || 1,
+            error: e.message.slice(0, 500),
+        };
+    }
+}
+
+// Extract <cmd>...</cmd> blocks from AI response text
+function extractCommands(text) {
+    const commands = [];
+    const regex = /<cmd>([\s\S]*?)<\/cmd>/g;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+        const cmd = match[1].trim();
+        if (cmd) commands.push(cmd);
+    }
+    return commands;
+}
+
+// Strip <cmd> tags from displayed text (they're invisible to user)
+function stripCommandTags(text) {
+    return text.replace(/<cmd>[\s\S]*?<\/cmd>/g, '').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function buildRobinPathSystemPrompt() {
@@ -6662,22 +6537,46 @@ IMPORTANT: If the user asks about a module that is NOT in the native modules lis
 For example, if they ask about Slack but @robinpath/slack is not installed, say:
   "First install it: robinpath add @robinpath/slack"
 
-## Your Capabilities
-You have tools to:
-1. **read_file** \u2014 Read files to understand existing code
-2. **write_file** \u2014 Create new files
-3. **edit_file** \u2014 Modify specific parts of existing files
-4. **run_script** \u2014 Execute RobinPath code to test it
-5. **list_files** \u2014 Explore the project structure
+## Your Capabilities — Shell Commands
+You can execute shell commands on the user's machine to perform file operations, run scripts, and explore the filesystem.
+To execute a command, wrap it in <cmd> tags in your response:
+
+<cmd>cat myfile.txt</cmd>         — read a file
+<cmd>ls -la</cmd>                  — list files
+<cmd>echo 'content' > file.txt</cmd>  — create/write a file
+<cmd>mkdir -p mydir</cmd>         — create directories
+<cmd>cat file.txt | sed 's/old/new/g' > file.tmp && mv file.tmp file.txt</cmd>  — edit a file
+<cmd>rm file.txt</cmd>            — delete a file
+<cmd>robinpath run script.rp</cmd> — run a RobinPath script
+
+The commands are executed in the system shell (${getShellConfig().name} on ${platform()}).
+You can use multiple <cmd> tags in a single response — they execute sequentially.
+After execution, you receive the output (stdout/stderr) and can use it to continue.
+
+### Writing files with heredoc
+To create files with multi-line content:
+<cmd>cat << 'RPEOF' > myfile.rp
+@desc "My script"
+do
+  log "Hello!"
+enddo
+RPEOF</cmd>
+
+### Editing files with sed
+For simple replacements:
+<cmd>sed -i 's/old text/new text/g' myfile.rp</cmd>
+
+For multi-line edits, read the file first, then write the modified version.
 
 ## User Environment
 - Working directory: ${process.cwd()}
 - Platform: ${platform()}
+- Shell: ${getShellConfig().name}
 - RobinPath CLI version: ${CLI_VERSION}
 
 ## Guidelines
 - When asked to create code, write idiomatic RobinPath using the available modules
-- When modifying files, always read them first to understand the current content
+- When modifying files, always read them first (cat) to understand the current content
 - Show diffs or explain what you changed
 - Keep responses concise and focused
 - When showing code, use \`\`\`robinpath code blocks
@@ -6685,6 +6584,7 @@ You have tools to:
 - If the user needs a module that is not installed, tell them to install it with: robinpath add @robinpath/<name>
 - Never assume a module is available if it's not in the native or installed modules list
 - Run code when appropriate to verify it works
+- IMPORTANT: Only use <cmd> tags when you need to actually execute a command. Do NOT use <cmd> tags in examples or explanations — use regular code blocks instead.
 
 ## Persistent Memory
 You can save important facts about the user across sessions using memory tags.
@@ -7119,16 +7019,33 @@ function formatFileSize(bytes) {
 // OpenRouter LLM calls
 // ============================================================================
 
-async function callOpenRouter(apiKey, model, messages, tools) {
+async function callOpenRouter(apiKey, model, messages) {
+    // Clean messages — ensure content is always a string, filter out legacy tool messages
+    const sanitizedMessages = messages
+        .filter(msg => msg.role !== 'tool') // No more tool role messages
+        .map(msg => {
+            const m = { ...msg };
+            if (m.content === null || m.content === undefined) m.content = '';
+            delete m.tool_calls; // Strip any legacy tool_calls
+            delete m.tool_call_id;
+            return m;
+        });
+
+    // Merge consecutive same-role messages (required by Gemini, harmless for others)
+    const merged = [];
+    for (const m of sanitizedMessages) {
+        if (merged.length > 0 && merged[merged.length - 1].role === m.role) {
+            merged[merged.length - 1].content += '\n\n' + m.content;
+        } else {
+            merged.push(m);
+        }
+    }
+
     const body = {
         model,
-        messages,
+        messages: merged,
         stream: true,
     };
-    if (tools && tools.length > 0) {
-        body.tools = tools;
-        body.tool_choice = 'auto';
-    }
 
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
@@ -7159,15 +7076,17 @@ async function processAiStream(response) {
         const json = await response.json();
         const msg = json.choices?.[0]?.message;
         const usage = json.usage || {};
-        return { content: msg?.content || '', toolCalls: msg?.tool_calls || [], usage };
+        return { content: msg?.content || '', usage };
     }
 
     const decoder = new TextDecoder();
     let buffer = '';
     let content = '';
-    const toolCalls = {};
     let isFirstContent = true;
     let usage = {};
+    // Track <cmd> tags to suppress them from display
+    let insideCmd = false;
+    let pendingDisplay = '';
 
     while (true) {
         const { done, value } = await reader.read();
@@ -7187,30 +7106,52 @@ async function processAiStream(response) {
                 const delta = parsed.choices?.[0]?.delta;
                 if (!delta) continue;
 
-                // Text content
                 if (delta.content) {
                     if (isFirstContent) {
                         process.stdout.write('\n');
                         isFirstContent = false;
                     }
                     content += delta.content;
-                    process.stdout.write(delta.content);
-                }
 
-                // Tool calls (accumulated across chunks)
-                if (delta.tool_calls) {
-                    for (const tc of delta.tool_calls) {
-                        const idx = tc.index ?? 0;
-                        if (!toolCalls[idx]) {
-                            toolCalls[idx] = { id: tc.id || '', function: { name: '', arguments: '' } };
+                    // Buffer content to detect <cmd> tags and hide them from display
+                    pendingDisplay += delta.content;
+
+                    // Process pending display buffer
+                    while (pendingDisplay.length > 0) {
+                        if (insideCmd) {
+                            const endIdx = pendingDisplay.indexOf('</cmd>');
+                            if (endIdx !== -1) {
+                                insideCmd = false;
+                                pendingDisplay = pendingDisplay.slice(endIdx + 6);
+                            } else {
+                                // Still inside <cmd>, don't display, wait for more
+                                break;
+                            }
+                        } else {
+                            const startIdx = pendingDisplay.indexOf('<cmd>');
+                            if (startIdx !== -1) {
+                                // Display everything before <cmd>
+                                if (startIdx > 0) {
+                                    process.stdout.write(pendingDisplay.slice(0, startIdx));
+                                }
+                                insideCmd = true;
+                                pendingDisplay = pendingDisplay.slice(startIdx + 5);
+                            } else if (pendingDisplay.includes('<')) {
+                                // Might be a partial <cmd> tag — display up to '<' and wait
+                                const ltIdx = pendingDisplay.lastIndexOf('<');
+                                if (ltIdx > 0) {
+                                    process.stdout.write(pendingDisplay.slice(0, ltIdx));
+                                    pendingDisplay = pendingDisplay.slice(ltIdx);
+                                }
+                                break;
+                            } else {
+                                process.stdout.write(pendingDisplay);
+                                pendingDisplay = '';
+                            }
                         }
-                        if (tc.id) toolCalls[idx].id = tc.id;
-                        if (tc.function?.name) toolCalls[idx].function.name += tc.function.name;
-                        if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
                     }
                 }
 
-                // Usage info (usually in the final chunk)
                 if (parsed.usage) {
                     usage = parsed.usage;
                 }
@@ -7218,13 +7159,13 @@ async function processAiStream(response) {
         }
     }
 
+    // Flush any remaining display buffer
+    if (pendingDisplay.length > 0 && !insideCmd) {
+        process.stdout.write(pendingDisplay);
+    }
     if (content) process.stdout.write('\n');
 
-    return {
-        content,
-        toolCalls: Object.values(toolCalls),
-        usage,
-    };
+    return { content, usage };
 }
 
 async function startAiREPL(initialPrompt, resumeSessionId) {
@@ -7387,11 +7328,18 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
         }
 
         if (trimmed === '/tools') {
+            const { name: shellName } = getShellConfig();
             log('');
-            log(color.bold('  Available tools:'));
-            for (const tool of AI_TOOLS) {
-                log(`  ${color.cyan(tool.function.name.padEnd(15))} ${tool.function.description.split('.')[0]}`);
-            }
+            log(color.bold('  Shell command execution:'));
+            log(`  Shell: ${color.cyan(shellName)} on ${platform()}`);
+            log('');
+            log('  The AI executes shell commands to:');
+            log(`  ${color.cyan('cat / head / tail')}     Read files`);
+            log(`  ${color.cyan('echo > / cat <<')}      Create/write files`);
+            log(`  ${color.cyan('sed -i')}               Edit files in-place`);
+            log(`  ${color.cyan('ls / find')}             List/search files`);
+            log(`  ${color.cyan('mkdir / rm / mv / cp')}  File operations`);
+            log(`  ${color.cyan('robinpath run')}         Run .rp scripts`);
             log('');
             rl.prompt();
             return;
@@ -7794,9 +7742,10 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
 
             // Fallback: brain failed, use OpenRouter with conversation history
             logVerbose('Brain stream failed, falling back to OpenRouter');
+            log(color.dim('  [fallback → OpenRouter]'));
 
             for (let loopCount = 0; loopCount < 15; loopCount++) {
-                const response = await callOpenRouter(config.apiKey, activeModel, conversationMessages, AI_TOOLS);
+                const response = await callOpenRouter(config.apiKey, activeModel, conversationMessages);
                 spinner.stop();
 
                 const result = await processAiStream(response);
@@ -7809,13 +7758,20 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
                     usage.requests++;
                 }
 
-                // If no tool calls, we're done — save the assistant message
-                if (result.toolCalls.length === 0) {
-                    if (result.content) {
-                        conversationMessages.push({ role: 'assistant', content: result.content });
+                // Extract shell commands from <cmd> tags
+                const commands = extractCommands(result.content || '');
+                const cleanContent = stripCommandTags(result.content || '');
 
+                // Save assistant message (stripped of <cmd> tags)
+                if (cleanContent) {
+                    conversationMessages.push({ role: 'assistant', content: cleanContent });
+                }
+
+                // If no commands, we're done
+                if (commands.length === 0) {
+                    if (cleanContent) {
                         // Auto-detect module install suggestions
-                        const installMatch = result.content.match(/robinpath add (@robinpath\/[\w-]+)/g);
+                        const installMatch = cleanContent.match(/robinpath add (@robinpath\/[\w-]+)/g);
                         if (installMatch) {
                             const manifest = readModulesManifest();
                             for (const match of installMatch) {
@@ -7828,79 +7784,65 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
                             }
                         }
 
-                        // Extract and save any <memory> tags from OpenRouter response
-                        const { cleaned: cleanContent, facts: memFacts } = extractMemoryTags(result.content);
+                        // Extract and save any <memory> tags from response
+                        const { cleaned: memCleaned, facts: memFacts } = extractMemoryTags(cleanContent);
                         for (const mf of memFacts) {
                             addMemoryFact(mf);
                             logVerbose(`Memory saved: ${mf}`);
                         }
-                        if (cleanContent !== result.content) {
-                            conversationMessages[conversationMessages.length - 1].content = cleanContent;
+                        if (memCleaned !== cleanContent) {
+                            conversationMessages[conversationMessages.length - 1].content = memCleaned;
                         }
                     }
                     break;
                 }
 
-                // Assistant message with tool calls
-                conversationMessages.push({
-                    role: 'assistant',
-                    content: result.content || null,
-                    tool_calls: result.toolCalls,
-                });
+                // Execute each shell command and collect results
+                const cmdResults = [];
+                for (const cmd of commands) {
+                    // Show command being executed
+                    const cmdPreview = cmd.length > 80 ? cmd.slice(0, 77) + '...' : cmd;
+                    log(color.dim(`  \u25b6 ${cmdPreview}`));
 
-                // Execute each tool call
-                for (const tc of result.toolCalls) {
-                    const fnName = tc.function.name;
-                    let fnArgs = {};
-                    try { fnArgs = JSON.parse(tc.function.arguments); } catch { /* ignore */ }
+                    const result = executeShellCommand(cmd);
 
-                    // Show tool activity with better formatting
-                    const toolIcons = {
-                        read_file: '\u{1F4C4}',
-                        write_file: '\u{1F4DD}',
-                        edit_file: '\u270F\uFE0F',
-                        run_script: '\u25B6\uFE0F',
-                        list_files: '\u{1F4C1}',
-                    };
-                    const toolLabels = {
-                        read_file: `Reading ${fnArgs.path}`,
-                        write_file: `Writing ${fnArgs.path}`,
-                        edit_file: `Editing ${fnArgs.path}`,
-                        run_script: 'Running script...',
-                        list_files: `Listing ${fnArgs.path || '.'}`,
-                    };
-                    log(color.dim(`  ${toolIcons[fnName] || '\u25b6'} ${toolLabels[fnName] || fnName}`));
-
-                    let toolResult = executeAiTool(fnName, fnArgs);
-                    if (toolResult && typeof toolResult.then === 'function') {
-                        toolResult = await toolResult;
-                    }
-
-                    // Show brief result summary
-                    if (toolResult && !toolResult.error) {
-                        if (fnName === 'read_file' && toolResult.size) {
-                            log(color.dim(`    \u2514 ${(toolResult.size/1024).toFixed(1)}KB read`));
-                        } else if (fnName === 'write_file' && toolResult.success) {
-                            log(color.dim(`    \u2514 ${(toolResult.size/1024).toFixed(1)}KB written`));
-                        } else if (fnName === 'edit_file' && toolResult.success) {
-                            log(color.dim(`    \u2514 edit applied`));
-                        } else if (fnName === 'run_script' && toolResult.output) {
-                            const lines = toolResult.output.split('\n');
-                            const preview = lines.slice(0, 3).join('\n    ');
+                    if (result.exitCode === 0) {
+                        const lines = (result.stdout || '').split('\n');
+                        const preview = lines.slice(0, 3).join('\n    ');
+                        if (preview.trim()) {
                             log(color.dim(`    \u2514 ${preview}${lines.length > 3 ? '\n    ...' : ''}`));
-                        } else if (fnName === 'list_files' && toolResult.files) {
-                            log(color.dim(`    \u2514 ${toolResult.files.length} items`));
+                        } else {
+                            log(color.dim(`    \u2514 done`));
                         }
-                    } else if (toolResult?.error) {
-                        log(color.red(`    \u2514 Error: ${toolResult.error.slice(0, 80)}`));
+                    } else {
+                        log(color.red(`    \u2514 exit ${result.exitCode}: ${(result.stderr || result.error || '').slice(0, 80)}`));
                     }
 
-                    conversationMessages.push({
-                        role: 'tool',
-                        tool_call_id: tc.id,
-                        content: JSON.stringify(toolResult),
+                    cmdResults.push({
+                        command: cmd,
+                        stdout: result.stdout || '',
+                        stderr: result.stderr || '',
+                        exitCode: result.exitCode,
                     });
                 }
+
+                // Feed command results back as a user message so AI can continue
+                const resultSummary = cmdResults.map(r => {
+                    let out = `$ ${r.command}\n`;
+                    if (r.exitCode === 0) {
+                        out += r.stdout || '(no output)';
+                    } else {
+                        out += `Exit code: ${r.exitCode}\n`;
+                        if (r.stderr) out += `stderr: ${r.stderr}\n`;
+                        if (r.stdout) out += `stdout: ${r.stdout}`;
+                    }
+                    return out;
+                }).join('\n\n');
+
+                conversationMessages.push({
+                    role: 'user',
+                    content: `[Command results]\n${resultSummary}`,
+                });
 
                 // Show spinner for the follow-up call
                 spinner = createSpinner('Processing...');
