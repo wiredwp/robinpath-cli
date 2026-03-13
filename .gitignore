@@ -2,3 +2,4 @@ node_modules/
 test.rp
 dist/*
 !dist/robinpath-cli.cjs
+.claude/settings.local.json

@@ -7,14 +7,14 @@ import { createServer } from 'node:http';
 import { readFileSync, existsSync, mkdirSync, copyFileSync, rmSync, writeFileSync, readdirSync, statSync, watch, appendFileSync, chmodSync, unlinkSync } from 'node:fs';
 import { resolve, extname, join, relative, dirname, basename } from 'node:path';
 import { execSync } from 'node:child_process';
-import { homedir, platform, tmpdir } from 'node:os';
+import { homedir, platform, tmpdir, hostname, userInfo } from 'node:os';
 import { pathToFileURL } from 'node:url';
-import { createHash, createHmac, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomUUID, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErrorWithContext } from '@wiredwp/robinpath';
 import { nativeModules } from './modules/index.js';
 
 // Injected by esbuild at build time via --define, fallback for dev mode
-const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.49.1';
+const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.50.0';
 
 // ============================================================================
 // Global flags
@@ -305,16 +305,16 @@ set $r = math.add 1 2               # Module function call
 set $s = "hello " + $name           # String concatenation
 if $x > 5                           # If block
   log "big"
-end
+endif
 for $i in array.create 1 2 3        # For loop
   log $i
-end
+endfor
 def greet $name                     # Function definition
   log "Hello " + $name
 enddef
 on "myEvent" $data                  # Event handler
   log $data
-end
+endon
 # This is a comment                 # Comments
 \`\`\`
 
@@ -4714,10 +4714,10 @@ async function handleInfo(args) {
                     log: 'log "hello"  OR  log $x',
                     module_call: 'set $r = math.add 1 2  OR  math.add 1 2',
                     string_concat: 'set $s = "hello " + $name',
-                    if_block: 'if $x > 5\n  log "big"\nend',
-                    for_loop: 'for $i in array.create 1 2 3\n  log $i\nend',
+                    if_block: 'if $x > 5\n  log "big"\nendif',
+                    for_loop: 'for $i in array.create 1 2 3\n  log $i\nendfor',
                     function_def: 'def greet $name\n  log "Hello " + $name\nenddef',
-                    events: 'on "myEvent" $data\n  log $data\nend',
+                    events: 'on "myEvent" $data\n  log $data\nendon',
                     comments: '# This is a comment',
                     file_extensions: '.rp, .robin (both recognized)',
                 },
@@ -5948,6 +5948,1825 @@ async function runWatchIteration(filePath) {
 }
 
 // ============================================================================
+// AI Interactive Mode
+// ============================================================================
+
+const AI_CONFIG_PATH = join(homedir(), '.robinpath', 'ai.json');
+const AI_SESSIONS_DIR = join(homedir(), '.robinpath', 'ai-sessions');
+const AI_BRAIN_URL = process.env.ROBINPATH_AI_BRAIN_URL || 'https://ai-brain.robinpath.com';
+
+// --- Session persistence ---
+function getSessionPath(sessionId) {
+    return join(AI_SESSIONS_DIR, `${sessionId}.json`);
+}
+
+function listSessions() {
+    if (!existsSync(AI_SESSIONS_DIR)) return [];
+    return readdirSync(AI_SESSIONS_DIR)
+        .filter(f => f.endsWith('.json'))
+        .map(f => {
+            try {
+                const data = JSON.parse(readFileSync(join(AI_SESSIONS_DIR, f), 'utf-8'));
+                return { id: data.id, name: data.name, created: data.created, updated: data.updated, messages: data.messages?.length || 0 };
+            } catch { return null; }
+        })
+        .filter(Boolean)
+        .sort((a, b) => (b.updated || b.created).localeCompare(a.updated || a.created));
+}
+
+function saveSession(sessionId, name, messages, usage) {
+    if (!existsSync(AI_SESSIONS_DIR)) mkdirSync(AI_SESSIONS_DIR, { recursive: true });
+    const data = {
+        id: sessionId,
+        name,
+        created: existsSync(getSessionPath(sessionId))
+            ? JSON.parse(readFileSync(getSessionPath(sessionId), 'utf-8')).created
+            : new Date().toISOString(),
+        updated: new Date().toISOString(),
+        messages: messages.slice(1), // skip system prompt
+        usage,
+    };
+    writeFileSync(getSessionPath(sessionId), JSON.stringify(data, null, 2), 'utf-8');
+}
+
+function loadSession(sessionId) {
+    const p = getSessionPath(sessionId);
+    if (!existsSync(p)) return null;
+    try { return JSON.parse(readFileSync(p, 'utf-8')); } catch { return null; }
+}
+
+function deleteSession(sessionId) {
+    const p = getSessionPath(sessionId);
+    if (existsSync(p)) { unlinkSync(p); return true; }
+    return false;
+}
+
+// --- Token usage tracking ---
+function createUsageTracker() {
+    return { promptTokens: 0, completionTokens: 0, totalTokens: 0, requests: 0 };
+}
+
+// Derive a machine-specific encryption key from hostname + username + fixed salt
+function getAiEncryptionKey() {
+    const material = `robinpath-ai-${hostname()}-${userInfo().username}-v1`;
+    return createHash('sha256').update(material).digest();
+}
+
+function encryptApiKey(plaintext) {
+    const key = getAiEncryptionKey();
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', key, iv);
+    let encrypted = cipher.update(plaintext, 'utf-8', 'hex');
+    encrypted += cipher.final('hex');
+    const tag = cipher.getAuthTag().toString('hex');
+    return `${iv.toString('hex')}:${tag}:${encrypted}`;
+}
+
+function decryptApiKey(stored) {
+    try {
+        const key = getAiEncryptionKey();
+        const [ivHex, tagHex, encrypted] = stored.split(':');
+        const iv = Buffer.from(ivHex, 'hex');
+        const tag = Buffer.from(tagHex, 'hex');
+        const decipher = createDecipheriv('aes-256-gcm', key, iv);
+        decipher.setAuthTag(tag);
+        let decrypted = decipher.update(encrypted, 'hex', 'utf-8');
+        decrypted += decipher.final('utf-8');
+        return decrypted;
+    } catch {
+        return null;
+    }
+}
+
+function readAiConfig() {
+    try {
+        if (!existsSync(AI_CONFIG_PATH)) return {};
+        const raw = JSON.parse(readFileSync(AI_CONFIG_PATH, 'utf-8'));
+        // Decrypt the API key if it's encrypted
+        if (raw.apiKeyEncrypted) {
+            const decrypted = decryptApiKey(raw.apiKeyEncrypted);
+            if (decrypted) {
+                raw.apiKey = decrypted;
+            } else {
+                raw.apiKey = null; // Decryption failed (different machine?)
+            }
+            delete raw.apiKeyEncrypted;
+        }
+        return raw;
+    } catch {
+        return {};
+    }
+}
+
+function writeAiConfig(config) {
+    const dir = getRobinPathHome();
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    // Encrypt the API key before saving
+    const toSave = { ...config };
+    if (toSave.apiKey) {
+        toSave.apiKeyEncrypted = encryptApiKey(toSave.apiKey);
+        delete toSave.apiKey;
+    }
+    writeFileSync(AI_CONFIG_PATH, JSON.stringify(toSave, null, 2), 'utf-8');
+    if (platform() !== 'win32') {
+        try { chmodSync(AI_CONFIG_PATH, 0o600); } catch { /* ignore */ }
+    }
+}
+
+async function handleAiConfig(args) {
+    const sub = args[0];
+
+    if (sub === 'set-key') {
+        let key = args[1];
+        if (!key) {
+            // Interactive input — key won't appear in shell history or process list
+            const rl = createInterface({ input: process.stdin, output: process.stdout });
+            key = await new Promise((resolve) => {
+                // Disable echo for secure input
+                if (process.stdin.isTTY) {
+                    process.stdout.write('Enter your OpenRouter API key: ');
+                    process.stdin.setRawMode(true);
+                    let input = '';
+                    const onData = (ch) => {
+                        const c = ch.toString();
+                        if (c === '\n' || c === '\r') {
+                            process.stdin.setRawMode(false);
+                            process.stdin.removeListener('data', onData);
+                            process.stdout.write('\n');
+                            rl.close();
+                            resolve(input);
+                        } else if (c === '\u0003') { // Ctrl+C
+                            process.stdin.setRawMode(false);
+                            process.exit(0);
+                        } else if (c === '\u007f' || c === '\b') { // Backspace
+                            if (input.length > 0) {
+                                input = input.slice(0, -1);
+                                process.stdout.write('\b \b');
+                            }
+                        } else {
+                            input += c;
+                            process.stdout.write('*');
+                        }
+                    };
+                    process.stdin.on('data', onData);
+                } else {
+                    rl.question('Enter your OpenRouter API key: ', (answer) => {
+                        rl.close();
+                        resolve(answer.trim());
+                    });
+                }
+            });
+        }
+        if (!key || !key.trim()) {
+            console.error(color.red('Error:') + ' API key cannot be empty');
+            process.exit(2);
+        }
+        const config = readAiConfig();
+        config.apiKey = key.trim();
+        if (!config.provider) config.provider = 'openrouter';
+        if (!config.model) config.model = 'anthropic/claude-sonnet-4-20250514';
+        writeAiConfig(config);
+        log(color.green('API key saved.'));
+        log(`Provider: ${color.cyan(config.provider)}`);
+        log(`Model: ${color.cyan(config.model)}`);
+        log(`\nStart chatting with: ${color.cyan('robinpath')}`);
+    } else if (sub === 'set-model') {
+        const model = args[1];
+        if (!model) {
+            console.error(color.red('Error:') + ' Usage: robinpath ai config set-model <model-id>');
+            console.error('\nExamples:');
+            console.error('  anthropic/claude-sonnet-4-20250514');
+            console.error('  openai/gpt-4o');
+            console.error('  google/gemini-2.5-pro');
+            console.error('  deepseek/deepseek-chat');
+            process.exit(2);
+        }
+        const config = readAiConfig();
+        config.model = model;
+        writeAiConfig(config);
+        log(color.green('Model set:') + ` ${color.cyan(model)}`);
+    } else if (sub === 'show') {
+        const config = readAiConfig();
+        if (!config.apiKey) {
+            log('No AI configuration found.');
+            log(`\nSet up with: ${color.cyan('robinpath ai config set-key <openrouter-api-key>')}`);
+            return;
+        }
+        log('');
+        log(color.bold('  AI Configuration:'));
+        log(color.dim('  ' + '\u2500'.repeat(40)));
+        log(`  Provider:  ${color.cyan(config.provider || 'openrouter')}`);
+        log(`  Model:     ${color.cyan(config.model || 'anthropic/claude-sonnet-4-20250514')}`);
+        const masked = config.apiKey.length > 8
+            ? config.apiKey.slice(0, 5) + '\u2022'.repeat(Math.min(config.apiKey.length - 8, 20)) + config.apiKey.slice(-3)
+            : '\u2022\u2022\u2022\u2022';
+        log(`  API Key:   ${color.dim(masked)}`);
+        log('');
+    } else if (sub === 'remove') {
+        if (existsSync(AI_CONFIG_PATH)) {
+            unlinkSync(AI_CONFIG_PATH);
+            log(color.green('AI configuration removed.'));
+        } else {
+            log('No AI configuration found.');
+        }
+    } else {
+        console.error(color.red('Error:') + ' Usage: robinpath ai config <set-key|set-model|show|remove>');
+        console.error('');
+        console.error('  robinpath ai config set-key sk-or-...     Set OpenRouter API key');
+        console.error('  robinpath ai config set-model <model>     Set model (e.g. openai/gpt-4o)');
+        console.error('  robinpath ai config show                  Show current configuration');
+        console.error('  robinpath ai config remove                Remove configuration');
+        process.exit(2);
+    }
+}
+
+// AI tool definitions (OpenAI function calling format used by OpenRouter)
+const AI_TOOLS = [
+    {
+        type: 'function',
+        function: {
+            name: 'read_file',
+            description: 'Read the contents of a file from disk. Use this to understand existing code before modifying it.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    path: { type: 'string', description: 'The file path to read (relative or absolute)' },
+                },
+                required: ['path'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'write_file',
+            description: 'Create a new file or completely overwrite an existing file with new content.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    path: { type: 'string', description: 'The file path to write' },
+                    content: { type: 'string', description: 'The full file content to write' },
+                },
+                required: ['path', 'content'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'edit_file',
+            description: 'Edit a file by replacing a specific string with new content. The old_string must match exactly (including whitespace). Read the file first to get the exact content.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    path: { type: 'string', description: 'The file path to edit' },
+                    old_string: { type: 'string', description: 'The exact string to find and replace' },
+                    new_string: { type: 'string', description: 'The replacement string' },
+                },
+                required: ['path', 'old_string', 'new_string'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'run_script',
+            description: 'Execute a RobinPath script (.rp file) or inline code and return the output.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    code: { type: 'string', description: 'Inline RobinPath code to execute (use this OR file, not both)' },
+                    file: { type: 'string', description: 'Path to a .rp file to execute (use this OR code, not both)' },
+                },
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'list_files',
+            description: 'List files in a directory to understand the project structure.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    path: { type: 'string', description: 'Directory path to list (defaults to current directory)' },
+                    pattern: { type: 'string', description: 'Glob pattern to filter files (e.g. "*.rp")' },
+                },
+            },
+        },
+    },
+];
+
+function executeAiTool(name, args) {
+    try {
+        if (name === 'read_file') {
+            const filePath = resolve(args.path);
+            if (!existsSync(filePath)) {
+                return { error: `File not found: ${args.path}` };
+            }
+            const stat = statSync(filePath);
+            if (stat.size > 100000) {
+                return { error: `File too large (${(stat.size / 1024).toFixed(1)}KB). Try a smaller file.` };
+            }
+            const content = readFileSync(filePath, 'utf-8');
+            return { content, path: filePath, size: stat.size };
+        }
+
+        if (name === 'write_file') {
+            const filePath = resolve(args.path);
+            const dir = dirname(filePath);
+            if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+            writeFileSync(filePath, args.content, 'utf-8');
+            return { success: true, path: filePath, size: args.content.length };
+        }
+
+        if (name === 'edit_file') {
+            const filePath = resolve(args.path);
+            if (!existsSync(filePath)) {
+                return { error: `File not found: ${args.path}` };
+            }
+            const content = readFileSync(filePath, 'utf-8');
+            if (!content.includes(args.old_string)) {
+                return { error: 'old_string not found in file. Read the file first to get exact content.' };
+            }
+            const newContent = content.replace(args.old_string, args.new_string);
+            writeFileSync(filePath, newContent, 'utf-8');
+            return { success: true, path: filePath };
+        }
+
+        if (name === 'run_script') {
+            let script;
+            if (args.file) {
+                const filePath = resolve(args.file);
+                if (!existsSync(filePath)) {
+                    return { error: `File not found: ${args.file}` };
+                }
+                script = readFileSync(filePath, 'utf-8');
+            } else if (args.code) {
+                script = args.code;
+            } else {
+                return { error: 'Provide either code or file parameter' };
+            }
+
+            // Capture output by temporarily overriding console.log
+            const output = [];
+            const origLog = console.log;
+            console.log = (...a) => output.push(a.map(String).join(' '));
+            try {
+                const rp = new RobinPath();
+                for (const mod of nativeModules) {
+                    rp.registerModule(mod);
+                }
+                return rp.executeScript(script).then(result => {
+                    console.log = origLog;
+                    return { output: output.join('\n'), result };
+                }).catch(e => {
+                    console.log = origLog;
+                    return { error: e.message, output: output.join('\n') };
+                });
+            } catch (e) {
+                console.log = origLog;
+                return { error: e.message, output: output.join('\n') };
+            }
+        }
+
+        if (name === 'list_files') {
+            const dirPath = resolve(args.path || '.');
+            if (!existsSync(dirPath)) {
+                return { error: `Directory not found: ${args.path || '.'}` };
+            }
+            const entries = readdirSync(dirPath);
+            const files = [];
+            for (const entry of entries.slice(0, 100)) {
+                try {
+                    const full = join(dirPath, entry);
+                    const s = statSync(full);
+                    files.push({
+                        name: entry,
+                        type: s.isDirectory() ? 'directory' : 'file',
+                        size: s.isFile() ? s.size : undefined,
+                    });
+                } catch { /* skip */ }
+            }
+            if (args.pattern) {
+                const pat = args.pattern.replace(/\*/g, '.*').replace(/\?/g, '.');
+                const re = new RegExp('^' + pat + '$', 'i');
+                return { files: files.filter(f => re.test(f.name)), directory: dirPath };
+            }
+            return { files, directory: dirPath };
+        }
+
+        return { error: `Unknown tool: ${name}` };
+    } catch (e) {
+        return { error: e.message };
+    }
+}
+
+function buildRobinPathSystemPrompt() {
+    // Load installed (external) module info
+    const manifest = readModulesManifest();
+    const installedModuleNames = Object.keys(manifest);
+    const installedInfo = installedModuleNames.map(name => {
+        const mInfo = manifest[name];
+        let desc = '';
+        try {
+            const pkgPath = join(getModulePath(name), 'package.json');
+            if (existsSync(pkgPath)) {
+                const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+                desc = pkg.description || '';
+            }
+        } catch { /* ignore */ }
+        return `  ${name}@${mInfo.version}${desc ? ' \u2014 ' + desc : ''}`;
+    }).join('\n');
+
+    // Load native module info for context
+    const moduleInfo = nativeModules.map(m => {
+        const fns = Object.keys(m.functions);
+        const desc = m.moduleMetadata?.description || '';
+        // Include parameter info if available
+        const fnDetails = fns.map(fn => {
+            const meta = m.functionMetadata?.[fn];
+            if (meta?.params?.length) {
+                const params = meta.params.map(p => `${p.name}${p.required ? '' : '?'}: ${p.type}`).join(', ');
+                return `  ${fn}(${params})`;
+            }
+            return `  ${fn}`;
+        }).join('\n');
+        return `${m.name} \u2014 ${desc}\n${fnDetails}`;
+    }).join('\n\n');
+
+    return `You are RobinPath AI, an intelligent assistant built into the RobinPath CLI.
+You help users write, understand, debug, and modify RobinPath code.
+
+## CLI Commands Reference
+
+\`\`\`
+robinpath run <file.rp>       Run a .rp or .robin script
+robinpath <file.rp>           Shorthand: run a script directly
+robinpath repl                Start the language REPL
+robinpath add <pkg>           Install a module (e.g. robinpath add @robinpath/slack)
+robinpath remove <pkg>        Uninstall a module
+robinpath modules list        List installed modules
+robinpath modules upgrade     Upgrade all installed modules to latest
+robinpath search <query>      Search the module registry
+robinpath info                Show system/environment info
+robinpath info --json         Machine-readable system info
+robinpath init                Create a new robinpath.json project file
+robinpath publish             Publish your module to the registry
+robinpath audit               Check installed modules for issues
+robinpath doctor              Diagnose CLI installation issues
+robinpath start               Start an HTTP server (robinpath start -p 8080)
+robinpath test <file>         Run test files
+robinpath env set KEY=VALUE   Set a persistent environment variable
+robinpath env list            List environment variables
+robinpath ai config set-key   Set OpenRouter API key
+robinpath ai config set-model Set AI model
+robinpath ai config show      Show AI configuration
+robinpath -p "question"       Headless AI prompt (for scripting/app integration)
+\`\`\`
+
+File extensions: \`.rp\` and \`.robin\` are both recognized.
+
+## About RobinPath
+- RobinPath is a scripting language and CLI for automation, APIs, and data processing
+- Scripts run on Node.js — all scripts run server-side, NOT in the browser
+- RobinPath is synchronous by default but async operations (fetch, timers) are supported
+- Cannot use npm packages directly — use RobinPath modules from the registry
+- There is no hard file size limit — limited by available system memory
+- No TypeScript support — RobinPath is its own language with .rp/.robin files
+
+## RobinPath Language Syntax
+
+RobinPath is a scripting language for automation and data processing.
+
+\`\`\`
+# Variables
+set $x = 1
+$name = "Robin"
+
+# Output
+log "Hello " + $name
+
+# Module function calls
+set $result = math.add 1 2
+set $upper = string.upper "hello"
+
+# If/else
+if $x > 5
+  log "big"
+else
+  log "small"
+endif
+
+# For loops
+for $item in array.create 1 2 3
+  log $item
+endfor
+
+# Looping with do block
+set $i = 0
+do
+  log $i
+  $i = math.add $i 1
+enddo
+
+# Functions
+def greet $name
+  log "Hello " + $name
+enddef
+
+# Using functions
+greet "World"
+
+# External modules (auto-loaded when installed, no import needed)
+# Install with: robinpath add @robinpath/slack
+slack.send "#general" "Hello from RobinPath!"
+
+# Error handling (do/catch)
+do
+  set $data = file.read "missing.txt"
+catch $err
+  log "Error: " + $err
+enddo
+
+# Events
+on "myEvent" $data
+  log "Received: " + $data
+endon
+emit "myEvent" "hello"
+
+# Pipe operator
+set $result = "hello world" |> string.upper |> string.split " "
+
+# String interpolation
+log "Result: {$result}"
+
+# Comments
+# This is a comment
+\`\`\`
+
+## File Extensions
+.rp and .robin are both recognized.
+
+## Available Native Modules
+
+${moduleInfo}
+
+## External Modules
+Users can install modules from the registry:
+  robinpath add @robinpath/slack
+  robinpath add @robinpath/csv
+
+Then import and use:
+  import "@robinpath/slack"
+  slack.send "#channel" "message"
+
+## Installed External Modules
+${installedModuleNames.length > 0 ? `The user has ${installedModuleNames.length} external module(s) installed locally:\n${installedInfo}` : 'The user has no external modules installed yet.'}
+
+IMPORTANT: If the user asks about a module that is NOT in the native modules list above AND NOT in the installed list, they need to install it first. Tell them:
+  robinpath add @robinpath/<module-name>
+For example, if they ask about Slack but @robinpath/slack is not installed, say:
+  "First install it: robinpath add @robinpath/slack"
+
+## Your Capabilities
+You have tools to:
+1. **read_file** \u2014 Read files to understand existing code
+2. **write_file** \u2014 Create new files
+3. **edit_file** \u2014 Modify specific parts of existing files
+4. **run_script** \u2014 Execute RobinPath code to test it
+5. **list_files** \u2014 Explore the project structure
+
+## User Environment
+- Working directory: ${process.cwd()}
+- Platform: ${platform()}
+- RobinPath CLI version: ${CLI_VERSION}
+
+## Guidelines
+- When asked to create code, write idiomatic RobinPath using the available modules
+- When modifying files, always read them first to understand the current content
+- Show diffs or explain what you changed
+- Keep responses concise and focused
+- When showing code, use \`\`\`robinpath code blocks
+- If the user asks something unrelated to RobinPath, you can still help but focus on being useful
+- If the user needs a module that is not installed, tell them to install it with: robinpath add @robinpath/<name>
+- Never assume a module is available if it's not in the native or installed modules list
+- Run code when appropriate to verify it works`;
+}
+
+// Spinner animation for "thinking" state
+function createSpinner(text) {
+    const frames = ['\u280b', '\u2819', '\u2839', '\u2838', '\u283c', '\u2834', '\u2826', '\u2827', '\u2807', '\u280f'];
+    let i = 0;
+    const interval = setInterval(() => {
+        process.stdout.write(`\r${color.cyan(frames[i % frames.length])} ${color.dim(text)}`);
+        i++;
+    }, 80);
+    return {
+        stop(clearLine = true) {
+            clearInterval(interval);
+            if (clearLine) process.stdout.write('\r' + ' '.repeat(text.length + 4) + '\r');
+        },
+    };
+}
+
+// Format AI response with basic markdown rendering
+function formatAiResponse(text) {
+    const lines = text.split('\n');
+    let inCodeBlock = false;
+    const formatted = [];
+
+    for (const line of lines) {
+        if (line.startsWith('```')) {
+            inCodeBlock = !inCodeBlock;
+            if (inCodeBlock) {
+                formatted.push(color.dim('\u2500'.repeat(Math.min(process.stdout.columns || 60, 60))));
+            } else {
+                formatted.push(color.dim('\u2500'.repeat(Math.min(process.stdout.columns || 60, 60))));
+            }
+            continue;
+        }
+
+        if (inCodeBlock) {
+            formatted.push('  ' + color.cyan(line));
+            continue;
+        }
+
+        // Bold: **text**
+        let formatted_line = line.replace(/\*\*(.+?)\*\*/g, (_, t) => color.bold(t));
+        // Inline code: `text`
+        formatted_line = formatted_line.replace(/`([^`]+)`/g, (_, t) => color.cyan(t));
+        // Headers
+        if (formatted_line.startsWith('## ')) {
+            formatted_line = '\n' + color.bold(formatted_line.slice(3));
+        } else if (formatted_line.startsWith('# ')) {
+            formatted_line = '\n' + color.bold(formatted_line.slice(2));
+        }
+        // Bullet points
+        if (formatted_line.startsWith('- ')) {
+            formatted_line = '  \u2022 ' + formatted_line.slice(2);
+        }
+
+        formatted.push(formatted_line);
+    }
+
+    return formatted.join('\n');
+}
+
+/**
+ * Fetch RAG context from the AI brain for a given prompt.
+ * Returns relevant module docs and examples to inject into the system prompt.
+ * Falls back gracefully if the brain is unreachable.
+ */
+async function fetchBrainContext(prompt) {
+    try {
+        const response = await fetch(`${AI_BRAIN_URL}/docs/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                prompt,
+                topK: 10,
+                model: 'robinpath-default',
+            }),
+            signal: AbortSignal.timeout(15000),
+        });
+
+        if (!response.ok) {
+            logVerbose('Brain returned', response.status);
+            return null;
+        }
+
+        const data = await response.json();
+        return {
+            code: data.code || '',
+            sources: data.sources || [],
+            context: data.context || {},
+        };
+    } catch (err) {
+        logVerbose('Brain unreachable:', err.message);
+        return null;
+    }
+}
+
+/**
+ * Stream brain response via SSE — prints tokens as they arrive.
+ * Returns the full accumulated text when done.
+ */
+async function fetchBrainStream(prompt, { onToken } = {}) {
+    try {
+        const response = await fetch(`${AI_BRAIN_URL}/docs/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                prompt,
+                topK: 10,
+                model: 'robinpath-default',
+                stream: true,
+            }),
+            signal: AbortSignal.timeout(60000),
+        });
+
+        if (!response.ok) {
+            logVerbose('Brain stream returned', response.status);
+            return null;
+        }
+
+        let fullText = '';
+        let metadata = null;
+        let doneData = null;
+
+        // Parse SSE stream
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+
+            // Process complete SSE events (separated by double newlines)
+            const events = buffer.split('\n\n');
+            buffer = events.pop() || ''; // Keep incomplete last chunk
+
+            for (const event of events) {
+                if (!event.trim()) continue;
+
+                let eventType = '';
+                let eventData = '';
+                for (const line of event.split('\n')) {
+                    if (line.startsWith('event: ')) eventType = line.slice(7);
+                    else if (line.startsWith('data: ')) eventData = line.slice(6);
+                }
+
+                if (!eventType || !eventData) continue;
+
+                try {
+                    const parsed = JSON.parse(eventData);
+
+                    if (eventType === 'metadata') {
+                        metadata = parsed;
+                    } else if (eventType === 'text_delta' || eventType === 'retry_delta') {
+                        const delta = parsed.delta || '';
+                        fullText += delta;
+                        if (onToken) onToken(delta);
+                    } else if (eventType === 'validation') {
+                        // Validation event during retry — could show a brief indicator
+                        if (parsed.retrying && onToken) {
+                            onToken('\n[validating...]\n');
+                            fullText = ''; // Reset — retry will replace
+                        }
+                    } else if (eventType === 'done') {
+                        doneData = parsed;
+                    } else if (eventType === 'error') {
+                        logVerbose('Brain stream error:', parsed.message);
+                    }
+                } catch {
+                    // Skip malformed JSON
+                }
+            }
+        }
+
+        return {
+            code: fullText,
+            sources: metadata?.sources || [],
+            context: metadata?.context || {},
+            validation: doneData?.validation || null,
+            usage: doneData?.usage || null,
+        };
+    } catch (err) {
+        logVerbose('Brain stream unreachable:', err.message);
+        return null;
+    }
+}
+
+// ============================================================================
+// Smart Context Builder — gathers local + brain context before AI calls
+// ============================================================================
+
+/**
+ * Resolve which modules a prompt needs via the brain's vector search.
+ * Returns module names, functions, and relevance scores.
+ * Fast — no LLM call, just embedding + vector similarity.
+ */
+async function resolveBrainModules(prompt) {
+    try {
+        const response = await fetch(`${AI_BRAIN_URL}/docs/resolve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt, topK: 10 }),
+            signal: AbortSignal.timeout(5000),
+        });
+
+        if (!response.ok) {
+            logVerbose('Brain resolve returned', response.status);
+            return null;
+        }
+
+        const data = await response.json();
+        return data.modules || [];
+    } catch (err) {
+        logVerbose('Brain resolve unreachable:', err.message);
+        return null;
+    }
+}
+
+/**
+ * Build local context from the user's environment:
+ * - Installed modules (names + versions)
+ * - Native modules (names only)
+ * - Current working directory
+ * - Project config (robinpath.json)
+ * - Relevant local files (.rp scripts, data files)
+ * - Environment variable names (not values)
+ */
+function buildLocalContext() {
+    const cwd = process.cwd();
+    const ctx = {
+        cwd,
+        platform: platform(),
+        cliVersion: CLI_VERSION,
+        installedModules: [],
+        nativeModuleNames: [],
+        projectConfig: null,
+        localFiles: [],
+        envVarNames: [],
+    };
+
+    // Installed modules
+    const manifest = readModulesManifest();
+    ctx.installedModules = Object.entries(manifest).map(([name, info]) => ({
+        name,
+        version: info.version,
+    }));
+
+    // Native modules (just names)
+    ctx.nativeModuleNames = nativeModules.map(m => m.name);
+
+    // Project config
+    try {
+        const projectPath = join(cwd, 'robinpath.json');
+        if (existsSync(projectPath)) {
+            ctx.projectConfig = JSON.parse(readFileSync(projectPath, 'utf-8'));
+        }
+    } catch { /* ignore */ }
+
+    // Relevant local files (scripts + data, max 20)
+    try {
+        const entries = readdirSync(cwd, { withFileTypes: true });
+        const relevant = [];
+        for (const entry of entries) {
+            if (entry.isFile()) {
+                const ext = entry.name.split('.').pop()?.toLowerCase();
+                if (['rp', 'robin', 'csv', 'json', 'txt', 'sql', 'db'].includes(ext)) {
+                    try {
+                        const st = statSync(join(cwd, entry.name));
+                        relevant.push({ name: entry.name, size: st.size });
+                    } catch { /* ignore */ }
+                }
+            }
+        }
+        ctx.localFiles = relevant.slice(0, 20);
+    } catch { /* ignore */ }
+
+    // Environment variable names (from robinpath env, not values)
+    try {
+        const envPath = join(getRobinPathHome(), 'env');
+        if (existsSync(envPath)) {
+            const lines = readFileSync(envPath, 'utf-8').split('\n');
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed || trimmed.startsWith('#')) continue;
+                const eqIdx = trimmed.indexOf('=');
+                if (eqIdx > 0) {
+                    ctx.envVarNames.push(trimmed.slice(0, eqIdx));
+                }
+            }
+        }
+    } catch { /* ignore */ }
+
+    return ctx;
+}
+
+/**
+ * Build an enriched prompt that combines:
+ * 1. Brain's module resolution (what modules match the prompt)
+ * 2. Local context (what's installed, project files, env)
+ * 3. The original user prompt
+ *
+ * This is what gets sent to the LLM — focused, relevant context only.
+ */
+async function buildEnrichedPrompt(prompt) {
+    const [resolved, local] = await Promise.all([
+        resolveBrainModules(prompt),
+        Promise.resolve(buildLocalContext()),
+    ]);
+
+    const installedNames = new Set([
+        ...local.installedModules.map(m => m.name.replace(/^@robinpath\//, '')),
+        ...local.nativeModuleNames,
+    ]);
+
+    // Modules that overlap with built-in language features (not external deps)
+    // Populated dynamically from native module list + core language keywords
+    const coreOverlaps = new Set(local.nativeModuleNames);
+    for (const mod of nativeModules) {
+        // Any native function that shares a name with a resolved module
+        for (const fn of Object.keys(mod.functions || {})) {
+            coreOverlaps.add(fn);
+        }
+    }
+
+    const sections = [];
+
+    // Section 1: Module availability
+    if (resolved && resolved.length > 0) {
+        // Filter: score > 0.76, and exclude modules that overlap with core language features
+        const relevant = resolved.filter(m => m.score > 0.76 && !coreOverlaps.has(m.name));
+        if (relevant.length > 0) {
+            const moduleLines = relevant.map(m => {
+                const shortName = m.name;
+                const fullName = `@robinpath/${shortName}`;
+                const isInstalled = installedNames.has(shortName);
+                const fns = m.functions.length > 0 ? m.functions.join(', ') : 'see docs';
+                const desc = m.description ? ` — ${m.description}` : '';
+                return `  ${fullName} [${isInstalled ? '+' : '-'}]${desc}\n    ${fns}`;
+            });
+            sections.push(`Modules:\n${moduleLines.join('\n')}`);
+        }
+
+        // Collect missing modules
+        const missing = relevant
+            .filter(m => !installedNames.has(m.name))
+            .map(m => `@robinpath/${m.name}`);
+        if (missing.length > 0) {
+            sections.push(`Not installed: ${missing.join(', ')}`);
+        }
+    }
+
+    // Section 2: Installed modules
+    if (local.installedModules.length > 0) {
+        sections.push(`Installed: ${local.installedModules.map(m => m.name).join(', ')}`);
+    }
+
+    // Section 3: Local files
+    if (local.localFiles.length > 0) {
+        sections.push(`Files: ${local.localFiles.map(f => `${f.name} (${formatFileSize(f.size)})`).join(', ')}`);
+    }
+
+    // Section 4: Environment variables
+    if (local.envVarNames.length > 0) {
+        sections.push(`Env: ${local.envVarNames.join(', ')}`);
+    }
+
+    // Section 5: Project
+    if (local.projectConfig?.name) {
+        sections.push(`Project: ${local.projectConfig.name}`);
+    }
+
+    // Build the enriched prompt
+    const contextBlock = sections.length > 0
+        ? `[Context]\n${sections.join('\n\n')}\n[/Context]\n\n`
+        : '';
+
+    return {
+        enrichedPrompt: `${contextBlock}${prompt}`,
+        resolved,
+        local,
+        missingModules: resolved
+            ? resolved.filter(m => m.score > 0.76 && !installedNames.has(m.name) && !coreOverlaps.has(m.name)).map(m => `@robinpath/${m.name}`)
+            : [],
+    };
+}
+
+function formatFileSize(bytes) {
+    if (bytes < 1024) return `${bytes}B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+// ============================================================================
+// OpenRouter LLM calls
+// ============================================================================
+
+async function callOpenRouter(apiKey, model, messages, tools) {
+    const body = {
+        model,
+        messages,
+        stream: true,
+    };
+    if (tools && tools.length > 0) {
+        body.tools = tools;
+        body.tool_choice = 'auto';
+    }
+
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+            'HTTP-Referer': 'https://robinpath.com',
+            'X-Title': 'RobinPath CLI',
+        },
+        body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+        const err = await response.text().catch(() => '');
+        if (response.status === 401) {
+            throw new Error('Invalid API key. Run: robinpath ai config set-key <your-key>');
+        }
+        throw new Error(`OpenRouter error (${response.status}): ${err.slice(0, 200)}`);
+    }
+
+    return response;
+}
+
+async function processAiStream(response) {
+    const reader = response.body.getReader ? response.body.getReader() : null;
+    if (!reader) {
+        // Fallback: non-streaming
+        const json = await response.json();
+        const msg = json.choices?.[0]?.message;
+        const usage = json.usage || {};
+        return { content: msg?.content || '', toolCalls: msg?.tool_calls || [], usage };
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let content = '';
+    const toolCalls = {};
+    let isFirstContent = true;
+    let usage = {};
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const data = line.slice(6).trim();
+            if (data === '[DONE]') continue;
+
+            try {
+                const parsed = JSON.parse(data);
+                const delta = parsed.choices?.[0]?.delta;
+                if (!delta) continue;
+
+                // Text content
+                if (delta.content) {
+                    if (isFirstContent) {
+                        process.stdout.write('\n');
+                        isFirstContent = false;
+                    }
+                    content += delta.content;
+                    process.stdout.write(delta.content);
+                }
+
+                // Tool calls (accumulated across chunks)
+                if (delta.tool_calls) {
+                    for (const tc of delta.tool_calls) {
+                        const idx = tc.index ?? 0;
+                        if (!toolCalls[idx]) {
+                            toolCalls[idx] = { id: tc.id || '', function: { name: '', arguments: '' } };
+                        }
+                        if (tc.id) toolCalls[idx].id = tc.id;
+                        if (tc.function?.name) toolCalls[idx].function.name += tc.function.name;
+                        if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
+                    }
+                }
+
+                // Usage info (usually in the final chunk)
+                if (parsed.usage) {
+                    usage = parsed.usage;
+                }
+            } catch { /* skip malformed JSON */ }
+        }
+    }
+
+    if (content) process.stdout.write('\n');
+
+    return {
+        content,
+        toolCalls: Object.values(toolCalls),
+        usage,
+    };
+}
+
+async function startAiREPL(initialPrompt, resumeSessionId) {
+    const config = readAiConfig();
+    if (!config.apiKey) {
+        log('');
+        log(color.bold('  RobinPath AI \u2014 Setup Required'));
+        log(color.dim('  ' + '\u2500'.repeat(40)));
+        log('');
+        log('  To use RobinPath AI, you need an OpenRouter API key.');
+        log('');
+        log('  1. Get a key at ' + color.cyan('https://openrouter.ai/keys'));
+        log('  2. Run: ' + color.cyan('robinpath ai config set-key <your-key>'));
+        log('');
+        return;
+    }
+
+    const model = config.model || 'anthropic/claude-sonnet-4-20250514';
+    const provider = config.provider || 'openrouter';
+    const modelShort = model.includes('/') ? model.split('/').pop() : model;
+
+    // Session management
+    let sessionId = resumeSessionId || randomUUID().slice(0, 8);
+    let sessionName = `session-${new Date().toISOString().slice(0, 10)}`;
+
+    // Token usage tracking
+    const usage = createUsageTracker();
+
+    const systemPrompt = buildRobinPathSystemPrompt();
+    const conversationMessages = [
+        { role: 'system', content: systemPrompt },
+    ];
+
+    // Resume existing session
+    if (resumeSessionId) {
+        const session = loadSession(resumeSessionId);
+        if (session) {
+            sessionName = session.name;
+            // Restore conversation messages
+            for (const msg of session.messages) {
+                conversationMessages.push(msg);
+            }
+            if (session.usage) {
+                usage.promptTokens = session.usage.promptTokens || 0;
+                usage.completionTokens = session.usage.completionTokens || 0;
+                usage.totalTokens = session.usage.totalTokens || 0;
+                usage.requests = session.usage.requests || 0;
+            }
+            log('');
+            log(color.green(`  Resumed session: ${color.bold(sessionName)}`));
+            log(color.dim(`  ${session.messages.length} messages restored, ${usage.requests} prior requests`));
+        } else {
+            log(color.red(`  Session '${resumeSessionId}' not found.`));
+        }
+    }
+
+    // Welcome banner
+    log('');
+    log(color.dim('  \u256d' + '\u2500'.repeat(50) + '\u256e'));
+    log(color.dim('  \u2502') + color.bold('  RobinPath AI') + ' '.repeat(36) + color.dim('\u2502'));
+    log(color.dim('  \u2502') + `  Model: ${color.cyan(modelShort)}` + ' '.repeat(Math.max(0, 41 - modelShort.length)) + color.dim('\u2502'));
+    log(color.dim('  \u2502') + `  Type ${color.dim('exit')} to quit, ${color.dim('/help')} for commands` + ' '.repeat(12) + color.dim('\u2502'));
+    log(color.dim('  \u2570' + '\u2500'.repeat(50) + '\u256f'));
+    log('');
+
+    const history = [];
+    try {
+        const histPath = join(getRobinPathHome(), 'ai-history');
+        if (existsSync(histPath)) {
+            const lines = readFileSync(histPath, 'utf-8').split('\n').filter(Boolean);
+            history.push(...lines.slice(-500));
+        }
+    } catch { /* ignore */ }
+
+    const rl = createInterface({
+        input: process.stdin,
+        output: process.stdout,
+        prompt: color.cyan('> '),
+        history,
+        historySize: 500,
+    });
+
+    function saveHistory(line) {
+        try {
+            const histPath = join(getRobinPathHome(), 'ai-history');
+            appendFileSync(histPath, line + '\n', 'utf-8');
+        } catch { /* ignore */ }
+    }
+
+    // If initial prompt was provided (rp ai "question"), simulate input
+    if (initialPrompt) {
+        setTimeout(() => rl.write(initialPrompt + '\n'), 50);
+    }
+
+    rl.prompt();
+
+    rl.on('line', async (line) => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+            rl.prompt();
+            return;
+        }
+
+        if (trimmed === 'exit' || trimmed === 'quit' || trimmed === '.exit') {
+            log(color.dim('\nGoodbye!'));
+            process.exit(0);
+        }
+
+        if (trimmed === '/help') {
+            log('');
+            log(color.bold('  Commands:'));
+            log(color.dim('  ── Conversation ──'));
+            log('  /clear         Clear conversation history');
+            log('  /compact       Trim conversation to last 10 messages');
+            log(color.dim('  ── Sessions ──'));
+            log('  /save [name]   Save current session');
+            log('  /sessions      List saved sessions');
+            log('  /resume <id>   Resume a saved session');
+            log('  /delete <id>   Delete a saved session');
+            log(color.dim('  ── Info ──'));
+            log('  /model         Show current model');
+            log('  /model <id>    Switch model');
+            log('  /tools         List available tools');
+            log('  /modules       Show installed modules');
+            log('  /context       Show what the AI knows about your setup');
+            log('  /usage         Show token usage this session');
+            log('  /scan          Scan project files for AI context');
+            log(color.dim('  ──'));
+            log('  exit           Exit AI mode');
+            log('');
+            rl.prompt();
+            return;
+        }
+
+        if (trimmed === '/clear') {
+            conversationMessages.length = 1; // Keep system prompt
+            log(color.green('Conversation cleared.'));
+            rl.prompt();
+            return;
+        }
+
+        if (trimmed === '/model') {
+            log(`Current model: ${color.cyan(model)}`);
+            rl.prompt();
+            return;
+        }
+
+        if (trimmed.startsWith('/model ')) {
+            const newModel = trimmed.slice(7).trim();
+            config.model = newModel;
+            writeAiConfig(config);
+            log(color.green('Model changed:') + ` ${color.cyan(newModel)}`);
+            log(color.dim('(takes effect on next message)'));
+            rl.prompt();
+            return;
+        }
+
+        if (trimmed === '/tools') {
+            log('');
+            log(color.bold('  Available tools:'));
+            for (const tool of AI_TOOLS) {
+                log(`  ${color.cyan(tool.function.name.padEnd(15))} ${tool.function.description.split('.')[0]}`);
+            }
+            log('');
+            rl.prompt();
+            return;
+        }
+
+        if (trimmed === '/modules') {
+            const mf = readModulesManifest();
+            const names = Object.keys(mf);
+            log('');
+            log(color.bold(`  Native modules (${nativeModules.length}):`));
+            log('  ' + nativeModules.map(m => color.cyan(m.name)).join(', '));
+            log('');
+            if (names.length > 0) {
+                log(color.bold(`  Installed modules (${names.length}):`));
+                for (const n of names) {
+                    log(`  ${color.cyan(n)}@${color.dim(mf[n].version)}`);
+                }
+            } else {
+                log(color.bold('  Installed modules:') + color.dim(' (none)'));
+                log('  Install with: ' + color.cyan('robinpath add @robinpath/<name>'));
+            }
+            log('');
+            rl.prompt();
+            return;
+        }
+
+        if (trimmed === '/context') {
+            const mf = readModulesManifest();
+            const installedNames = Object.keys(mf);
+            const msgCount = conversationMessages.length - 1; // minus system prompt
+            log('');
+            log(color.bold('  AI Context:'));
+            log(`  Model:              ${color.cyan(readAiConfig().model || model)}`);
+            log(`  Working dir:        ${color.cyan(process.cwd())}`);
+            log(`  Platform:           ${platform()}`);
+            log(`  CLI version:        ${CLI_VERSION}`);
+            log(`  Native modules:     ${nativeModules.length}`);
+            log(`  Installed modules:  ${installedNames.length}${installedNames.length > 0 ? ' (' + installedNames.map(n => n.replace('@robinpath/', '')).join(', ') + ')' : ''}`);
+            log(`  Conversation:       ${msgCount} message${msgCount !== 1 ? 's' : ''}`);
+            log(`  Brain:              ${AI_BRAIN_URL}`);
+            log('');
+            rl.prompt();
+            return;
+        }
+
+        if (trimmed === '/compact') {
+            // Keep system prompt + last 10 messages (5 exchanges)
+            if (conversationMessages.length > 11) {
+                const system = conversationMessages[0];
+                const recent = conversationMessages.slice(-10);
+                conversationMessages.length = 0;
+                conversationMessages.push(system, ...recent);
+                log(color.green(`Conversation trimmed to ${recent.length} recent messages.`));
+            } else {
+                log(color.dim('Conversation is already short — nothing to compact.'));
+            }
+            rl.prompt();
+            return;
+        }
+
+        // --- Session commands ---
+        if (trimmed === '/save' || trimmed.startsWith('/save ')) {
+            const customName = trimmed.slice(5).trim();
+            if (customName) sessionName = customName;
+            saveSession(sessionId, sessionName, conversationMessages, usage);
+            log(color.green(`Session saved: ${color.bold(sessionName)} (${sessionId})`));
+            log(color.dim(`  ${conversationMessages.length - 1} messages, ${usage.totalTokens} tokens`));
+            rl.prompt();
+            return;
+        }
+
+        if (trimmed === '/sessions') {
+            const sessions = listSessions();
+            log('');
+            if (sessions.length === 0) {
+                log(color.dim('  No saved sessions. Use /save to save the current conversation.'));
+            } else {
+                log(color.bold(`  Saved Sessions (${sessions.length}):`));
+                for (const s of sessions.slice(0, 20)) {
+                    const active = s.id === sessionId ? color.green(' \u25c0 current') : '';
+                    const age = Math.round((Date.now() - new Date(s.updated).getTime()) / 60000);
+                    const ageStr = age < 60 ? `${age}m ago` : age < 1440 ? `${Math.round(age/60)}h ago` : `${Math.round(age/1440)}d ago`;
+                    log(`  ${color.cyan(s.id)}  ${s.name}  ${color.dim(`${s.messages} msgs, ${ageStr}`)}${active}`);
+                }
+                log('');
+                log(color.dim('  Resume with: /resume <id>'));
+            }
+            log('');
+            rl.prompt();
+            return;
+        }
+
+        if (trimmed.startsWith('/resume ')) {
+            const targetId = trimmed.slice(8).trim();
+            const session = loadSession(targetId);
+            if (!session) {
+                log(color.red(`Session '${targetId}' not found.`));
+            } else {
+                sessionId = session.id;
+                sessionName = session.name;
+                // Rebuild conversation
+                conversationMessages.length = 0;
+                conversationMessages.push({ role: 'system', content: systemPrompt });
+                for (const msg of session.messages) {
+                    conversationMessages.push(msg);
+                }
+                if (session.usage) {
+                    usage.promptTokens = session.usage.promptTokens || 0;
+                    usage.completionTokens = session.usage.completionTokens || 0;
+                    usage.totalTokens = session.usage.totalTokens || 0;
+                    usage.requests = session.usage.requests || 0;
+                }
+                log(color.green(`Resumed: ${color.bold(sessionName)}`));
+                log(color.dim(`  ${session.messages.length} messages restored`));
+            }
+            rl.prompt();
+            return;
+        }
+
+        if (trimmed.startsWith('/delete ')) {
+            const targetId = trimmed.slice(8).trim();
+            if (deleteSession(targetId)) {
+                log(color.green(`Session '${targetId}' deleted.`));
+            } else {
+                log(color.red(`Session '${targetId}' not found.`));
+            }
+            rl.prompt();
+            return;
+        }
+
+        // --- Usage tracking ---
+        if (trimmed === '/usage') {
+            log('');
+            log(color.bold('  Token Usage (this session):'));
+            log(`  Prompt tokens:     ${usage.promptTokens.toLocaleString()}`);
+            log(`  Completion tokens: ${usage.completionTokens.toLocaleString()}`);
+            log(`  Total tokens:      ${color.cyan(usage.totalTokens.toLocaleString())}`);
+            log(`  API requests:      ${usage.requests}`);
+            log(`  Messages:          ${conversationMessages.length - 1}`);
+            log('');
+            rl.prompt();
+            return;
+        }
+
+        // --- Scan project files ---
+        if (trimmed === '/scan') {
+            const spinner = createSpinner('Scanning project...');
+            try {
+                const cwd = process.cwd();
+                const entries = readdirSync(cwd);
+                const rpFiles = [];
+                const otherFiles = [];
+                const dirs = [];
+
+                for (const entry of entries.slice(0, 200)) {
+                    try {
+                        const full = join(cwd, entry);
+                        const s = statSync(full);
+                        if (s.isDirectory()) {
+                            if (!['node_modules', '.git', '.robinpath', '__pycache__'].includes(entry)) {
+                                dirs.push(entry);
+                            }
+                        } else if (entry.endsWith('.rp') || entry.endsWith('.robin')) {
+                            rpFiles.push({ name: entry, size: s.size });
+                        } else if (entry.match(/\.(json|yaml|yml|toml|env|md|txt|csv|js|ts)$/i)) {
+                            otherFiles.push({ name: entry, size: s.size });
+                        }
+                    } catch { /* skip */ }
+                }
+
+                // Scan subdirectories one level deep for .rp files
+                for (const dir of dirs.slice(0, 20)) {
+                    try {
+                        const subEntries = readdirSync(join(cwd, dir));
+                        for (const sub of subEntries) {
+                            if (sub.endsWith('.rp') || sub.endsWith('.robin')) {
+                                rpFiles.push({ name: `${dir}/${sub}`, size: statSync(join(cwd, dir, sub)).size });
+                            }
+                        }
+                    } catch { /* skip */ }
+                }
+
+                spinner.stop();
+
+                // Build context and inject into conversation
+                let scanContext = `[Project Scan — ${cwd}]\n`;
+                scanContext += `Directories: ${dirs.join(', ') || '(none)'}\n`;
+                if (rpFiles.length > 0) {
+                    scanContext += `\nRobinPath files (${rpFiles.length}):\n`;
+                    for (const f of rpFiles.slice(0, 30)) {
+                        scanContext += `  ${f.name} (${(f.size/1024).toFixed(1)}KB)\n`;
+                        // Auto-read small .rp files
+                        if (f.size < 5000) {
+                            try {
+                                const content = readFileSync(join(cwd, f.name), 'utf-8');
+                                scanContext += `  --- content ---\n${content}\n  --- end ---\n`;
+                            } catch { /* skip */ }
+                        }
+                    }
+                }
+                if (otherFiles.length > 0) {
+                    scanContext += `\nOther files: ${otherFiles.map(f => f.name).join(', ')}\n`;
+                }
+                // Read robinpath.json if exists
+                const rpJson = join(cwd, 'robinpath.json');
+                if (existsSync(rpJson)) {
+                    try {
+                        scanContext += `\nrobinpath.json:\n${readFileSync(rpJson, 'utf-8')}\n`;
+                    } catch { /* skip */ }
+                }
+                scanContext += `[End Project Scan]`;
+
+                conversationMessages.push({
+                    role: 'user',
+                    content: scanContext,
+                });
+                conversationMessages.push({
+                    role: 'assistant',
+                    content: `I've scanned your project. I can see ${rpFiles.length} RobinPath file(s), ${dirs.length} directories, and ${otherFiles.length} other files. I've loaded the contents of small .rp files into context. How can I help?`,
+                });
+
+                log('');
+                log(color.bold(`  Project scanned: ${cwd}`));
+                if (rpFiles.length > 0) {
+                    log(`  RobinPath files: ${color.cyan(String(rpFiles.length))}`);
+                    for (const f of rpFiles.slice(0, 10)) {
+                        log(color.dim(`    ${f.name}`));
+                    }
+                    if (rpFiles.length > 10) log(color.dim(`    ... and ${rpFiles.length - 10} more`));
+                }
+                if (dirs.length > 0) log(`  Directories: ${dirs.join(', ')}`);
+                log(color.green('  Context loaded. The AI now knows your project structure.'));
+                log('');
+            } catch (err) {
+                spinner.stop();
+                log(color.red(`  Scan error: ${err.message}`));
+            }
+            rl.prompt();
+            return;
+        }
+
+        saveHistory(trimmed);
+
+        const activeModel = readAiConfig().model || model;
+
+        // Fetch RAG context from AI brain (runs in parallel with user seeing spinner)
+        let spinner = createSpinner('Thinking...');
+
+        try {
+            // Get brain context for the user's question
+            const brainResult = await fetchBrainContext(trimmed);
+            if (brainResult && brainResult.code) {
+                // Inject brain's RAG knowledge as context
+                conversationMessages.push({
+                    role: 'user',
+                    content: `[RobinPath Knowledge Base]\nHere is relevant context from the RobinPath documentation about this topic:\n\n${brainResult.code}\n\n[End Knowledge Base]\n\nNow here is my actual question/request:\n${trimmed}`,
+                });
+                logVerbose(`Brain context: ${brainResult.context?.documentsUsed || 0} docs, intent: ${brainResult.context?.intent || 'unknown'}`);
+            } else {
+                // No brain context available, just add the raw user message
+                conversationMessages.push({ role: 'user', content: trimmed });
+            }
+
+            for (let loopCount = 0; loopCount < 15; loopCount++) {
+                const response = await callOpenRouter(config.apiKey, activeModel, conversationMessages, AI_TOOLS);
+                spinner.stop();
+
+                const result = await processAiStream(response);
+
+                // Track usage
+                if (result.usage) {
+                    usage.promptTokens += result.usage.prompt_tokens || 0;
+                    usage.completionTokens += result.usage.completion_tokens || 0;
+                    usage.totalTokens += (result.usage.prompt_tokens || 0) + (result.usage.completion_tokens || 0);
+                    usage.requests++;
+                }
+
+                // If no tool calls, we're done — save the assistant message
+                if (result.toolCalls.length === 0) {
+                    if (result.content) {
+                        conversationMessages.push({ role: 'assistant', content: result.content });
+
+                        // Auto-detect module install suggestions
+                        const installMatch = result.content.match(/robinpath add (@robinpath\/[\w-]+)/g);
+                        if (installMatch) {
+                            const manifest = readModulesManifest();
+                            for (const match of installMatch) {
+                                const pkg = match.replace('robinpath add ', '');
+                                if (!manifest[pkg]) {
+                                    log('');
+                                    log(color.yellow(`  \u26a1 Module ${color.cyan(pkg)} is not installed.`));
+                                    log(color.dim(`     Run: ${color.cyan(match)}`));
+                                }
+                            }
+                        }
+                    }
+                    break;
+                }
+
+                // Assistant message with tool calls
+                conversationMessages.push({
+                    role: 'assistant',
+                    content: result.content || null,
+                    tool_calls: result.toolCalls,
+                });
+
+                // Execute each tool call
+                for (const tc of result.toolCalls) {
+                    const fnName = tc.function.name;
+                    let fnArgs = {};
+                    try { fnArgs = JSON.parse(tc.function.arguments); } catch { /* ignore */ }
+
+                    // Show tool activity with better formatting
+                    const toolIcons = {
+                        read_file: '\u{1F4C4}',
+                        write_file: '\u{1F4DD}',
+                        edit_file: '\u270F\uFE0F',
+                        run_script: '\u25B6\uFE0F',
+                        list_files: '\u{1F4C1}',
+                    };
+                    const toolLabels = {
+                        read_file: `Reading ${fnArgs.path}`,
+                        write_file: `Writing ${fnArgs.path}`,
+                        edit_file: `Editing ${fnArgs.path}`,
+                        run_script: 'Running script...',
+                        list_files: `Listing ${fnArgs.path || '.'}`,
+                    };
+                    log(color.dim(`  ${toolIcons[fnName] || '\u25b6'} ${toolLabels[fnName] || fnName}`));
+
+                    let toolResult = executeAiTool(fnName, fnArgs);
+                    if (toolResult && typeof toolResult.then === 'function') {
+                        toolResult = await toolResult;
+                    }
+
+                    // Show brief result summary
+                    if (toolResult && !toolResult.error) {
+                        if (fnName === 'read_file' && toolResult.size) {
+                            log(color.dim(`    \u2514 ${(toolResult.size/1024).toFixed(1)}KB read`));
+                        } else if (fnName === 'write_file' && toolResult.success) {
+                            log(color.dim(`    \u2514 ${(toolResult.size/1024).toFixed(1)}KB written`));
+                        } else if (fnName === 'edit_file' && toolResult.success) {
+                            log(color.dim(`    \u2514 edit applied`));
+                        } else if (fnName === 'run_script' && toolResult.output) {
+                            const lines = toolResult.output.split('\n');
+                            const preview = lines.slice(0, 3).join('\n    ');
+                            log(color.dim(`    \u2514 ${preview}${lines.length > 3 ? '\n    ...' : ''}`));
+                        } else if (fnName === 'list_files' && toolResult.files) {
+                            log(color.dim(`    \u2514 ${toolResult.files.length} items`));
+                        }
+                    } else if (toolResult?.error) {
+                        log(color.red(`    \u2514 Error: ${toolResult.error.slice(0, 80)}`));
+                    }
+
+                    conversationMessages.push({
+                        role: 'tool',
+                        tool_call_id: tc.id,
+                        content: JSON.stringify(toolResult),
+                    });
+                }
+
+                // Show spinner for the follow-up call
+                spinner = createSpinner('Processing...');
+            }
+        } catch (err) {
+            spinner.stop();
+            log('');
+            console.error(color.red('Error:') + ` ${err.message}`);
+        }
+
+        log('');
+        rl.prompt();
+    });
+
+    function exitWithSave() {
+        // Auto-save session if there are messages beyond system prompt
+        if (conversationMessages.length > 1) {
+            saveSession(sessionId, sessionName, conversationMessages, usage);
+            log(color.dim(`Session auto-saved: ${sessionId}`));
+        }
+        log(color.dim('Goodbye!'));
+        process.exit(0);
+    }
+
+    rl.on('close', () => {
+        log('');
+        exitWithSave();
+    });
+
+    process.on('SIGINT', () => {
+        log('');
+        exitWithSave();
+    });
+}
+
+async function handleAi(args) {
+    // robinpath ai config <...>
+    if (args[0] === 'config') {
+        await handleAiConfig(args.slice(1));
+        return;
+    }
+
+    // robinpath ai sessions — list sessions
+    if (args[0] === 'sessions') {
+        const sessions = listSessions();
+        if (sessions.length === 0) {
+            log('No saved sessions.');
+        } else {
+            log(`\nSaved Sessions (${sessions.length}):`);
+            for (const s of sessions) {
+                const age = Math.round((Date.now() - new Date(s.updated).getTime()) / 60000);
+                const ageStr = age < 60 ? `${age}m ago` : age < 1440 ? `${Math.round(age/60)}h ago` : `${Math.round(age/1440)}d ago`;
+                log(`  ${s.id}  ${s.name}  (${s.messages} msgs, ${ageStr})`);
+            }
+            log(`\nResume with: robinpath ai --resume <id>`);
+        }
+        return;
+    }
+
+    // robinpath ai --resume <id>
+    const resumeIdx = args.indexOf('--resume');
+    if (resumeIdx !== -1) {
+        const resumeId = args[resumeIdx + 1];
+        if (!resumeId) {
+            log('Usage: robinpath ai --resume <session-id>');
+            return;
+        }
+        await startAiREPL(null, resumeId);
+        return;
+    }
+
+    // robinpath ai "prompt" (one-shot mode)
+    const prompt = args.join(' ').trim();
+    await startAiREPL(prompt || null);
+}
+
+/**
+ * Headless prompt mode: robinpath -p "question"
+ * Returns just the AI response text — no UI, no spinner, no colors.
+ * Designed for integration with other apps, scripts, and pipes.
+ *
+ * Options:
+ *   --save         Auto-save generated code to a .rp file
+ *   --run          Save and immediately run the generated script
+ *   -o <file>      Save to a specific filename (implies --save)
+ */
+async function handleHeadlessPrompt(prompt, opts = {}) {
+    const { save = false, run = false, outFile = null } = opts;
+
+    // Phase 1: Build smart context (local env + brain module resolution)
+    const enriched = await buildEnrichedPrompt(prompt);
+
+    // Show missing module warnings (on stderr so stdout stays clean for piping)
+    if (enriched.missingModules.length > 0) {
+        console.error('');
+        for (const mod of enriched.missingModules) {
+            console.error(`  \u26A0 Requires: ${mod} (not installed)`);
+            console.error(`    \u2192 robinpath add ${mod}`);
+        }
+        console.error('');
+    }
+
+    try {
+        // Phase 2: Stream brain response directly (RAG + LLM in one call)
+        // The brain handles everything: intent classification, context, generation, validation
+        const isSaveOrRun = save || run;
+
+        if (isSaveOrRun) {
+            // For --save/--run, collect full response (need the code block)
+            const brainResult = await fetchBrainStream(enriched.enrichedPrompt);
+
+            if (!brainResult || !brainResult.code) {
+                // Fallback: try non-streaming
+                const fallback = await fetchBrainContext(enriched.enrichedPrompt);
+                if (fallback && fallback.code) {
+                    await handleSaveRun(fallback.code, prompt, { save, run, outFile });
+                } else {
+                    console.error('Error: Brain returned no response');
+                    process.exit(1);
+                }
+                return;
+            }
+
+            await handleSaveRun(brainResult.code, prompt, { save, run, outFile });
+        } else {
+            // Default: stream tokens to stdout in real-time
+            const brainResult = await fetchBrainStream(enriched.enrichedPrompt, {
+                onToken: (delta) => process.stdout.write(delta),
+            });
+
+            if (!brainResult) {
+                // Fallback: try non-streaming
+                const fallback = await fetchBrainContext(enriched.enrichedPrompt);
+                if (fallback && fallback.code) {
+                    console.log(fallback.code);
+                } else {
+                    console.error('Error: Brain returned no response');
+                    process.exit(1);
+                }
+                return;
+            }
+
+            // End with a newline if the stream didn't
+            if (brainResult.code && !brainResult.code.endsWith('\n')) {
+                process.stdout.write('\n');
+            }
+        }
+    } catch (err) {
+        console.error(`Error: ${err.message}`);
+        process.exit(1);
+    }
+}
+
+async function handleSaveRun(content, prompt, { save, run, outFile }) {
+    const codeMatch = content.match(/```(?:robinpath|robin|rp|js|javascript)?\s*\n([\s\S]*?)```/);
+    const codeBlock = codeMatch ? codeMatch[1].trim() : null;
+
+    if (codeBlock) {
+        const fs = await import('node:fs');
+        const path = await import('node:path');
+
+        let fileName = outFile;
+        if (!fileName) {
+            const slug = prompt
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-|-$/g, '')
+                .slice(0, 50);
+            fileName = `${slug}.rp`;
+        }
+        if (!fileName.endsWith('.rp')) fileName += '.rp';
+
+        const fullPath = path.default.resolve(fileName);
+        fs.default.writeFileSync(fullPath, codeBlock + '\n');
+        console.error(`Saved: ${fullPath}`);
+
+        if (run) {
+            console.error(`Running: ${fileName}\n`);
+            await runScript(codeBlock, fullPath);
+        } else {
+            console.log(content);
+        }
+    } else {
+        console.error('No RobinPath code block found in response — printing raw output');
+        console.log(content);
+    }
+}
+
+// ============================================================================
 // Help system
 // ============================================================================
 
@@ -6021,6 +7840,19 @@ CLOUD:
   deprecate <pkg>    Mark a module as deprecated
   sync               List your published modules
 
+AI:
+  (default)              Type 'robinpath' with no args to start AI mode
+  -p, --prompt <text>    Headless AI prompt (no UI, just response — for scripts/apps)
+  -p "..." --save        Save generated code to an auto-named .rp file
+  -p "..." --run         Save and immediately run the generated script
+  -p "..." -o <file>     Save generated code to a specific file
+  ai config set-key <k>  Set OpenRouter API key
+  ai config set-model    Set AI model (e.g. openai/gpt-4o)
+  ai config show         Show AI configuration
+  ai config remove       Remove AI configuration
+  ai sessions            List saved AI sessions
+  ai --resume <id>       Resume a saved AI session
+
 SNIPPETS:
   snippet list           List your snippets (--visibility, --status, --category)
   snippet create <file>  Create a snippet from a file (or - for stdin)
@@ -6048,15 +7880,19 @@ SNIPPETS:
   Supports partial IDs: robinpath snippet get 01KJ8 (resolves automatically)
 
 FLAGS:
-  -e, --eval <code>  Execute inline script
-  -w, --watch        Re-run script on file changes
-  -q, --quiet        Suppress non-error output
-  --verbose          Show timing and debug info
-  -v, --version      Show version
-  -h, --help         Show this help
+  -p, --prompt <text>  Headless AI prompt (for scripts and app integration)
+      --save           Save AI-generated code to .rp file (use with -p)
+      --run            Save and run AI-generated code (use with -p)
+  -o, --output <file>  Save AI output to specific file (use with -p)
+  -e, --eval <code>    Execute inline script
+  -w, --watch          Re-run script on file changes
+  -q, --quiet          Suppress non-error output
+  --verbose            Show timing and debug info
+  -v, --version        Show version
+  -h, --help           Show this help
 
 REPL:
-  robinpath          Start interactive REPL (no arguments)
+  repl               Start language REPL (for writing RobinPath code directly)
 
   REPL Commands:
     help             Show help
@@ -6682,6 +8518,77 @@ EXAMPLES:
   robinpath snippet trending --limit=10
   robinpath snippet export my-backup.json
   robinpath snippet import my-backup.json`,
+
+        ai: `robinpath ai \u2014 AI configuration & interactive mode
+
+USAGE:
+  robinpath                          Start AI interactive session (default)
+  robinpath -p "question"            Headless prompt (no UI, for scripts/apps)
+  robinpath ai config <subcommand>   Manage AI configuration
+
+DESCRIPTION:
+  RobinPath AI is an intelligent assistant built into the CLI. It knows
+  RobinPath syntax, modules, and patterns. Ask questions, generate code,
+  edit files, and run scripts \u2014 all from an interactive prompt.
+
+  Just type 'robinpath' to start. The AI can read and modify your files,
+  execute RobinPath code, and help you build projects.
+
+  The -p flag runs a single prompt without UI \u2014 perfect for integration
+  with other apps, scripts, or piping output.
+
+SETUP:
+  1. Get an API key from https://openrouter.ai/keys
+  2. robinpath ai config set-key sk-or-...
+  3. robinpath
+
+CONFIG SUBCOMMANDS:
+  set-key           Set your OpenRouter API key (interactive secure input)
+  set-key <key>     Set your OpenRouter API key (inline — less secure)
+  set-model <id>    Set the AI model (default: anthropic/claude-sonnet-4-20250514)
+  show              Show current AI configuration
+  remove            Remove AI configuration
+
+AI SESSION COMMANDS:
+  /help             Show help inside AI session
+  /clear            Clear conversation history
+  /model            Show or switch model
+  /tools            List available AI tools
+  exit              Exit AI mode
+
+AI TOOLS:
+  The AI can use these tools during conversation:
+  - read_file       Read file contents
+  - write_file      Create or overwrite files
+  - edit_file       Modify specific parts of files
+  - run_script      Execute RobinPath code
+  - list_files      Explore project structure
+
+HEADLESS MODE (-p):
+  The -p flag returns just the AI response with no UI, colors, or
+  formatting. Designed for:
+  - Shell scripts:  result=$(robinpath -p "write a CSV parser")
+  - App integration: spawn robinpath with -p flag, read stdout
+  - Piping:         robinpath -p "explain this" | less
+
+POPULAR MODELS:
+  anthropic/claude-sonnet-4-20250514       (default, recommended)
+  openai/gpt-4o
+  google/gemini-2.5-pro
+  deepseek/deepseek-chat              (budget-friendly)
+
+EXAMPLES:
+  robinpath ai config set-key sk-or-v1-abc123
+  robinpath ai config set-model openai/gpt-4o
+  robinpath                                        Start AI session
+  robinpath -p "how do I read a file?"             Quick answer
+  robinpath -p "write a slack bot" > bot.rp        Generate to file
+
+  # Inside AI session:
+  > make a script that reads a CSV and posts to Slack
+  > add error handling to app.rp
+  > what does my project do?
+  > run the tests`,
     };
 
     const page = helpPages[command];
@@ -6689,7 +8596,7 @@ EXAMPLES:
         console.log(page);
     } else {
         console.error(color.red('Error:') + ` Unknown command: ${command}`);
-        console.error('Available: add, remove, upgrade, search, info, modules, init, doctor, env, cache, audit, deprecate, pack, fmt, check, ast, test, install, uninstall, login, logout, whoami, publish, sync, snippet, start, status');
+        console.error('Available: add, remove, upgrade, search, info, modules, init, doctor, env, cache, audit, deprecate, pack, fmt, check, ast, test, install, uninstall, login, logout, whoami, publish, sync, snippet, ai, start, status');
         process.exit(2);
     }
 }
@@ -7149,6 +9056,18 @@ async function main() {
         return;
     }
 
+    // ai config — AI configuration
+    if (command === 'ai') {
+        await handleAi(args.slice(1));
+        return;
+    }
+
+    // repl — language REPL (moved from default)
+    if (command === 'repl') {
+        await startREPL();
+        return;
+    }
+
     // start — HTTP server mode
     if (command === 'start') {
         await handleStart(args.slice(1));
@@ -7158,6 +9077,33 @@ async function main() {
     // status — check if a server is running
     if (command === 'status') {
         await handleStatus(args.slice(1));
+        return;
+    }
+
+    // Handle -p / --prompt (headless AI prompt — no UI, just response)
+    const promptIdx = args.indexOf('-p') !== -1 ? args.indexOf('-p') : args.indexOf('--prompt');
+    if (promptIdx !== -1) {
+        // Extract flags before building prompt text
+        const hasSave = args.includes('--save');
+        const hasRun = args.includes('--run');
+        const outIdx = args.indexOf('-o') !== -1 ? args.indexOf('-o') : args.indexOf('--output');
+        const outFile = outIdx !== -1 ? args[outIdx + 1] : null;
+
+        // Build prompt from remaining args (strip flags)
+        const skipSet = new Set([promptIdx]);
+        if (hasSave) skipSet.add(args.indexOf('--save'));
+        if (hasRun) skipSet.add(args.indexOf('--run'));
+        if (outIdx !== -1) { skipSet.add(outIdx); skipSet.add(outIdx + 1); }
+        const promptParts = [];
+        for (let pi = promptIdx + 1; pi < args.length; pi++) {
+            if (!skipSet.has(pi)) promptParts.push(args[pi]);
+        }
+        const prompt = promptParts.join(' ').trim();
+        if (!prompt) {
+            console.error(color.red('Error:') + ' -p requires a prompt argument');
+            process.exit(2);
+        }
+        await handleHeadlessPrompt(prompt, { save: hasSave || !!outFile, run: hasRun, outFile });
         return;
     }
 
@@ -7180,7 +9126,7 @@ async function main() {
         fileArg = args[dashDashIdx + 1];
     } else {
         // Filter out known flags before finding file arg
-        const flagsToSkip = new Set(['-q', '--quiet', '--verbose']);
+        const flagsToSkip = new Set(['-q', '--quiet', '--verbose', '-p', '--prompt']);
         fileArg = args.find(a => !a.startsWith('-') && !flagsToSkip.has(a));
     }
 
@@ -7220,11 +9166,11 @@ async function main() {
         return;
     }
 
-    // Check for updates (non-blocking, before REPL)
+    // Check for updates (non-blocking)
     checkForUpdates();
 
-    // Interactive REPL (stdin is a terminal)
-    await startREPL();
+    // Default: AI interactive mode (stdin is a terminal)
+    await startAiREPL(null);
 }
 
 main().catch(err => {
