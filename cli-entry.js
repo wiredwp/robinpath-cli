@@ -6001,6 +6001,139 @@ function deleteSession(sessionId) {
     return false;
 }
 
+// --- Persistent memory across sessions ---
+const AI_MEMORY_PATH = join(homedir(), '.robinpath', 'memory.json');
+
+function loadMemory() {
+    try {
+        if (existsSync(AI_MEMORY_PATH)) {
+            return JSON.parse(readFileSync(AI_MEMORY_PATH, 'utf-8'));
+        }
+    } catch { /* ignore */ }
+    return { facts: [], updatedAt: null };
+}
+
+function saveMemory(memory) {
+    try {
+        const dir = join(homedir(), '.robinpath');
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        memory.updatedAt = new Date().toISOString();
+        writeFileSync(AI_MEMORY_PATH, JSON.stringify(memory, null, 2), 'utf-8');
+    } catch { /* ignore */ }
+}
+
+function addMemoryFact(fact) {
+    const memory = loadMemory();
+    // Avoid duplicates
+    const lower = fact.toLowerCase().trim();
+    if (memory.facts.some(f => f.toLowerCase().trim() === lower)) return false;
+    memory.facts.push(fact.trim());
+    // Keep max 50 facts
+    if (memory.facts.length > 50) memory.facts = memory.facts.slice(-50);
+    saveMemory(memory);
+    return true;
+}
+
+function removeMemoryFact(index) {
+    const memory = loadMemory();
+    if (index >= 0 && index < memory.facts.length) {
+        const removed = memory.facts.splice(index, 1);
+        saveMemory(memory);
+        return removed[0];
+    }
+    return null;
+}
+
+function buildMemoryContext() {
+    const memory = loadMemory();
+    if (memory.facts.length === 0) return '';
+    return '\n\n## User Memory (persistent across sessions)\n' +
+        memory.facts.map(f => `- ${f}`).join('\n') + '\n';
+}
+
+/**
+ * Extract <memory>...</memory> tags from an AI response.
+ * The LLM decides what's worth remembering — no hardcoded patterns.
+ * Returns the cleaned response (tags stripped) and any extracted facts.
+ */
+function extractMemoryTags(response) {
+    const facts = [];
+    const cleaned = response.replace(/<memory>([\s\S]*?)<\/memory>/gi, (_, fact) => {
+        const trimmed = fact.trim();
+        if (trimmed.length > 3 && trimmed.length < 300) facts.push(trimmed);
+        return ''; // strip from displayed output
+    }).replace(/\n{3,}/g, '\n\n').trim(); // clean up extra newlines left behind
+    return { cleaned, facts };
+}
+
+// --- Auto-compaction: summarize old messages when conversation gets long ---
+
+/** Approximate token count (1 token ≈ 4 chars). */
+function estimateTokens(messages) {
+    return messages.reduce((sum, m) => {
+        const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '');
+        return sum + Math.ceil(content.length / 4);
+    }, 0);
+}
+
+/** Max tokens before auto-compaction triggers. */
+const COMPACTION_THRESHOLD = 30000; // ~30k tokens
+/** Keep this many recent messages intact after compaction. */
+const KEEP_RECENT = 10;
+
+/**
+ * Auto-compact conversation if it exceeds the token threshold.
+ * Summarizes older messages into a single compact message.
+ * Uses the brain to generate the summary.
+ */
+async function autoCompact(conversationMessages) {
+    const tokens = estimateTokens(conversationMessages);
+    if (tokens < COMPACTION_THRESHOLD || conversationMessages.length <= KEEP_RECENT + 2) {
+        return false; // No compaction needed
+    }
+
+    const systemMsg = conversationMessages[0];
+    const oldMessages = conversationMessages.slice(1, -KEEP_RECENT);
+    const recentMessages = conversationMessages.slice(-KEEP_RECENT);
+
+    // Build summary request
+    const summaryText = oldMessages
+        .map(m => `${m.role}: ${(typeof m.content === 'string' ? m.content : '').slice(0, 500)}`)
+        .join('\n');
+
+    try {
+        const response = await fetch(`${AI_BRAIN_URL}/docs/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                prompt: `Summarize this conversation history in 3-5 bullet points. Focus on: user's name, what they asked for, key decisions made, and any code that was generated. Be concise.\n\n${summaryText}`,
+                topK: 0,
+                model: 'robinpath-default',
+            }),
+            signal: AbortSignal.timeout(10000),
+        });
+
+        if (!response.ok) return false;
+
+        const data = await response.json();
+        const summary = data.code || '';
+        if (!summary) return false;
+
+        // Replace conversation with: system + summary + recent
+        conversationMessages.length = 0;
+        conversationMessages.push(systemMsg);
+        conversationMessages.push({
+            role: 'system',
+            content: `[Conversation Summary — ${oldMessages.length} earlier messages compacted]\n${summary}`,
+        });
+        conversationMessages.push(...recentMessages);
+
+        return true;
+    } catch {
+        return false; // Compaction failed, continue with full history
+    }
+}
+
 // --- Token usage tracking ---
 function createUsageTracker() {
     return { promptTokens: 0, completionTokens: 0, totalTokens: 0, requests: 0 };
@@ -6551,7 +6684,31 @@ You have tools to:
 - If the user asks something unrelated to RobinPath, you can still help but focus on being useful
 - If the user needs a module that is not installed, tell them to install it with: robinpath add @robinpath/<name>
 - Never assume a module is available if it's not in the native or installed modules list
-- Run code when appropriate to verify it works`;
+- Run code when appropriate to verify it works
+
+## Persistent Memory
+You can save important facts about the user across sessions using memory tags.
+When the user shares something worth remembering (their name, preferences, project details, workflow habits, corrections, explicit "remember this" requests), wrap the fact in a <memory> tag in your response. Examples:
+
+User: "my name is Alex"
+Response: Nice to meet you, Alex! <memory>User's name is Alex</memory>
+
+User: "I always use tabs not spaces"
+Response: Got it, I'll use tabs. <memory>User prefers tabs over spaces</memory>
+
+User: "remember that our API runs on port 3001"
+Response: Noted! <memory>Project API runs on port 3001</memory>
+
+User: "I work at Acme Corp"
+Response: Cool! <memory>User works at Acme Corp</memory>
+
+Rules:
+- Only save facts that are genuinely useful across future sessions
+- Keep each memory short and factual (under 200 chars)
+- Don't save temporary things like "user asked about X" — save lasting preferences, identity, project info
+- If the user corrects a previous fact, save the correction (it replaces the old one)
+- Don't mention the <memory> tag to the user — it's invisible to them
+- Most messages need NO memory tags — only use them when something is clearly worth persisting`;
 }
 
 // Spinner animation for "thinking" state
@@ -6652,17 +6809,21 @@ async function fetchBrainContext(prompt) {
  * Stream brain response via SSE — prints tokens as they arrive.
  * Returns the full accumulated text when done.
  */
-async function fetchBrainStream(prompt, { onToken } = {}) {
+async function fetchBrainStream(prompt, { onToken, conversationHistory } = {}) {
     try {
+        const body = {
+            prompt,
+            topK: 10,
+            model: 'robinpath-default',
+            stream: true,
+        };
+        if (conversationHistory && conversationHistory.length > 0) {
+            body.conversationHistory = conversationHistory;
+        }
         const response = await fetch(`${AI_BRAIN_URL}/docs/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                prompt,
-                topK: 10,
-                model: 'robinpath-default',
-                stream: true,
-            }),
+            body: JSON.stringify(body),
             signal: AbortSignal.timeout(60000),
         });
 
@@ -6712,10 +6873,18 @@ async function fetchBrainStream(prompt, { onToken } = {}) {
                         fullText += delta;
                         if (onToken) onToken(delta);
                     } else if (eventType === 'validation') {
-                        // Validation event during retry — could show a brief indicator
-                        if (parsed.retrying && onToken) {
-                            onToken('\n[validating...]\n');
+                        if (parsed.retrying) {
+                            // Clear the bad output from screen: move cursor up and erase each line
+                            const lines = fullText.split('\n').length;
+                            for (let i = 0; i < lines; i++) {
+                                process.stdout.write('\x1b[2K\x1b[1A'); // erase line + move up
+                            }
+                            process.stdout.write('\x1b[2K\r'); // erase current line
                             fullText = ''; // Reset — retry will replace
+                            if (onToken) {
+                                // Signal the caller to reset any internal buffers too
+                                onToken('\x1b[RETRY]');
+                            }
                         }
                     } else if (eventType === 'done') {
                         doneData = parsed;
@@ -7084,7 +7253,7 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
     // Token usage tracking
     const usage = createUsageTracker();
 
-    const systemPrompt = buildRobinPathSystemPrompt();
+    const systemPrompt = buildRobinPathSystemPrompt() + buildMemoryContext();
     const conversationMessages = [
         { role: 'system', content: systemPrompt },
     ];
@@ -7175,6 +7344,10 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
             log('  /sessions      List saved sessions');
             log('  /resume <id>   Resume a saved session');
             log('  /delete <id>   Delete a saved session');
+            log(color.dim('  ── Memory ──'));
+            log('  /memory        Show persistent memory');
+            log('  /remember <x>  Save a fact across sessions');
+            log('  /forget <n>    Remove a memory by number');
             log(color.dim('  ── Info ──'));
             log('  /model         Show current model');
             log('  /model <id>    Switch model');
@@ -7265,15 +7438,68 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
         }
 
         if (trimmed === '/compact') {
-            // Keep system prompt + last 10 messages (5 exchanges)
-            if (conversationMessages.length > 11) {
+            const beforeCount = conversationMessages.length - 1;
+            const beforeTokens = estimateTokens(conversationMessages);
+            const compacted = await autoCompact(conversationMessages);
+            if (compacted) {
+                const afterCount = conversationMessages.length - 1;
+                const afterTokens = estimateTokens(conversationMessages);
+                log(color.green(`Compacted: ${beforeCount} messages (~${Math.round(beforeTokens/1000)}k tokens) → ${afterCount} messages (~${Math.round(afterTokens/1000)}k tokens)`));
+            } else if (conversationMessages.length > 11) {
+                // Fallback: simple truncation if brain is unreachable
                 const system = conversationMessages[0];
                 const recent = conversationMessages.slice(-10);
                 conversationMessages.length = 0;
                 conversationMessages.push(system, ...recent);
-                log(color.green(`Conversation trimmed to ${recent.length} recent messages.`));
+                log(color.green(`Trimmed to ${recent.length} recent messages.`));
             } else {
                 log(color.dim('Conversation is already short — nothing to compact.'));
+            }
+            rl.prompt();
+            return;
+        }
+
+        // --- Memory commands ---
+        if (trimmed === '/memory') {
+            const memory = loadMemory();
+            log('');
+            if (memory.facts.length === 0) {
+                log(color.dim('  No memories saved. Use /remember <fact> to save one.'));
+            } else {
+                log(color.bold('  Persistent Memory:'));
+                memory.facts.forEach((f, i) => log(`  ${color.dim(String(i + 1) + '.')} ${f}`));
+                log('');
+                log(color.dim(`  ${memory.facts.length} facts — loaded into every conversation`));
+            }
+            log('');
+            rl.prompt();
+            return;
+        }
+
+        if (trimmed.startsWith('/remember ')) {
+            const fact = trimmed.slice(10).trim();
+            if (fact) {
+                const added = addMemoryFact(fact);
+                if (added) {
+                    log(color.green(`Remembered: "${fact}"`));
+                    // Also inject into current system prompt
+                    conversationMessages[0].content = buildRobinPathSystemPrompt() + buildMemoryContext();
+                } else {
+                    log(color.dim('Already remembered.'));
+                }
+            }
+            rl.prompt();
+            return;
+        }
+
+        if (trimmed.startsWith('/forget ')) {
+            const idx = parseInt(trimmed.slice(8).trim(), 10) - 1;
+            const removed = removeMemoryFact(idx);
+            if (removed) {
+                log(color.green(`Forgot: "${removed}"`));
+                conversationMessages[0].content = buildRobinPathSystemPrompt() + buildMemoryContext();
+            } else {
+                log(color.red('Invalid memory number. Use /memory to see the list.'));
             }
             rl.prompt();
             return;
@@ -7464,23 +7690,110 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
 
         const activeModel = readAiConfig().model || model;
 
-        // Fetch RAG context from AI brain (runs in parallel with user seeing spinner)
+        // Fetch RAG context from AI brain with full conversation history
         let spinner = createSpinner('Thinking...');
 
         try {
-            // Get brain context for the user's question
-            const brainResult = await fetchBrainContext(trimmed);
-            if (brainResult && brainResult.code) {
-                // Inject brain's RAG knowledge as context
-                conversationMessages.push({
-                    role: 'user',
-                    content: `[RobinPath Knowledge Base]\nHere is relevant context from the RobinPath documentation about this topic:\n\n${brainResult.code}\n\n[End Knowledge Base]\n\nNow here is my actual question/request:\n${trimmed}`,
-                });
-                logVerbose(`Brain context: ${brainResult.context?.documentsUsed || 0} docs, intent: ${brainResult.context?.intent || 'unknown'}`);
-            } else {
-                // No brain context available, just add the raw user message
-                conversationMessages.push({ role: 'user', content: trimmed });
+            // Add user message to history first
+            conversationMessages.push({ role: 'user', content: trimmed });
+
+            // Auto-compact if conversation is getting long
+            const didCompact = await autoCompact(conversationMessages);
+            if (didCompact) logVerbose('Conversation auto-compacted');
+
+            // Stream response from brain, intercepting <memory> tags in real-time.
+            // We accumulate all text into a pending buffer. On each chunk we flush
+            // everything that is *definitely* not part of a tag, while holding back
+            // any suffix that *could* be the start of "<memory>" or "</memory>".
+            const OPEN_TAG = '<memory>';
+            const CLOSE_TAG = '</memory>';
+            let pending = '';       // un-flushed text that might contain a partial tag
+            let insideTag = false;  // true while we're between <memory> and </memory>
+
+            let streamedLineCount = 0; // track lines for retry clearing
+
+            const brainResult = await fetchBrainStream(trimmed, {
+                onToken: (delta) => {
+                    spinner.stop();
+
+                    // Handle retry signal — reset buffers, show spinner
+                    if (delta === '\x1b[RETRY]') {
+                        pending = '';
+                        insideTag = false;
+                        streamedLineCount = 0;
+                        spinner = createSpinner('Fixing code...');
+                        return;
+                    }
+
+                    pending += delta;
+
+                    // Keep processing until we can't make further progress
+                    while (pending.length > 0) {
+                        if (insideTag) {
+                            const closeIdx = pending.indexOf(CLOSE_TAG);
+                            if (closeIdx === -1) return; // wait for more data
+                            const fact = pending.slice(0, closeIdx).trim();
+                            if (fact.length > 3 && fact.length < 300) {
+                                addMemoryFact(fact);
+                                logVerbose(`Memory saved: ${fact}`);
+                            }
+                            pending = pending.slice(closeIdx + CLOSE_TAG.length);
+                            insideTag = false;
+                        } else {
+                            const openIdx = pending.indexOf(OPEN_TAG);
+                            if (openIdx === -1) {
+                                // No full open tag found. Flush everything except
+                                // the last (OPEN_TAG.length - 1) chars which could
+                                // be a partial "<memor" etc.
+                                const safe = pending.length - (OPEN_TAG.length - 1);
+                                if (safe > 0) {
+                                    process.stdout.write(pending.slice(0, safe));
+                                    pending = pending.slice(safe);
+                                }
+                                return; // wait for more data
+                            }
+                            // Flush everything before the tag
+                            if (openIdx > 0) {
+                                process.stdout.write(pending.slice(0, openIdx));
+                            }
+                            pending = pending.slice(openIdx + OPEN_TAG.length);
+                            insideTag = true;
+                        }
+                    }
+                },
+                conversationHistory: conversationMessages.slice(0, -1), // all except current
+            });
+
+            // Flush any remaining pending text (no tag was opened)
+            if (pending.length > 0 && !insideTag) {
+                process.stdout.write(pending);
             }
+
+            if (brainResult && brainResult.code) {
+                // Strip any memory tags from the stored conversation
+                const { cleaned } = extractMemoryTags(brainResult.code);
+
+                process.stdout.write('\n\n');
+
+                // Warn if code validation failed even after retries
+                if (brainResult.validation && !brainResult.validation.valid && brainResult.validation.errors?.length > 0) {
+                    const errCount = brainResult.validation.errors.length;
+                    const retries = brainResult.validation.retryCount || 0;
+                    log(color.yellow(`  Warning: generated code has ${errCount} syntax issue${errCount > 1 ? 's' : ''}${retries > 0 ? ` (after ${retries} auto-fix attempt${retries > 1 ? 's' : ''})` : ''}.`));
+                    for (const e of brainResult.validation.errors.slice(0, 3)) {
+                        log(color.dim(`    Line ${e.line}: ${e.error}`));
+                    }
+                    log('');
+                }
+
+                conversationMessages.push({ role: 'assistant', content: cleaned });
+                logVerbose(`Brain: intent=${brainResult.context?.intent || '?'}, docs=${brainResult.context?.documentsUsed || 0}`);
+                rl.prompt();
+                return;
+            }
+
+            // Fallback: brain failed, use OpenRouter with conversation history
+            logVerbose('Brain stream failed, falling back to OpenRouter');
 
             for (let loopCount = 0; loopCount < 15; loopCount++) {
                 const response = await callOpenRouter(config.apiKey, activeModel, conversationMessages, AI_TOOLS);
@@ -7513,6 +7826,16 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
                                     log(color.dim(`     Run: ${color.cyan(match)}`));
                                 }
                             }
+                        }
+
+                        // Extract and save any <memory> tags from OpenRouter response
+                        const { cleaned: cleanContent, facts: memFacts } = extractMemoryTags(result.content);
+                        for (const mf of memFacts) {
+                            addMemoryFact(mf);
+                            logVerbose(`Memory saved: ${mf}`);
+                        }
+                        if (cleanContent !== result.content) {
+                            conversationMessages[conversationMessages.length - 1].content = cleanContent;
                         }
                     }
                     break;
@@ -7705,7 +8028,10 @@ async function handleHeadlessPrompt(prompt, opts = {}) {
         } else {
             // Default: stream tokens to stdout in real-time
             const brainResult = await fetchBrainStream(enriched.enrichedPrompt, {
-                onToken: (delta) => process.stdout.write(delta),
+                onToken: (delta) => {
+                    if (delta === '\x1b[RETRY]') return; // retry signal — screen already cleared by fetchBrainStream
+                    process.stdout.write(delta);
+                },
             });
 
             if (!brainResult) {
