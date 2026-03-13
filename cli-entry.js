@@ -6217,7 +6217,7 @@ async function handleAiConfig(args) {
             key = await new Promise((resolve) => {
                 // Disable echo for secure input
                 if (process.stdin.isTTY) {
-                    process.stdout.write('Enter your OpenRouter API key: ');
+                    process.stdout.write('Enter your API key (OpenRouter, OpenAI, or Anthropic): ');
                     process.stdin.setRawMode(true);
                     let input = '';
                     const onData = (ch) => {
@@ -6243,7 +6243,7 @@ async function handleAiConfig(args) {
                     };
                     process.stdin.on('data', onData);
                 } else {
-                    rl.question('Enter your OpenRouter API key: ', (answer) => {
+                    rl.question('Enter your API key (OpenRouter, OpenAI, or Anthropic): ', (answer) => {
                         rl.close();
                         resolve(answer.trim());
                     });
@@ -6256,13 +6256,18 @@ async function handleAiConfig(args) {
         }
         const config = readAiConfig();
         config.apiKey = key.trim();
-        if (!config.provider) config.provider = 'openrouter';
+        // Auto-detect provider from key prefix
+        const k = key.trim();
+        if (k.startsWith('sk-or-')) config.provider = 'openrouter';
+        else if (k.startsWith('sk-ant-')) config.provider = 'anthropic';
+        else if (k.startsWith('sk-')) config.provider = 'openai';
+        else if (!config.provider) config.provider = 'openrouter';
         if (!config.model) config.model = 'anthropic/claude-sonnet-4-20250514';
         writeAiConfig(config);
         log(color.green('API key saved.'));
-        log(`Provider: ${color.cyan(config.provider)}`);
+        log(`Provider: ${color.cyan(config.provider)} (auto-detected)`);
         log(`Model: ${color.cyan(config.model)}`);
-        log(`\nStart chatting with: ${color.cyan('robinpath')}`);
+        log(`\nStart chatting with: ${color.cyan('robinpath ai')}`);
     } else if (sub === 'set-model') {
         const model = args[1];
         if (!model) {
@@ -6280,20 +6285,24 @@ async function handleAiConfig(args) {
         log(color.green('Model set:') + ` ${color.cyan(model)}`);
     } else if (sub === 'show') {
         const config = readAiConfig();
-        if (!config.apiKey) {
-            log('No AI configuration found.');
-            log(`\nSet up with: ${color.cyan('robinpath ai config set-key <openrouter-api-key>')}`);
-            return;
-        }
         log('');
         log(color.bold('  AI Configuration:'));
         log(color.dim('  ' + '\u2500'.repeat(40)));
-        log(`  Provider:  ${color.cyan(config.provider || 'openrouter')}`);
-        log(`  Model:     ${color.cyan(config.model || 'anthropic/claude-sonnet-4-20250514')}`);
-        const masked = config.apiKey.length > 8
-            ? config.apiKey.slice(0, 5) + '\u2022'.repeat(Math.min(config.apiKey.length - 8, 20)) + config.apiKey.slice(-3)
-            : '\u2022\u2022\u2022\u2022';
-        log(`  API Key:   ${color.dim(masked)}`);
+        if (!config.apiKey) {
+            log(`  Provider:  ${color.cyan('gemini')} (free, no key needed)`);
+            log(`  Model:     ${color.cyan('gemini-2.0-flash')}`);
+            log(`  API Key:   ${color.dim('(none — using free tier)')}`);
+            log('');
+            log(color.dim('  Optional: set a key for premium models:'));
+            log(color.dim(`  ${color.cyan('robinpath ai config set-key <api-key>')}`));
+        } else {
+            log(`  Provider:  ${color.cyan(config.provider || 'openrouter')}`);
+            log(`  Model:     ${color.cyan(config.model || 'anthropic/claude-sonnet-4-20250514')}`);
+            const masked = config.apiKey.length > 8
+                ? config.apiKey.slice(0, 5) + '\u2022'.repeat(Math.min(config.apiKey.length - 8, 20)) + config.apiKey.slice(-3)
+                : '\u2022\u2022\u2022\u2022';
+            log(`  API Key:   ${color.dim(masked)}`);
+        }
         log('');
     } else if (sub === 'remove') {
         if (existsSync(AI_CONFIG_PATH)) {
@@ -6305,7 +6314,7 @@ async function handleAiConfig(args) {
     } else {
         console.error(color.red('Error:') + ' Usage: robinpath ai config <set-key|set-model|show|remove>');
         console.error('');
-        console.error('  robinpath ai config set-key sk-or-...     Set OpenRouter API key');
+        console.error('  robinpath ai config set-key <key>          Set API key (optional, free tier works without)');
         console.error('  robinpath ai config set-model <model>     Set model (e.g. openai/gpt-4o)');
         console.error('  robinpath ai config show                  Show current configuration');
         console.error('  robinpath ai config remove                Remove configuration');
@@ -6709,14 +6718,17 @@ async function fetchBrainContext(prompt) {
  * Stream brain response via SSE — prints tokens as they arrive.
  * Returns the full accumulated text when done.
  */
-async function fetchBrainStream(prompt, { onToken, conversationHistory } = {}) {
+async function fetchBrainStream(prompt, { onToken, conversationHistory, provider, model, apiKey, cliContext } = {}) {
     try {
         const body = {
             prompt,
             topK: 10,
-            model: 'robinpath-default',
+            model: model || 'robinpath-default',
             stream: true,
         };
+        if (provider) body.provider = provider;
+        if (apiKey) body.apiKey = apiKey;
+        if (cliContext) body.cliContext = cliContext;
         if (conversationHistory && conversationHistory.length > 0) {
             body.conversationHistory = conversationHistory;
         }
@@ -7015,177 +7027,34 @@ function formatFileSize(bytes) {
     return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
-// ============================================================================
-// OpenRouter LLM calls
-// ============================================================================
-
-async function callOpenRouter(apiKey, model, messages) {
-    // Clean messages — ensure content is always a string, filter out legacy tool messages
-    const sanitizedMessages = messages
-        .filter(msg => msg.role !== 'tool') // No more tool role messages
-        .map(msg => {
-            const m = { ...msg };
-            if (m.content === null || m.content === undefined) m.content = '';
-            delete m.tool_calls; // Strip any legacy tool_calls
-            delete m.tool_call_id;
-            return m;
-        });
-
-    // Merge consecutive same-role messages (required by Gemini, harmless for others)
-    const merged = [];
-    for (const m of sanitizedMessages) {
-        if (merged.length > 0 && merged[merged.length - 1].role === m.role) {
-            merged[merged.length - 1].content += '\n\n' + m.content;
-        } else {
-            merged.push(m);
-        }
-    }
-
-    const body = {
-        model,
-        messages: merged,
-        stream: true,
-    };
-
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-            'HTTP-Referer': 'https://robinpath.com',
-            'X-Title': 'RobinPath CLI',
-        },
-        body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-        const err = await response.text().catch(() => '');
-        if (response.status === 401) {
-            throw new Error('Invalid API key. Run: robinpath ai config set-key <your-key>');
-        }
-        throw new Error(`OpenRouter error (${response.status}): ${err.slice(0, 200)}`);
-    }
-
-    return response;
-}
-
-async function processAiStream(response) {
-    const reader = response.body.getReader ? response.body.getReader() : null;
-    if (!reader) {
-        // Fallback: non-streaming
-        const json = await response.json();
-        const msg = json.choices?.[0]?.message;
-        const usage = json.usage || {};
-        return { content: msg?.content || '', usage };
-    }
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let content = '';
-    let isFirstContent = true;
-    let usage = {};
-    // Track <cmd> tags to suppress them from display
-    let insideCmd = false;
-    let pendingDisplay = '';
-
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            const data = line.slice(6).trim();
-            if (data === '[DONE]') continue;
-
-            try {
-                const parsed = JSON.parse(data);
-                const delta = parsed.choices?.[0]?.delta;
-                if (!delta) continue;
-
-                if (delta.content) {
-                    if (isFirstContent) {
-                        process.stdout.write('\n');
-                        isFirstContent = false;
-                    }
-                    content += delta.content;
-
-                    // Buffer content to detect <cmd> tags and hide them from display
-                    pendingDisplay += delta.content;
-
-                    // Process pending display buffer
-                    while (pendingDisplay.length > 0) {
-                        if (insideCmd) {
-                            const endIdx = pendingDisplay.indexOf('</cmd>');
-                            if (endIdx !== -1) {
-                                insideCmd = false;
-                                pendingDisplay = pendingDisplay.slice(endIdx + 6);
-                            } else {
-                                // Still inside <cmd>, don't display, wait for more
-                                break;
-                            }
-                        } else {
-                            const startIdx = pendingDisplay.indexOf('<cmd>');
-                            if (startIdx !== -1) {
-                                // Display everything before <cmd>
-                                if (startIdx > 0) {
-                                    process.stdout.write(pendingDisplay.slice(0, startIdx));
-                                }
-                                insideCmd = true;
-                                pendingDisplay = pendingDisplay.slice(startIdx + 5);
-                            } else if (pendingDisplay.includes('<')) {
-                                // Might be a partial <cmd> tag — display up to '<' and wait
-                                const ltIdx = pendingDisplay.lastIndexOf('<');
-                                if (ltIdx > 0) {
-                                    process.stdout.write(pendingDisplay.slice(0, ltIdx));
-                                    pendingDisplay = pendingDisplay.slice(ltIdx);
-                                }
-                                break;
-                            } else {
-                                process.stdout.write(pendingDisplay);
-                                pendingDisplay = '';
-                            }
-                        }
-                    }
-                }
-
-                if (parsed.usage) {
-                    usage = parsed.usage;
-                }
-            } catch { /* skip malformed JSON */ }
-        }
-    }
-
-    // Flush any remaining display buffer
-    if (pendingDisplay.length > 0 && !insideCmd) {
-        process.stdout.write(pendingDisplay);
-    }
-    if (content) process.stdout.write('\n');
-
-    return { content, usage };
-}
+// (OpenRouter direct calls removed — Brain handles all LLM calls server-side)
 
 async function startAiREPL(initialPrompt, resumeSessionId) {
     const config = readAiConfig();
-    if (!config.apiKey) {
-        log('');
-        log(color.bold('  RobinPath AI \u2014 Setup Required'));
-        log(color.dim('  ' + '\u2500'.repeat(40)));
-        log('');
-        log('  To use RobinPath AI, you need an OpenRouter API key.');
-        log('');
-        log('  1. Get a key at ' + color.cyan('https://openrouter.ai/keys'));
-        log('  2. Run: ' + color.cyan('robinpath ai config set-key <your-key>'));
-        log('');
-        return;
-    }
 
-    const model = config.model || 'anthropic/claude-sonnet-4-20250514';
-    const provider = config.provider || 'openrouter';
-    const modelShort = model.includes('/') ? model.split('/').pop() : model;
+    // Resolve provider from API key prefix (if key is set)
+    const resolveProvider = (key) => {
+        if (!key) return 'gemini';
+        if (key.startsWith('sk-or-')) return 'openrouter';
+        if (key.startsWith('sk-ant-')) return 'anthropic';
+        if (key.startsWith('sk-')) return 'openai';
+        return config.provider || 'gemini';
+    };
+
+    const apiKey = config.apiKey || null;
+    const provider = resolveProvider(apiKey);
+    const model = apiKey ? (config.model || 'anthropic/claude-sonnet-4-20250514') : 'robinpath-default';
+    const modelShort = model === 'robinpath-default' ? 'gemini-2.0-flash (free)' : (model.includes('/') ? model.split('/').pop() : model);
+
+    // Build CLI context to send to brain
+    const cliContext = {
+        platform: platform(),
+        shell: getShellConfig().name,
+        cwd: process.cwd(),
+        cliVersion: CLI_VERSION,
+        nativeModules: nativeModules.map(m => m.name),
+        installedModules: Object.keys(readModulesManifest()),
+    };
 
     // Session management
     let sessionId = resumeSessionId || randomUUID().slice(0, 8);
@@ -7194,10 +7063,15 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
     // Token usage tracking
     const usage = createUsageTracker();
 
-    const systemPrompt = buildRobinPathSystemPrompt() + buildMemoryContext();
-    const conversationMessages = [
-        { role: 'system', content: systemPrompt },
-    ];
+    // Conversation messages — no system prompt needed, brain handles it server-side
+    const conversationMessages = [];
+
+    // Inject memory context as first user context if available
+    const memContext = buildMemoryContext();
+    if (memContext.trim()) {
+        conversationMessages.push({ role: 'user', content: `[Context] ${memContext.trim()}` });
+        conversationMessages.push({ role: 'assistant', content: 'Got it, I have your preferences loaded.' });
+    }
 
     // Resume existing session
     if (resumeSessionId) {
@@ -7637,93 +7511,125 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
         saveHistory(trimmed);
 
         const activeModel = readAiConfig().model || model;
+        const activeKey = readAiConfig().apiKey || apiKey;
+        const activeProvider = resolveProvider(activeKey);
 
-        // Fetch RAG context from AI brain with full conversation history
         let spinner = createSpinner('Thinking...');
 
         try {
-            // Add user message to history first
+            // Add user message to history
             conversationMessages.push({ role: 'user', content: trimmed });
 
             // Auto-compact if conversation is getting long
             const didCompact = await autoCompact(conversationMessages);
             if (didCompact) logVerbose('Conversation auto-compacted');
 
-            // Stream response from brain, intercepting <memory> tags in real-time.
-            // We accumulate all text into a pending buffer. On each chunk we flush
-            // everything that is *definitely* not part of a tag, while holding back
-            // any suffix that *could* be the start of "<memory>" or "</memory>".
-            const OPEN_TAG = '<memory>';
-            const CLOSE_TAG = '</memory>';
-            let pending = '';       // un-flushed text that might contain a partial tag
-            let insideTag = false;  // true while we're between <memory> and </memory>
+            // Tags to intercept from streamed output
+            const HIDDEN_TAGS = ['<memory>', '</memory>', '<cmd>', '</cmd>'];
 
-            let streamedLineCount = 0; // track lines for retry clearing
+            for (let loopCount = 0; loopCount < 15; loopCount++) {
+                // Stream from brain with provider/model/apiKey passthrough
+                let pending = '';
+                let insideMemory = false;
+                let insideCmd = false;
 
-            const brainResult = await fetchBrainStream(trimmed, {
-                onToken: (delta) => {
-                    spinner.stop();
+                const brainResult = await fetchBrainStream(
+                    loopCount === 0 ? trimmed : conversationMessages[conversationMessages.length - 1].content,
+                    {
+                        onToken: (delta) => {
+                            spinner.stop();
 
-                    // Handle retry signal — reset buffers, show spinner
-                    if (delta === '\x1b[RETRY]') {
-                        pending = '';
-                        insideTag = false;
-                        streamedLineCount = 0;
-                        spinner = createSpinner('Fixing code...');
-                        return;
-                    }
-
-                    pending += delta;
-
-                    // Keep processing until we can't make further progress
-                    while (pending.length > 0) {
-                        if (insideTag) {
-                            const closeIdx = pending.indexOf(CLOSE_TAG);
-                            if (closeIdx === -1) return; // wait for more data
-                            const fact = pending.slice(0, closeIdx).trim();
-                            if (fact.length > 3 && fact.length < 300) {
-                                addMemoryFact(fact);
-                                logVerbose(`Memory saved: ${fact}`);
+                            if (delta === '\x1b[RETRY]') {
+                                pending = '';
+                                insideMemory = false;
+                                insideCmd = false;
+                                spinner = createSpinner('Fixing code...');
+                                return;
                             }
-                            pending = pending.slice(closeIdx + CLOSE_TAG.length);
-                            insideTag = false;
-                        } else {
-                            const openIdx = pending.indexOf(OPEN_TAG);
-                            if (openIdx === -1) {
-                                // No full open tag found. Flush everything except
-                                // the last (OPEN_TAG.length - 1) chars which could
-                                // be a partial "<memor" etc.
-                                const safe = pending.length - (OPEN_TAG.length - 1);
-                                if (safe > 0) {
-                                    process.stdout.write(pending.slice(0, safe));
-                                    pending = pending.slice(safe);
+
+                            pending += delta;
+
+                            // Process buffer — hide <memory> and <cmd> tags from display
+                            while (pending.length > 0) {
+                                if (insideMemory) {
+                                    const closeIdx = pending.indexOf('</memory>');
+                                    if (closeIdx === -1) return;
+                                    const fact = pending.slice(0, closeIdx).trim();
+                                    if (fact.length > 3 && fact.length < 300) {
+                                        addMemoryFact(fact);
+                                        logVerbose(`Memory saved: ${fact}`);
+                                    }
+                                    pending = pending.slice(closeIdx + 9);
+                                    insideMemory = false;
+                                } else if (insideCmd) {
+                                    const closeIdx = pending.indexOf('</cmd>');
+                                    if (closeIdx === -1) return;
+                                    pending = pending.slice(closeIdx + 6);
+                                    insideCmd = false;
+                                } else {
+                                    // Look for any tag opening
+                                    const memIdx = pending.indexOf('<memory>');
+                                    const cmdIdx = pending.indexOf('<cmd>');
+                                    const firstTag = memIdx === -1 ? cmdIdx : cmdIdx === -1 ? memIdx : Math.min(memIdx, cmdIdx);
+
+                                    if (firstTag === -1) {
+                                        // No tag found — flush safely (keep tail that could be partial tag)
+                                        const safe = pending.length - 8; // max tag length "<memory>"
+                                        if (safe > 0) {
+                                            process.stdout.write(pending.slice(0, safe));
+                                            pending = pending.slice(safe);
+                                        }
+                                        return;
+                                    }
+
+                                    // Flush text before the tag
+                                    if (firstTag > 0) {
+                                        process.stdout.write(pending.slice(0, firstTag));
+                                    }
+
+                                    if (firstTag === memIdx) {
+                                        pending = pending.slice(firstTag + 8);
+                                        insideMemory = true;
+                                    } else {
+                                        pending = pending.slice(firstTag + 5);
+                                        insideCmd = true;
+                                    }
                                 }
-                                return; // wait for more data
                             }
-                            // Flush everything before the tag
-                            if (openIdx > 0) {
-                                process.stdout.write(pending.slice(0, openIdx));
-                            }
-                            pending = pending.slice(openIdx + OPEN_TAG.length);
-                            insideTag = true;
-                        }
-                    }
-                },
-                conversationHistory: conversationMessages.slice(0, -1), // all except current
-            });
+                        },
+                        conversationHistory: conversationMessages.slice(0, -1),
+                        provider: activeProvider,
+                        model: activeModel,
+                        apiKey: activeKey,
+                        cliContext,
+                    },
+                );
 
-            // Flush any remaining pending text (no tag was opened)
-            if (pending.length > 0 && !insideTag) {
-                process.stdout.write(pending);
-            }
+                // Flush remaining display buffer
+                if (pending.length > 0 && !insideMemory && !insideCmd) {
+                    process.stdout.write(pending);
+                }
 
-            if (brainResult && brainResult.code) {
-                // Strip any memory tags from the stored conversation
-                const { cleaned } = extractMemoryTags(brainResult.code);
+                if (!brainResult || !brainResult.code) {
+                    log(color.red('\n  Brain returned no response. Check your connection or API key.'));
+                    break;
+                }
 
-                process.stdout.write('\n\n');
+                // Track usage
+                if (brainResult.usage) {
+                    usage.promptTokens += brainResult.usage.prompt_tokens || 0;
+                    usage.completionTokens += brainResult.usage.completion_tokens || 0;
+                    usage.totalTokens += (brainResult.usage.prompt_tokens || 0) + (brainResult.usage.completion_tokens || 0);
+                    usage.requests++;
+                }
 
-                // Warn if code validation failed even after retries
+                // Extract commands and clean the response
+                const commands = extractCommands(brainResult.code);
+                const { cleaned } = extractMemoryTags(stripCommandTags(brainResult.code));
+
+                process.stdout.write('\n');
+
+                // Warn if code validation failed
                 if (brainResult.validation && !brainResult.validation.valid && brainResult.validation.errors?.length > 0) {
                     const errCount = brainResult.validation.errors.length;
                     const retries = brainResult.validation.retryCount || 0;
@@ -7734,44 +7640,18 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
                     log('');
                 }
 
-                conversationMessages.push({ role: 'assistant', content: cleaned });
+                // Store assistant message
+                if (cleaned) {
+                    conversationMessages.push({ role: 'assistant', content: cleaned });
+                }
+
                 logVerbose(`Brain: intent=${brainResult.context?.intent || '?'}, docs=${brainResult.context?.documentsUsed || 0}`);
-                rl.prompt();
-                return;
-            }
-
-            // Fallback: brain failed, use OpenRouter with conversation history
-            logVerbose('Brain stream failed, falling back to OpenRouter');
-            log(color.dim('  [fallback → OpenRouter]'));
-
-            for (let loopCount = 0; loopCount < 15; loopCount++) {
-                const response = await callOpenRouter(config.apiKey, activeModel, conversationMessages);
-                spinner.stop();
-
-                const result = await processAiStream(response);
-
-                // Track usage
-                if (result.usage) {
-                    usage.promptTokens += result.usage.prompt_tokens || 0;
-                    usage.completionTokens += result.usage.completion_tokens || 0;
-                    usage.totalTokens += (result.usage.prompt_tokens || 0) + (result.usage.completion_tokens || 0);
-                    usage.requests++;
-                }
-
-                // Extract shell commands from <cmd> tags
-                const commands = extractCommands(result.content || '');
-                const cleanContent = stripCommandTags(result.content || '');
-
-                // Save assistant message (stripped of <cmd> tags)
-                if (cleanContent) {
-                    conversationMessages.push({ role: 'assistant', content: cleanContent });
-                }
 
                 // If no commands, we're done
                 if (commands.length === 0) {
-                    if (cleanContent) {
-                        // Auto-detect module install suggestions
-                        const installMatch = cleanContent.match(/robinpath add (@robinpath\/[\w-]+)/g);
+                    // Auto-detect module install suggestions
+                    if (cleaned) {
+                        const installMatch = cleaned.match(/robinpath add (@robinpath\/[\w-]+)/g);
                         if (installMatch) {
                             const manifest = readModulesManifest();
                             for (const match of installMatch) {
@@ -7783,24 +7663,13 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
                                 }
                             }
                         }
-
-                        // Extract and save any <memory> tags from response
-                        const { cleaned: memCleaned, facts: memFacts } = extractMemoryTags(cleanContent);
-                        for (const mf of memFacts) {
-                            addMemoryFact(mf);
-                            logVerbose(`Memory saved: ${mf}`);
-                        }
-                        if (memCleaned !== cleanContent) {
-                            conversationMessages[conversationMessages.length - 1].content = memCleaned;
-                        }
                     }
                     break;
                 }
 
-                // Execute each shell command and collect results
+                // Execute each shell command
                 const cmdResults = [];
                 for (const cmd of commands) {
-                    // Show command being executed
                     const cmdPreview = cmd.length > 80 ? cmd.slice(0, 77) + '...' : cmd;
                     log(color.dim(`  \u25b6 ${cmdPreview}`));
 
@@ -7826,7 +7695,7 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
                     });
                 }
 
-                // Feed command results back as a user message so AI can continue
+                // Feed command results back for next iteration
                 const resultSummary = cmdResults.map(r => {
                     let out = `$ ${r.command}\n`;
                     if (r.exitCode === 0) {
@@ -7844,7 +7713,6 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
                     content: `[Command results]\n${resultSummary}`,
                 });
 
-                // Show spinner for the follow-up call
                 spinner = createSpinner('Processing...');
             }
         } catch (err) {
