@@ -8,12 +8,12 @@ import { resolve, extname, basename } from 'node:path';
 import { getROBINPATH_VERSION } from './runtime';
 
 import { CLI_VERSION, color, log, setFlags, FLAG_AUTO_ACCEPT, FLAG_DEV_MODE } from './utils';
-import { readAiConfig } from './config';
+import { readAiConfig, writeAiConfig } from './config';
 import { listSessions } from './sessions';
 import { showMainHelp, showCommandHelp } from './help';
 import { handleStart, handleStatus, readStdin } from './server';
 import { fetchBrainStream, fetchBrainContext, buildEnrichedPrompt } from './brain';
-import { startAiREPL, welcomeWizard, handleAiConfig } from './repl';
+import { startAiREPL, handleAiConfig } from './repl';
 
 import { startInkREPL } from './ink-repl';
 
@@ -227,6 +227,52 @@ async function handleSaveRun(
 // ============================================================================
 // Main entry point
 // ============================================================================
+
+/** Simple arrow-key selector — returns selected index */
+function arrowSelect(options: string[]): Promise<number> {
+    return new Promise((resolve) => {
+        if (!process.stdin.isTTY) { resolve(0); return; }
+        let selected = 0;
+
+        function render() {
+            process.stdout.write('\x1b[2K\r');
+            for (let i = 0; i < options.length; i++) {
+                if (i > 0) process.stdout.write('\n\x1b[2K');
+                const marker = i === selected ? color.cyan('  ❯ ') : '    ';
+                const text = i === selected ? color.bold(options[i]) : options[i];
+                process.stdout.write(`${marker}${text}`);
+            }
+            if (options.length > 1) process.stdout.write(`\x1b[${options.length - 1}A\r`);
+        }
+
+        render();
+        process.stdin.setRawMode(true);
+        process.stdin.resume();
+
+        const onKey = (buf: Buffer): void => {
+            const key = buf.toString();
+            if (key === '\x1b[A') { selected = Math.max(0, selected - 1); render(); return; }
+            if (key === '\x1b[B') { selected = Math.min(options.length - 1, selected + 1); render(); return; }
+            if (key === '\r' || key === '\n') {
+                process.stdin.removeListener('data', onKey);
+                try { process.stdin.setRawMode(false); } catch {}
+                process.stdin.pause();
+                process.stdout.write('\n'.repeat(options.length));
+                resolve(selected);
+                return;
+            }
+            if (key === '\x1b' || key === '\x03') {
+                process.stdin.removeListener('data', onKey);
+                try { process.stdin.setRawMode(false); } catch {}
+                process.stdin.pause();
+                process.stdout.write('\n'.repeat(options.length));
+                resolve(options.length - 1); // last option = skip/cancel
+                return;
+            }
+        };
+        process.stdin.on('data', onKey);
+    });
+}
 
 async function main(): Promise<void> {
     const args = process.argv.slice(2);
@@ -494,156 +540,89 @@ async function main(): Promise<void> {
     // ── Default: AI interactive mode ──
     checkForUpdates();
 
-    // Check if logged in — AI mode requires authentication
-    const auth = readAuth();
-    if (!auth && process.stdin.isTTY) {
-        console.log('');
-        console.log(color.bold('  Welcome to RobinPath!'));
-        console.log('');
-        console.log('  To unlock AI assistant, deploy, snippets, and sync —');
-        console.log('  please login to your RobinPath account.');
-        console.log('');
-        console.log('  Without login you can still:');
-        console.log(`  ${color.dim('•')} Run scripts: ${color.cyan('robinpath script.rp')}`);
-        console.log(`  ${color.dim('•')} Format code: ${color.cyan('robinpath fmt file.rp')}`);
-        console.log(`  ${color.dim('•')} Run tests:   ${color.cyan('robinpath test')}`);
-        console.log(`  ${color.dim('•')} Install modules: ${color.cyan('robinpath add @robinpath/csv')}`);
-        console.log('');
-
-        // Ask: Login or Skip
-        const choice: string = await new Promise((resolve) => {
-            if (!process.stdin.isTTY) { resolve('skip'); return; }
-            let selected = 0;
-            const options = ['Login', 'Skip for now'];
-
-            function render() {
-                process.stdout.write('\x1b[2K\r');
-                for (let i = 0; i < options.length; i++) {
-                    if (i > 0) process.stdout.write('\n\x1b[2K');
-                    const marker = i === selected ? color.cyan('  ❯ ') : '    ';
-                    const text = i === selected ? color.bold(options[i]) : options[i];
-                    process.stdout.write(`${marker}${text}`);
-                }
-                // Move cursor back up
-                if (options.length > 1) process.stdout.write(`\x1b[${options.length - 1}A`);
-                process.stdout.write('\r');
-            }
-
-            render();
-            process.stdin.setRawMode(true);
-            process.stdin.resume();
-
-            const onKey = (buf: Buffer): void => {
-                const key = buf.toString();
-                if (key === '\x1b[A') { selected = 0; render(); return; } // up
-                if (key === '\x1b[B') { selected = 1; render(); return; } // down
-                if (key === '\r' || key === '\n') {
-                    process.stdin.removeListener('data', onKey);
-                    try { process.stdin.setRawMode(false); } catch {}
-                    process.stdin.pause();
-                    // Clear selector lines
-                    process.stdout.write('\n'.repeat(options.length));
-                    resolve(selected === 0 ? 'login' : 'skip');
-                    return;
-                }
-                if (key === '\x1b' || key === '\x03') {
-                    process.stdin.removeListener('data', onKey);
-                    try { process.stdin.setRawMode(false); } catch {}
-                    process.stdin.pause();
-                    process.stdout.write('\n'.repeat(options.length));
-                    resolve('skip');
-                    return;
-                }
-            };
-            process.stdin.on('data', onKey);
-        });
-
-        if (choice === 'login') {
-            await handleLogin();
-        } else {
-            console.log(color.dim('  Skipped. Run ') + color.cyan('robinpath login') + color.dim(' anytime to unlock AI features.'));
+    if (process.stdin.isTTY) {
+        // ── Step 1: Login check ──
+        const auth = readAuth();
+        if (!auth) {
             console.log('');
-            return;
+            console.log(color.bold('  Welcome to RobinPath!'));
+            console.log('');
+            console.log('  Login to unlock AI assistant, deploy, snippets, and sync.');
+            console.log(color.dim('  Without login: run scripts, fmt, test, and install modules.'));
+            console.log('');
+
+            const choice = await arrowSelect(['Login', 'Skip for now']);
+            if (choice === 0) {
+                await handleLogin();
+            } else {
+                console.log(color.dim('  Run ') + color.cyan('robinpath login') + color.dim(' anytime.'));
+                console.log('');
+                return;
+            }
+        }
+
+        // ── Step 2: API key check ──
+        const config = readAiConfig();
+        if (!config.apiKey) {
+            console.log('');
+            console.log(color.green('  ✓') + ' Logged in!');
+            console.log('');
+            console.log('  Connect your OpenRouter API key to use the AI:');
+            console.log('');
+            console.log(color.bold('  1.') + ' Go to ' + color.cyan('https://openrouter.ai/keys'));
+            console.log(color.bold('  2.') + ' Create a key and copy it');
+            console.log(color.bold('  3.') + ' Paste it below:');
+            console.log('');
+
+            // Masked key input — right here, no separate command needed
+            const apiKey: string = await new Promise((resolve) => {
+                process.stdout.write(color.cyan('  API key: '));
+                process.stdin.setRawMode(true);
+                process.stdin.resume();
+                let input = '';
+                const onData = (ch: Buffer): void => {
+                    const c = ch.toString();
+                    if (c === '\r' || c === '\n') {
+                        process.stdin.removeListener('data', onData);
+                        try { process.stdin.setRawMode(false); } catch {}
+                        process.stdin.pause();
+                        process.stdout.write('\n');
+                        resolve(input);
+                    } else if (c === '\x03' || c === '\x1b') {
+                        process.stdin.removeListener('data', onData);
+                        try { process.stdin.setRawMode(false); } catch {}
+                        process.stdin.pause();
+                        process.stdout.write('\n');
+                        resolve('');
+                    } else if (c === '\x7f' || c === '\b') {
+                        if (input.length > 0) { input = input.slice(0, -1); process.stdout.write('\b \b'); }
+                    } else if (c.charCodeAt(0) >= 32) {
+                        input += c;
+                        process.stdout.write('*');
+                    }
+                };
+                process.stdin.on('data', onData);
+            });
+
+            if (apiKey && apiKey.trim()) {
+                const k = apiKey.trim();
+                const newConfig: any = { apiKey: k, model: 'anthropic/claude-sonnet-4.6' };
+                if (k.startsWith('sk-or-')) newConfig.provider = 'openrouter';
+                else if (k.startsWith('sk-ant-')) newConfig.provider = 'anthropic';
+                else if (k.startsWith('sk-')) newConfig.provider = 'openai';
+                else newConfig.provider = 'openrouter';
+                writeAiConfig(newConfig);
+                console.log(color.green('  ✓') + ' API key saved! Provider: ' + color.cyan(newConfig.provider));
+                console.log('');
+            } else {
+                console.log(color.dim('  Skipped. Set it later: ') + color.cyan('robinpath ai config set-key ...'));
+                console.log('');
+                return;
+            }
         }
     }
 
-    // Post-login: check if OpenRouter API key is set
-    const existingConfig = readAiConfig();
-    if (!existingConfig.apiKey && process.stdin.isTTY) {
-        console.log('');
-        console.log(color.green('  ✓ Logged in successfully!'));
-        console.log('');
-        console.log('  To explore the AI assistant and agent coding,');
-        console.log('  connect your OpenRouter API key:');
-        console.log('');
-        console.log(color.bold('  Step 1:') + ' Go to ' + color.cyan('https://openrouter.ai/keys'));
-        console.log(color.bold('  Step 2:') + ' Click "Create Key" and copy it');
-        console.log(color.bold('  Step 3:') + ' Run this command:');
-        console.log('');
-        console.log('    ' + color.cyan(color.bold('robinpath ai config set-key ...')));
-        console.log('');
-
-        // Ask: Ready or Later
-        const ready: string = await new Promise((resolve) => {
-            if (!process.stdin.isTTY) { resolve('later'); return; }
-            let selected = 0;
-            const options = ["Yes, I'm ready", 'Maybe later'];
-
-            function render() {
-                process.stdout.write('\x1b[2K\r');
-                for (let i = 0; i < options.length; i++) {
-                    if (i > 0) process.stdout.write('\n\x1b[2K');
-                    const marker = i === selected ? color.cyan('  ❯ ') : '    ';
-                    const text = i === selected ? color.bold(options[i]) : options[i];
-                    process.stdout.write(`${marker}${text}`);
-                }
-                if (options.length > 1) process.stdout.write(`\x1b[${options.length - 1}A`);
-                process.stdout.write('\r');
-            }
-
-            render();
-            process.stdin.setRawMode(true);
-            process.stdin.resume();
-
-            const onKey = (buf: Buffer): void => {
-                const key = buf.toString();
-                if (key === '\x1b[A') { selected = 0; render(); return; }
-                if (key === '\x1b[B') { selected = 1; render(); return; }
-                if (key === '\r' || key === '\n') {
-                    process.stdin.removeListener('data', onKey);
-                    try { process.stdin.setRawMode(false); } catch {}
-                    process.stdin.pause();
-                    process.stdout.write('\n'.repeat(options.length));
-                    resolve(selected === 0 ? 'ready' : 'later');
-                    return;
-                }
-                if (key === '\x1b' || key === '\x03') {
-                    process.stdin.removeListener('data', onKey);
-                    try { process.stdin.setRawMode(false); } catch {}
-                    process.stdin.pause();
-                    process.stdout.write('\n'.repeat(options.length));
-                    resolve('later');
-                    return;
-                }
-            };
-            process.stdin.on('data', onKey);
-        });
-
-        console.log('');
-        if (ready === 'ready') {
-            console.log('  Copy and paste this command in your terminal:');
-            console.log('');
-            console.log('    ' + color.cyan(color.bold('robinpath ai config set-key')) + color.dim(' <paste-your-key-here>'));
-            console.log('');
-            console.log(color.dim('  After setting the key, run ') + color.cyan('robinpath') + color.dim(' to start the AI assistant.'));
-        } else {
-            console.log(color.dim('  No problem! When you\'re ready, run:'));
-            console.log('    ' + color.cyan('robinpath ai config set-key') + color.dim(' <your-openrouter-key>'));
-        }
-        console.log('');
-        return;
-    }
-
+    // ── Step 3: Enter AI mode (login + key ready) ──
     await startInkOrFallback(null, null, { autoAccept: FLAG_AUTO_ACCEPT, devMode: FLAG_DEV_MODE });
 }
 
