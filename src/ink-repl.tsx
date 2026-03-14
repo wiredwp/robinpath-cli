@@ -266,8 +266,16 @@ export async function startInkREPL(
                 },
             );
 
-            if (!result || !result.code) {
-                finalResponse = fullText || 'No response.';
+            if (!result) {
+                finalResponse = 'No internet connection. Check your network and try again.';
+                break;
+            }
+            if ((result as any).error) {
+                finalResponse = (result as any).error;
+                break;
+            }
+            if (!result.code) {
+                finalResponse = fullText || 'No response from AI. Try again.';
                 break;
             }
 

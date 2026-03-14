@@ -1215,9 +1215,19 @@ export async function startAiREPL(
                     process.stdout.write(pending);
                 }
 
-                if (!brainResult || !brainResult.code) {
+                if (!brainResult) {
                     spinner.stop();
-                    log(color.red('\n  Brain returned no response. Check your connection or API key.'));
+                    log(color.red('\n  No internet connection. Check your network and try again.'));
+                    break;
+                }
+                if ((brainResult as any).error) {
+                    spinner.stop();
+                    log(color.red(`\n  ${(brainResult as any).error}`));
+                    break;
+                }
+                if (!brainResult.code) {
+                    spinner.stop();
+                    log(color.red('\n  No response from AI. Try again.'));
                     break;
                 }
 

@@ -136,7 +136,11 @@ export async function fetchBrainStream(
 
         if (!response.ok) {
             logVerbose('Brain stream returned', response.status);
-            return null;
+            const errorHint = response.status === 401 ? 'Invalid API key.'
+                : response.status === 429 ? 'Rate limited. Wait a moment and try again.'
+                : response.status >= 500 ? 'Brain server error. Try again.'
+                : `Brain returned HTTP ${response.status}.`;
+            return { code: '', sources: [], context: {}, validation: null, usage: null, error: errorHint } as any;
         }
 
         let fullText = '';
@@ -212,8 +216,22 @@ export async function fetchBrainStream(
             usage: doneData?.usage || null,
         };
     } catch (err: unknown) {
-        logVerbose('Brain stream unreachable:', (err as Error).message);
-        return null;
+        const msg = (err as Error).message || '';
+        logVerbose('Brain stream unreachable:', msg);
+
+        // Classify the error for user-friendly messages
+        let errorHint: string;
+        if (msg.includes('fetch failed') || msg.includes('ENOTFOUND') || msg.includes('ECONNREFUSED') || msg.includes('NetworkError') || msg.includes('getaddrinfo')) {
+            errorHint = 'No internet connection. Check your network and try again.';
+        } else if (msg.includes('abort') || msg.includes('timeout') || msg.includes('TimeoutError')) {
+            errorHint = 'Request timed out. The server might be slow — try again.';
+        } else if (msg.includes('CERT') || msg.includes('SSL') || msg.includes('certificate')) {
+            errorHint = 'SSL/certificate error. Check your network or proxy settings.';
+        } else {
+            errorHint = `Connection failed: ${msg.slice(0, 100)}`;
+        }
+
+        return { code: '', sources: [], context: {}, validation: null, usage: null, error: errorHint } as any;
     }
 }
 
