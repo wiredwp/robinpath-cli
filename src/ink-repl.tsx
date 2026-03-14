@@ -102,9 +102,9 @@ function InputArea({onSubmit, placeholder}: {onSubmit: (v: string) => void; plac
                 </Box>
             )}
 
-            <Box flexDirection="column" marginX={1}>
-                <Text dimColor>{'─'.repeat(w)}</Text>
-                <Box paddingX={1} flexDirection="column">
+            <Box flexDirection="column">
+                <Text dimColor>{'─'.repeat(Math.max(process.stdout.columns || 80, 40))}</Text>
+                <Box paddingX={2} flexDirection="column">
                     {empty ? (
                         <Text dimColor>{'> '}{placeholder}</Text>
                     ) : (
@@ -117,17 +117,11 @@ function InputArea({onSubmit, placeholder}: {onSubmit: (v: string) => void; plac
                         ))
                     )}
                 </Box>
-                <Text dimColor>{'─'.repeat(w)}</Text>
+                <Text dimColor>{'─'.repeat(Math.max(process.stdout.columns || 80, 40))}</Text>
             </Box>
 
-            <Box marginX={2}>
-                <Text dimColor>
-                    <Text color="gray">enter</Text>{' send  '}
-                    <Text color="gray">\</Text>{' newline  '}
-                    <Text color="gray">/</Text>{' commands  '}
-                    <Text color="gray">tab</Text>{' complete  '}
-                    <Text color="gray">@/</Text>{' files'}
-                </Text>
+            <Box paddingX={2}>
+                <Text dimColor>enter send · \ newline · / commands · @/ files</Text>
             </Box>
         </Box>
     );
@@ -274,9 +268,10 @@ class ReplEngine {
 
     updateStatus() {
         const m = this.model.includes('/') ? this.model.split('/').pop() : this.model;
-        const cost = this.usage.cost > 0 ? ` · $${this.usage.cost.toFixed(4)}` : '';
-        const tokens = this.usage.totalTokens > 0 ? ` · ${this.usage.totalTokens.toLocaleString()} tok` : '';
-        this.ui?.setStatus(`${m} · ${getShellConfig().name} · ${this.autoAccept ? 'auto' : 'confirm'}${tokens}${cost}`);
+        const parts: string[] = [m || 'default'];
+        if (this.usage.totalTokens > 0) parts.push(`${this.usage.totalTokens.toLocaleString()} tokens`);
+        if (this.usage.cost > 0) parts.push(`$${this.usage.cost.toFixed(4)}`);
+        this.ui?.setStatus(parts.join(' · '));
     }
 
     exit() {
