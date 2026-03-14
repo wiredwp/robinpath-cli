@@ -257,21 +257,16 @@ function ChatApp({engine}: {engine: ReplEngine}) {
         <Box flexDirection="column" paddingY={1}>
             {/* Welcome banner — only shows before first message */}
             {isFirst && !loading ? (
-                <Box borderStyle="round" borderColor="gray" marginBottom={1} paddingX={2} paddingY={1}>
+                <Box borderStyle="round" borderColor="gray" paddingX={1}>
                     <Box flexDirection="column" width="50%">
-                        <Text> </Text>
-                        <Text bold>        Welcome to RobinPath!</Text>
-                        <Text> </Text>
-                        <Text>        <Text color="cyan" bold>◆</Text> <Text dimColor>{modelName}</Text></Text>
-                        <Text>        <Text dimColor>{cwdShort}</Text></Text>
-                        <Text> </Text>
+                        <Text bold>  Welcome to RobinPath!</Text>
+                        <Text>  <Text color="cyan" bold>◆</Text> <Text dimColor>{modelName}</Text></Text>
+                        <Text>  <Text dimColor>{cwdShort}</Text></Text>
                     </Box>
                     <Box flexDirection="column" width="50%">
-                        <Text bold>Tips</Text>
-                        <Text dimColor>Type <Text color="cyan">/</Text> to see all commands</Text>
+                        <Text dimColor>Type <Text color="cyan">/</Text> to see commands</Text>
                         <Text dimColor>Use <Text color="cyan">@/file</Text> to include files</Text>
-                        <Text dimColor>Use <Text color="cyan">\</Text> at end for multiline</Text>
-                        <Text dimColor>Type <Text color="cyan">exit</Text> to quit</Text>
+                        <Text dimColor>Use <Text color="cyan">\</Text> for multiline</Text>
                     </Box>
                 </Box>
             ) : null}
