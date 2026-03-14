@@ -36,13 +36,7 @@ export function executeShellCommand(command: string, timeout: number = 30000): P
         });
 
         child.stdout.on('data', (data: Buffer) => {
-            const chunk = data.toString();
-            stdout += chunk;
-            // Stream output live (dim, indented)
-            const lines = chunk.replace(/\n$/, '').split('\n');
-            for (const line of lines) {
-                if (line.trim()) process.stdout.write(color.dim(`    ${line}\n`));
-            }
+            stdout += data.toString();
         });
 
         child.stderr.on('data', (data: Buffer) => {

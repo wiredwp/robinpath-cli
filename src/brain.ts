@@ -185,15 +185,9 @@ export async function fetchBrainStream(
                         if (onToken) onToken(delta);
                     } else if (eventType === 'validation') {
                         if (parsed.retrying) {
-                            // Clear the bad output from screen: move cursor up and erase each line
-                            const lines = fullText.split('\n').length;
-                            for (let i = 0; i < lines; i++) {
-                                process.stdout.write('\x1b[2K\x1b[1A'); // erase line + move up
-                            }
-                            process.stdout.write('\x1b[2K\r'); // erase current line
-                            fullText = ''; // Reset — retry will replace
+                            // Reset text — let the caller handle UI clearing via RETRY signal
+                            fullText = '';
                             if (onToken) {
-                                // Signal the caller to reset any internal buffers too
                                 onToken('\x1b[RETRY]');
                             }
                         }

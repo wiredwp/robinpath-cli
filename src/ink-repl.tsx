@@ -439,18 +439,39 @@ class ReplEngine {
 
             if (cleaned) ui?.addMessage(cleaned);
 
+            // Execute commands and collect results
+            const cmdResults: {command: string; stdout: string; stderr: string; exitCode: number}[] = [];
             for (const cmd of commands) {
                 const preview = cmd.split('\n')[0].slice(0, 80);
                 ui?.addMessage(`$ ${preview}${cmd.includes('\n') ? ' ...' : ''}`, true);
                 const r = await executeShellCommand(cmd);
+                cmdResults.push({command: cmd, stdout: r.stdout || '', stderr: r.stderr || '', exitCode: r.exitCode});
+
+                // Display result (truncated for UI, full for AI)
                 if (r.exitCode === 0 && r.stdout?.trim()) {
-                    ui?.addMessage(r.stdout.trim().split('\n').slice(0, 5).join('\n'), true);
+                    const lines = r.stdout.trim().split('\n');
+                    if (lines.length <= 15) {
+                        ui?.addMessage(lines.join('\n'), true);
+                    } else {
+                        ui?.addMessage(
+                            `${lines.slice(0, 5).join('\n')}\n... (${lines.length - 10} lines hidden)\n${lines.slice(-5).join('\n')}`,
+                            true,
+                        );
+                    }
                 } else if (r.exitCode !== 0) {
-                    ui?.addMessage(`exit ${r.exitCode}: ${(r.stderr || '').slice(0, 100)}`, true);
+                    ui?.addMessage(`exit ${r.exitCode}: ${(r.stderr || '').slice(0, 200)}`, true);
+                } else {
+                    ui?.addMessage('done', true);
                 }
             }
 
-            const summary = commands.map(cmd => `$ ${cmd}\n(executed)`).join('\n');
+            // Send full results to AI (not truncated for display)
+            const summary = cmdResults.map(r => {
+                let out = `$ ${r.command}\n`;
+                if (r.exitCode === 0) out += (r.stdout || '(no output)').slice(0, 5000);
+                else { out += `Exit: ${r.exitCode}\n`; if (r.stderr) out += r.stderr.slice(0, 2000); }
+                return out;
+            }).join('\n\n');
             this.conversationMessages.push({role: 'user', content: `[Results]\n${summary}`});
             ui?.setStreaming('');
             finalResponse = '';
