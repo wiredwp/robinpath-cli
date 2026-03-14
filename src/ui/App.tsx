@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { Box, Static, Text } from 'ink';
 import { Banner } from './Banner';
+import { StatusBar } from './StatusBar';
 import { InputBox } from './InputBox';
 import { ChatMessage } from './ChatMessage';
 import { Spinner } from './Spinner';
@@ -12,37 +13,40 @@ export interface AppMessage {
 }
 
 interface AppProps {
+    version: string;
     model: string;
     mode: string;
     dir: string;
     shell: string;
-    projectInfo?: string;
     onSubmit: (text: string) => Promise<string | null>;
 }
 
 let msgId = 0;
 
-export function App({ model, mode, dir, shell, projectInfo, onSubmit }: AppProps) {
+export function App({ version, model, mode, dir, shell, onSubmit }: AppProps) {
     const [messages, setMessages] = useState<AppMessage[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [streamText, setStreamText] = useState('');
-    const [spinnerLabel, setSpinnerLabel] = useState('Thinking...');
+    const [spinnerLabel, setSpinnerLabel] = useState('Thinking');
+    const [totalTokens, setTotalTokens] = useState(0);
+    const [totalCost, setTotalCost] = useState(0);
 
-    // Expose setters for external code to drive the UI
+    // Expose UI control for the REPL engine
     const ui = (global as any).__rpUI = (global as any).__rpUI || {};
     ui.setStreamText = setStreamText;
     ui.setSpinnerLabel = setSpinnerLabel;
     ui.setLoading = setIsLoading;
+    ui.setTokens = setTotalTokens;
+    ui.setCost = setTotalCost;
     ui.addMessage = (role: 'user' | 'assistant' | 'system', content: string) => {
         setMessages(prev => [...prev, { id: ++msgId, role, content }]);
     };
 
     const handleSubmit = useCallback(async (text: string) => {
-        // Add user message
         setMessages(prev => [...prev, { id: ++msgId, role: 'user', content: text }]);
         setIsLoading(true);
         setStreamText('');
-        setSpinnerLabel('Thinking...');
+        setSpinnerLabel('Thinking');
 
         try {
             const response = await onSubmit(text);
@@ -59,32 +63,38 @@ export function App({ model, mode, dir, shell, projectInfo, onSubmit }: AppProps
 
     return (
         <Box flexDirection="column">
-            <Banner model={model} mode={mode} dir={dir} shell={shell} projectInfo={projectInfo} />
+            {/* Header */}
+            <Banner version={version} />
 
-            {/* Completed messages — Static prevents re-rendering */}
+            {/* Completed messages */}
             <Static items={messages}>
                 {(msg) => (
                     <ChatMessage key={msg.id} role={msg.role} content={msg.content} />
                 )}
             </Static>
 
-            {/* Streaming response */}
+            {/* Streaming */}
             {isLoading && streamText ? (
                 <ChatMessage role="assistant" content={streamText} isStreaming />
             ) : null}
 
-            {/* Spinner */}
-            {isLoading && !streamText ? (
-                <Box marginBottom={1}>
-                    <Spinner label={spinnerLabel} />
-                </Box>
-            ) : null}
+            {/* Loading */}
+            {isLoading && !streamText ? <Spinner label={spinnerLabel} /> : null}
 
-            {/* Input box */}
+            {/* Input */}
             <InputBox
                 onSubmit={handleSubmit}
                 isActive={!isLoading}
-                placeholder={messages.length === 0 ? 'What do you want to automate today?' : 'Type a message...'}
+                placeholder={messages.length === 0 ? 'What do you want to automate?' : 'Ask anything...'}
+            />
+
+            {/* Status bar */}
+            <StatusBar
+                model={model}
+                shell={shell}
+                mode={mode}
+                tokens={totalTokens}
+                cost={totalCost}
             />
         </Box>
     );

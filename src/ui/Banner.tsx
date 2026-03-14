@@ -2,26 +2,17 @@ import React from 'react';
 import { Box, Text } from 'ink';
 
 interface BannerProps {
-    model: string;
-    mode: string;
-    dir: string;
-    shell: string;
-    projectInfo?: string;
+    version: string;
 }
 
-export function Banner({ model, mode, dir, shell, projectInfo }: BannerProps) {
-    const modeColor = mode === 'confirm' ? 'green' : 'yellow';
-
+export function Banner({ version }: BannerProps) {
     return (
-        <Box flexDirection="column" marginBottom={1}>
-            <Box borderStyle="round" borderColor="gray" flexDirection="column" paddingX={1}>
-                <Text bold> RobinPath AI</Text>
-                <Text>  Model: <Text color="cyan">{model}</Text></Text>
-                <Text>  Mode:  <Text color={modeColor}>{mode}</Text></Text>
-                <Text>  Dir:   <Text dimColor>{dir}</Text></Text>
-                <Text>  Shell: <Text dimColor>{shell}</Text></Text>
-            </Box>
-            {projectInfo && <Text dimColor>  {projectInfo}</Text>}
+        <Box flexDirection="column" marginBottom={1} marginTop={1}>
+            <Text>
+                <Text bold color="cyan">{'  ◆ '}</Text>
+                <Text bold>RobinPath</Text>
+                <Text dimColor> v{version}</Text>
+            </Text>
         </Box>
     );
 }

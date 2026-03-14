@@ -205,6 +205,9 @@ export async function startInkREPL(
                 usage.totalTokens += pt + ct;
                 usage.requests++;
                 usage.cost += estimateCost(activeModel, pt, ct);
+                // Update status bar
+                if (ui?.setTokens) ui.setTokens(usage.totalTokens);
+                if (ui?.setCost) ui.setCost(usage.cost);
             }
 
             const commands = extractCommands(brainResult.code);
@@ -252,11 +255,11 @@ export async function startInkREPL(
     // Render the Ink app
     const { waitUntilExit } = render(
         <App
+            version={CLI_VERSION}
             model={modelShort}
             mode={modeStr}
             dir={cwdShort}
             shell={getShellConfig().name}
-            projectInfo={projectInfo}
             onSubmit={handleMessage}
         />,
     );

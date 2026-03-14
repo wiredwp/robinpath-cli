@@ -1,16 +1,18 @@
 import React from 'react';
-import { Text } from 'ink';
+import { Box, Text } from 'ink';
 import InkSpinner from 'ink-spinner';
 
 interface SpinnerProps {
     label?: string;
 }
 
-export function Spinner({ label = 'Thinking...' }: SpinnerProps) {
+export function Spinner({ label = 'Thinking' }: SpinnerProps) {
     return (
-        <Text>
-            <Text color="cyan"><InkSpinner type="dots" /></Text>
-            <Text dimColor> {label}</Text>
-        </Text>
+        <Box paddingX={2} paddingLeft={4} marginBottom={1}>
+            <Text dimColor>
+                <InkSpinner type="dots" />
+                {' '}{label}
+            </Text>
+        </Box>
     );
 }
