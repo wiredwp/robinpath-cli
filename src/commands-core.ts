@@ -2,7 +2,16 @@
  * RobinPath CLI — Core commands and utilities
  * Extracted from cli-entry.js and converted to TypeScript.
  */
-import { readFileSync, existsSync, mkdirSync, copyFileSync, rmSync, writeFileSync, chmodSync, unlinkSync } from 'node:fs';
+import {
+    readFileSync,
+    existsSync,
+    mkdirSync,
+    copyFileSync,
+    rmSync,
+    writeFileSync,
+    chmodSync,
+    unlinkSync,
+} from 'node:fs';
 import { resolve, extname, join, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
 import { homedir, platform } from 'node:os';
@@ -26,7 +35,7 @@ import { RobinPath, ROBINPATH_VERSION, nativeModules, formatErrorWithContext } f
 
 interface NativeModule {
     name: string;
-    functions: Record<string, Function>;
+    functions: Record<string, (...args: any[]) => any>;
     functionMetadata?: Record<string, unknown>;
     moduleMetadata?: Record<string, unknown>;
 }
@@ -61,10 +70,12 @@ export function toTarPath(p: string): string {
 export async function checkForUpdates(): Promise<void> {
     try {
         const res = await fetch('https://api.github.com/repos/wiredwp/robinpath-cli/releases/latest');
-        const data = await res.json() as { tag_name: string };
+        const data = (await res.json()) as { tag_name: string };
         const latest: string = data.tag_name.replace('v', '');
         if (latest !== CLI_VERSION) {
-            console.log(`\n${color.yellow('⚡')} New version available: ${color.green('v' + latest)} (you have v${CLI_VERSION})`);
+            console.log(
+                `\n${color.yellow('⚡')} New version available: ${color.green('v' + latest)} (you have v${CLI_VERSION})`,
+            );
             console.log(`   Run ${color.cyan('robinpath update')} to upgrade\n`);
         }
     } catch {
@@ -78,7 +89,10 @@ export function handleUpdate(): void {
     const env = { ...process.env, ROBINPATH_CURRENT_VERSION: CLI_VERSION };
     try {
         if (isWindows) {
-            execSync('powershell -NoProfile -Command "irm https://dev.robinpath.com/install.ps1 | iex"', { stdio: 'inherit', env });
+            execSync('powershell -NoProfile -Command "irm https://dev.robinpath.com/install.ps1 | iex"', {
+                stdio: 'inherit',
+                env,
+            });
         } else {
             execSync('curl -fsSL https://dev.robinpath.com/install.sh | sh', { stdio: 'inherit', env });
         }
@@ -132,13 +146,13 @@ export function handleInstall(): void {
         try {
             const checkPath: string = execSync(
                 `powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('Path','User')"`,
-                { encoding: 'utf-8' }
+                { encoding: 'utf-8' },
             ).trim();
 
             if (!checkPath.includes(installDir)) {
                 execSync(
                     `powershell -NoProfile -Command "[Environment]::SetEnvironmentVariable('Path','${installDir};' + [Environment]::GetEnvironmentVariable('Path','User'),'User')"`,
-                    { encoding: 'utf-8' }
+                    { encoding: 'utf-8' },
                 );
             }
         } catch {
@@ -181,7 +195,7 @@ export function handleUninstall(): void {
         try {
             execSync(
                 `powershell -NoProfile -Command "$p = [Environment]::GetEnvironmentVariable('Path','User'); $clean = ($p -split ';' | Where-Object { $_ -notlike '*\\.robinpath\\bin*' }) -join ';'; [Environment]::SetEnvironmentVariable('Path',$clean,'User')"`,
-                { encoding: 'utf-8' }
+                { encoding: 'utf-8' },
             );
             log('Removed from PATH');
         } catch {
@@ -293,7 +307,11 @@ export function writeAuth(data: AuthData): void {
     writeFileSync(authPath, JSON.stringify(data, null, 2), 'utf-8');
     // Restrict permissions on Unix
     if (platform() !== 'win32') {
-        try { chmodSync(authPath, 0o600); } catch { /* ignore */ }
+        try {
+            chmodSync(authPath, 0o600);
+        } catch {
+            /* ignore */
+        }
     }
 }
 
@@ -323,9 +341,15 @@ export function requireAuth(): string {
     return token;
 }
 
-export async function platformFetch(path: string, opts: RequestInit & { headers?: Record<string, string> } = {}): Promise<Response> {
+export async function platformFetch(
+    path: string,
+    opts: RequestInit & { headers?: Record<string, string> } = {},
+): Promise<Response> {
     const token: string = requireAuth();
-    const headers: Record<string, string> = { Authorization: `Bearer ${token}`, ...opts.headers };
+    const headers: Record<string, string> = { ...opts.headers, Authorization: `Bearer ${token}` } as Record<
+        string,
+        string
+    >;
     const url: string = `${PLATFORM_URL}${path}`;
     const res: Response = await fetch(url, { ...opts, headers });
     return res;
@@ -424,7 +448,9 @@ export async function loadInstalledModules(rp: RobinPath): Promise<void> {
                 try {
                     const pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf-8')) as { main?: string };
                     if (pkg.main) entryPoint = pkg.main;
-                } catch { /* use default */ }
+                } catch {
+                    /* use default */
+                }
             }
 
             const modulePath: string = join(modDir, entryPoint);
@@ -433,7 +459,9 @@ export async function loadInstalledModules(rp: RobinPath): Promise<void> {
                 continue;
             }
 
-            const mod = await import(pathToFileURL(modulePath).href) as { default?: NativeModule & { global?: boolean } };
+            const mod = (await import(pathToFileURL(modulePath).href)) as {
+                default?: NativeModule & { global?: boolean };
+            };
             const adapter = mod.default;
 
             if (!adapter || !adapter.name || !adapter.functions) {
@@ -442,25 +470,27 @@ export async function loadInstalledModules(rp: RobinPath): Promise<void> {
             }
 
             // Register module using public API
-            rp.registerModule(adapter.name, adapter.functions);
+            rp.registerModule(adapter.name, adapter.functions as any);
             if (adapter.functionMetadata) {
-                rp.registerModuleMeta(adapter.name, adapter.functionMetadata);
+                rp.registerModuleMeta(adapter.name, adapter.functionMetadata as any);
             }
             if (adapter.moduleMetadata) {
-                rp.registerModuleInfo(adapter.name, adapter.moduleMetadata);
+                rp.registerModuleInfo(adapter.name, adapter.moduleMetadata as any);
             }
 
             // If global, also register functions without module prefix
             if (adapter.global === true) {
                 for (const [funcName, handler] of Object.entries(adapter.functions)) {
-                    rp.registerBuiltin(funcName, handler);
+                    rp.registerBuiltin(funcName, handler as any);
                 }
             }
 
             if (FLAG_VERBOSE) logVerbose(`Loaded module: ${packageName}@${info.version}`);
         } catch (err: unknown) {
             // Never fatal — warn and continue
-            console.error(color.yellow('Warning:') + ` Failed to load module ${packageName}: ${(err as Error).message}`);
+            console.error(
+                color.yellow('Warning:') + ` Failed to load module ${packageName}: ${(err as Error).message}`,
+            );
         }
     }
 }
@@ -507,7 +537,7 @@ export function decodeJWTPayload(token: string): Record<string, unknown> | null 
         const parts: string[] = token.split('.');
         if (parts.length !== 3) return null;
         const payload: string = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-        const padded: string = payload + '='.repeat((4 - payload.length % 4) % 4);
+        const padded: string = payload + '='.repeat((4 - (payload.length % 4)) % 4);
         return JSON.parse(Buffer.from(padded, 'base64').toString('utf-8')) as Record<string, unknown>;
     } catch {
         return null;

@@ -7,13 +7,7 @@ import { resolve, basename, extname, join } from 'node:path';
 import { homedir, platform } from 'node:os';
 import { createInterface } from 'node:readline';
 
-import {
-    color,
-    log,
-    logVerbose,
-    CLI_VERSION,
-    getRobinPathHome,
-} from './utils';
+import { color, log, logVerbose, CLI_VERSION, getRobinPathHome } from './utils';
 
 import {
     requireAuth,
@@ -32,7 +26,18 @@ import { readStdin } from './server';
 
 const PLATFORM_URL: string = process.env.ROBINPATH_PLATFORM_URL || 'https://api.robinpath.com';
 
-const SNIPPET_CATEGORIES: string[] = ['forms', 'notifications', 'crm', 'e-commerce', 'data-processing', 'auth', 'ai', 'webhooks', 'utilities', 'other'];
+const SNIPPET_CATEGORIES: string[] = [
+    'forms',
+    'notifications',
+    'crm',
+    'e-commerce',
+    'data-processing',
+    'auth',
+    'ai',
+    'webhooks',
+    'utilities',
+    'other',
+];
 const SNIPPET_SORTS: string[] = ['popular', 'stars', 'newest', 'updated'];
 
 // ---------------------------------------------------------------------------
@@ -150,25 +155,30 @@ function formatTimeAgo(dateStr: string | null | undefined): string {
 // ---------------------------------------------------------------------------
 
 function parseSnippetFlags(args: string[]): SnippetFlags {
-    const flags: SnippetFlags = { json: args.includes('--json'), force: args.includes('--force'), codeOnly: args.includes('--code-only') || args.includes('--code'), positional: [] };
+    const flags: SnippetFlags = {
+        json: args.includes('--json'),
+        force: args.includes('--force'),
+        codeOnly: args.includes('--code-only') || args.includes('--code'),
+        positional: [],
+    };
     for (const a of args) {
-        if (a.startsWith('--page='))        flags.page = a.split('=')[1];
-        if (a.startsWith('--limit='))       flags.limit = a.split('=')[1];
-        if (a.startsWith('--name='))        flags.name = a.split('=')[1];
+        if (a.startsWith('--page=')) flags.page = a.split('=')[1];
+        if (a.startsWith('--limit=')) flags.limit = a.split('=')[1];
+        if (a.startsWith('--name=')) flags.name = a.split('=')[1];
         if (a.startsWith('--description=')) flags.description = a.split('=')[1];
-        if (a.startsWith('--visibility='))  flags.visibility = a.split('=')[1];
-        if (a.startsWith('--category='))    flags.category = a.split('=')[1];
-        if (a.startsWith('--tags='))        flags.tags = a.split('=')[1];
-        if (a.startsWith('--status='))      flags.status = a.split('=')[1];
-        if (a.startsWith('--license='))     flags.license = a.split('=')[1];
-        if (a.startsWith('--version='))     flags.version = a.split('=')[1];
-        if (a.startsWith('--sort='))        flags.sort = a.split('=')[1];
-        if (a.startsWith('--code='))        flags.code = a.split('=')[1];
-        if (a.startsWith('--changelog='))   flags.changelog = a.split('=')[1];
-        if (a.startsWith('--format='))      flags.format = a.split('=')[1];
-        if (a.startsWith('--readme='))      flags.readme = a.split('=')[1];
+        if (a.startsWith('--visibility=')) flags.visibility = a.split('=')[1];
+        if (a.startsWith('--category=')) flags.category = a.split('=')[1];
+        if (a.startsWith('--tags=')) flags.tags = a.split('=')[1];
+        if (a.startsWith('--status=')) flags.status = a.split('=')[1];
+        if (a.startsWith('--license=')) flags.license = a.split('=')[1];
+        if (a.startsWith('--version=')) flags.version = a.split('=')[1];
+        if (a.startsWith('--sort=')) flags.sort = a.split('=')[1];
+        if (a.startsWith('--code=')) flags.code = a.split('=')[1];
+        if (a.startsWith('--changelog=')) flags.changelog = a.split('=')[1];
+        if (a.startsWith('--format=')) flags.format = a.split('=')[1];
+        if (a.startsWith('--readme=')) flags.readme = a.split('=')[1];
     }
-    flags.positional = args.filter(a => a === '-' || !a.startsWith('-'));
+    flags.positional = args.filter((a) => a === '-' || !a.startsWith('-'));
     return flags;
 }
 
@@ -217,14 +227,16 @@ async function resolveSnippetId(partialId: string): Promise<string> {
         });
         if (!res.ok) return partialId;
 
-        const body: SnippetListResponse = await res.json() as SnippetListResponse;
+        const body: SnippetListResponse = (await res.json()) as SnippetListResponse;
         const snippets: SnippetData[] = body.data || [];
         const upper: string = partialId.toUpperCase();
-        const matches: SnippetData[] = snippets.filter(s => s.id && s.id.toUpperCase().startsWith(upper));
+        const matches: SnippetData[] = snippets.filter((s) => s.id && s.id.toUpperCase().startsWith(upper));
 
         if (matches.length === 1) return matches[0].id!;
         if (matches.length > 1) {
-            console.error(color.yellow('Warning:') + ` Ambiguous ID '${partialId}' matches ${matches.length} snippets:`);
+            console.error(
+                color.yellow('Warning:') + ` Ambiguous ID '${partialId}' matches ${matches.length} snippets:`,
+            );
             for (const m of matches.slice(0, 5)) {
                 console.error(`  ${color.cyan(m.id!)}  ${m.name || 'untitled'}`);
             }
@@ -246,31 +258,33 @@ export async function handleSnippet(args: string[]): Promise<void> {
     const sub: string | undefined = args[0];
     const subArgs: string[] = args.slice(1);
 
-    if (!sub || sub === 'list')                             return snippetList(subArgs);
-    if (sub === 'create' || sub === 'new')                  return snippetCreate(subArgs);
-    if (sub === 'init')                                     return snippetInit(subArgs);
-    if (sub === 'get' || sub === 'view' || sub === 'show')  return snippetGet(subArgs);
-    if (sub === 'update' || sub === 'edit')                 return snippetUpdate(subArgs);
-    if (sub === 'delete' || sub === 'rm')                   return snippetDelete(subArgs);
-    if (sub === 'explore' || sub === 'browse')              return snippetExplore(subArgs);
-    if (sub === 'search')                                   return snippetExplore(subArgs);
-    if (sub === 'star')                                     return snippetStar(subArgs);
-    if (sub === 'unstar')                                   return snippetUnstar(subArgs);
-    if (sub === 'fork')                                     return snippetFork(subArgs);
-    if (sub === 'publish')                                  return snippetPublish(subArgs);
-    if (sub === 'unpublish')                                return snippetUnpublish(subArgs);
-    if (sub === 'copy' || sub === 'cp')                      return snippetCopy(subArgs);
-    if (sub === 'run' || sub === 'exec')                    return snippetRun(subArgs);
-    if (sub === 'pull' || sub === 'download')               return snippetPull(subArgs);
-    if (sub === 'push')                                     return snippetPush(subArgs);
-    if (sub === 'version')                                  return snippetVersion(subArgs);
-    if (sub === 'export')                                   return snippetExport(subArgs);
-    if (sub === 'import')                                   return snippetImport(subArgs);
-    if (sub === 'diff')                                     return snippetDiff(subArgs);
-    if (sub === 'trending')                                 return snippetExplore(['--sort=popular', ...subArgs]);
+    if (!sub || sub === 'list') return snippetList(subArgs);
+    if (sub === 'create' || sub === 'new') return snippetCreate(subArgs);
+    if (sub === 'init') return snippetInit(subArgs);
+    if (sub === 'get' || sub === 'view' || sub === 'show') return snippetGet(subArgs);
+    if (sub === 'update' || sub === 'edit') return snippetUpdate(subArgs);
+    if (sub === 'delete' || sub === 'rm') return snippetDelete(subArgs);
+    if (sub === 'explore' || sub === 'browse') return snippetExplore(subArgs);
+    if (sub === 'search') return snippetExplore(subArgs);
+    if (sub === 'star') return snippetStar(subArgs);
+    if (sub === 'unstar') return snippetUnstar(subArgs);
+    if (sub === 'fork') return snippetFork(subArgs);
+    if (sub === 'publish') return snippetPublish(subArgs);
+    if (sub === 'unpublish') return snippetUnpublish(subArgs);
+    if (sub === 'copy' || sub === 'cp') return snippetCopy(subArgs);
+    if (sub === 'run' || sub === 'exec') return snippetRun(subArgs);
+    if (sub === 'pull' || sub === 'download') return snippetPull(subArgs);
+    if (sub === 'push') return snippetPush(subArgs);
+    if (sub === 'version') return snippetVersion(subArgs);
+    if (sub === 'export') return snippetExport(subArgs);
+    if (sub === 'import') return snippetImport(subArgs);
+    if (sub === 'diff') return snippetDiff(subArgs);
+    if (sub === 'trending') return snippetExplore(['--sort=popular', ...subArgs]);
 
     console.error(color.red('Error:') + ` Unknown snippet subcommand: ${sub}`);
-    console.error('Available: list, create, get, update, delete, explore, search, star, unstar, fork, publish, unpublish, copy, run, pull, push, version, diff, export, import, trending');
+    console.error(
+        'Available: list, create, get, update, delete, explore, search, star, unstar, fork, publish, unpublish, copy, run, pull, push, version, diff, export, import, trending',
+    );
     process.exit(2);
 }
 
@@ -294,11 +308,14 @@ async function snippetList(args: string[]): Promise<void> {
         const res: Response = await platformFetch(`/v1/snippets?${params}`);
         if (!res.ok) {
             const body: Record<string, any> = await res.json().catch(() => ({}));
-            console.error(color.red('Error:') + ` Failed to list snippets (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+            console.error(
+                color.red('Error:') +
+                    ` Failed to list snippets (HTTP ${res.status}): ${body.error?.message || res.statusText}`,
+            );
             process.exit(1);
         }
 
-        const body: SnippetListResponse = await res.json() as SnippetListResponse;
+        const body: SnippetListResponse = (await res.json()) as SnippetListResponse;
         const snippets: SnippetData[] = body.data || [];
         const pagination: Pagination | null = body.pagination || null;
 
@@ -332,7 +349,9 @@ async function snippetList(args: string[]): Promise<void> {
             const cat: string = s.category ? color.dim(` [${s.category}]`) : '';
 
             log(color.bold('  ' + (s.name || 'Untitled')) + cat);
-            log(`    ${vis}  ${color.dim('|')}  ${status}  ${color.dim('|')}  ${color.dim(updated)}  ${color.dim('|')}  \u2605 ${formatCompactNumber(s.starCount)}`);
+            log(
+                `    ${vis}  ${color.dim('|')}  ${status}  ${color.dim('|')}  ${color.dim(updated)}  ${color.dim('|')}  \u2605 ${formatCompactNumber(s.starCount)}`,
+            );
             if (s.description) log(`    ${color.dim(s.description.slice(0, 80))}`);
             log(`    ${color.dim('ID:')} ${color.cyan(s.id!)}`);
             log('');
@@ -412,12 +431,16 @@ async function snippetCreate(args: string[]): Promise<void> {
         language: 'robinpath',
     };
     if (flags.description) payload.description = flags.description;
-    if (flags.visibility)  payload.visibility = flags.visibility;
-    if (flags.category)    payload.category = flags.category;
-    if (flags.tags)        payload.tags = flags.tags.split(',').map(t => t.trim()).filter(Boolean);
-    if (flags.status)      payload.status = flags.status;
-    if (flags.license)     payload.license = flags.license;
-    if (flags.version)     payload.version = flags.version;
+    if (flags.visibility) payload.visibility = flags.visibility;
+    if (flags.category) payload.category = flags.category;
+    if (flags.tags)
+        payload.tags = flags.tags
+            .split(',')
+            .map((t) => t.trim())
+            .filter(Boolean);
+    if (flags.status) payload.status = flags.status;
+    if (flags.license) payload.license = flags.license;
+    if (flags.version) payload.version = flags.version;
     if (flags.readme) {
         const readmePath: string = resolve(flags.readme);
         if (existsSync(readmePath)) {
@@ -434,15 +457,20 @@ async function snippetCreate(args: string[]): Promise<void> {
 
         if (!res.ok) {
             const body: Record<string, any> = await res.json().catch(() => ({}));
-            console.error(color.red('Error:') + ` Failed to create snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+            console.error(
+                color.red('Error:') +
+                    ` Failed to create snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`,
+            );
             process.exit(1);
         }
 
-        const body: SnippetCreateResponse = await res.json() as SnippetCreateResponse;
+        const body: SnippetCreateResponse = (await res.json()) as SnippetCreateResponse;
         const id: string | undefined = body.id || body.data?.id;
 
         if (flags.json) {
-            console.log(JSON.stringify({ id, name: payload.name, visibility: payload.visibility || 'private' }, null, 2));
+            console.log(
+                JSON.stringify({ id, name: payload.name, visibility: payload.visibility || 'private' }, null, 2),
+            );
             return;
         }
 
@@ -469,10 +497,11 @@ async function snippetInit(args: string[]): Promise<void> {
     requireAuth();
 
     const rl = createInterface({ input: process.stdin, output: process.stdout });
-    const ask = (q: string, def: string): Promise<string> => new Promise(resolve => {
-        const suffix: string = def ? color.dim(` (${def})`) : '';
-        rl.question(`  ${q}${suffix}: `, answer => resolve(answer.trim() || def || ''));
-    });
+    const ask = (q: string, def: string): Promise<string> =>
+        new Promise((resolve) => {
+            const suffix: string = def ? color.dim(` (${def})`) : '';
+            rl.question(`  ${q}${suffix}: `, (answer) => resolve(answer.trim() || def || ''));
+        });
 
     log(color.bold('Create a new snippet') + '\n');
 
@@ -495,7 +524,12 @@ async function snippetInit(args: string[]): Promise<void> {
     const category: string = await ask('Category', '');
 
     const tagsRaw: string = await ask('Tags (comma-separated)', '');
-    const tags: string[] = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
+    const tags: string[] = tagsRaw
+        ? tagsRaw
+              .split(',')
+              .map((t) => t.trim())
+              .filter(Boolean)
+        : [];
 
     log('');
     log(color.dim('  Status: 1) published  2) draft'));
@@ -557,7 +591,7 @@ async function snippetInit(args: string[]): Promise<void> {
             process.exit(1);
         }
 
-        const body: SnippetCreateResponse = await res.json() as SnippetCreateResponse;
+        const body: SnippetCreateResponse = (await res.json()) as SnippetCreateResponse;
         const id: string | undefined = body.id || body.data?.id;
 
         log('');
@@ -595,14 +629,17 @@ async function snippetGet(args: string[]): Promise<void> {
         const res: Response = await fetchSnippet(id);
         if (!res.ok) {
             if (res.status === 404) {
-                console.error(color.red('Error:') + ` Snippet '${id}' not found. Private snippets require login (${color.cyan('robinpath login')}).`);
+                console.error(
+                    color.red('Error:') +
+                        ` Snippet '${id}' not found. Private snippets require login (${color.cyan('robinpath login')}).`,
+                );
             } else {
                 console.error(color.red('Error:') + ` Failed to fetch snippet (HTTP ${res.status})`);
             }
             process.exit(1);
         }
 
-        const body: SnippetGetResponse = await res.json() as SnippetGetResponse;
+        const body: SnippetGetResponse = (await res.json()) as SnippetGetResponse;
         const s: SnippetData = (body.data || body) as SnippetData;
 
         if (flags.json) {
@@ -624,9 +661,9 @@ async function snippetGet(args: string[]): Promise<void> {
         log('  Visibility: ' + (s.visibility === 'public' ? color.green('public') : color.dim('private')));
         log('  Status:     ' + (s.status || 'draft'));
         log('  Language:   ' + (s.language || 'robinpath'));
-        if (s.category)  log('  Category:   ' + s.category);
-        if (s.version)   log('  Version:    ' + s.version);
-        if (s.license)   log('  License:    ' + s.license);
+        if (s.category) log('  Category:   ' + s.category);
+        if (s.version) log('  Version:    ' + s.version);
+        if (s.license) log('  License:    ' + s.license);
         if (s.tags) {
             const tags: string[] = typeof s.tags === 'string' ? JSON.parse(s.tags) : s.tags;
             if (tags && tags.length) log('  Tags:       ' + tags.join(', '));
@@ -635,9 +672,9 @@ async function snippetGet(args: string[]): Promise<void> {
         if (s.viewCount != null) log('  Views:      ' + formatCompactNumber(s.viewCount));
         if (s.forkCount != null) log('  Forks:      ' + formatCompactNumber(s.forkCount));
         if (s.isStarred != null) log('  Starred:    ' + (s.isStarred ? color.yellow('\u2605 yes') : '\u2606 no'));
-        if (s.isOwner != null)   log('  Owner:      ' + (s.isOwner ? 'yes' : 'no'));
-        if (s.author)            log('  Author:     ' + (s.author.name || s.author.username || '-'));
-        if (s.forkedFrom)        log('  Forked from: ' + s.forkedFrom);
+        if (s.isOwner != null) log('  Owner:      ' + (s.isOwner ? 'yes' : 'no'));
+        if (s.author) log('  Author:     ' + (s.author.name || s.author.username || '-'));
+        if (s.forkedFrom) log('  Forked from: ' + s.forkedFrom);
         if (s.createdAt) log('  Created:    ' + formatTimeAgo(s.createdAt));
         if (s.updatedAt) log('  Updated:    ' + formatTimeAgo(s.updatedAt));
         log('');
@@ -699,15 +736,19 @@ async function snippetUpdate(args: string[]): Promise<void> {
     id = await resolveSnippetId(id);
 
     const payload: Record<string, any> = {};
-    if (flags.name)        payload.name = flags.name;
+    if (flags.name) payload.name = flags.name;
     if (flags.description) payload.description = flags.description;
-    if (flags.visibility)  payload.visibility = flags.visibility;
-    if (flags.category)    payload.category = flags.category;
-    if (flags.status)      payload.status = flags.status;
-    if (flags.license)     payload.license = flags.license;
-    if (flags.version)     payload.version = flags.version;
-    if (flags.changelog)   payload.changelog = flags.changelog;
-    if (flags.tags)        payload.tags = flags.tags.split(',').map(t => t.trim()).filter(Boolean);
+    if (flags.visibility) payload.visibility = flags.visibility;
+    if (flags.category) payload.category = flags.category;
+    if (flags.status) payload.status = flags.status;
+    if (flags.license) payload.license = flags.license;
+    if (flags.version) payload.version = flags.version;
+    if (flags.changelog) payload.changelog = flags.changelog;
+    if (flags.tags)
+        payload.tags = flags.tags
+            .split(',')
+            .map((t) => t.trim())
+            .filter(Boolean);
     if (flags.code) {
         const codePath: string = resolve(flags.code);
         if (!existsSync(codePath)) {
@@ -737,7 +778,10 @@ async function snippetUpdate(args: string[]): Promise<void> {
 
         if (!res.ok) {
             const body: Record<string, any> = await res.json().catch(() => ({}));
-            console.error(color.red('Error:') + ` Failed to update snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+            console.error(
+                color.red('Error:') +
+                    ` Failed to update snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`,
+            );
             process.exit(1);
         }
 
@@ -784,7 +828,10 @@ async function snippetDelete(args: string[]): Promise<void> {
                 console.error(color.red('Error:') + ` Snippet '${id}' not found.`);
             } else {
                 const body: Record<string, any> = await res.json().catch(() => ({}));
-                console.error(color.red('Error:') + ` Failed to delete snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+                console.error(
+                    color.red('Error:') +
+                        ` Failed to delete snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`,
+                );
             }
             process.exit(1);
         }
@@ -829,7 +876,11 @@ async function snippetExplore(args: string[]): Promise<void> {
     if (flags.page) params.set('page', flags.page);
     if (flags.limit) params.set('limit', flags.limit);
 
-    const searchLabel: string = query ? `"${query}"` : (flags.category ? `category: ${flags.category}` : 'public snippets');
+    const searchLabel: string = query
+        ? `"${query}"`
+        : flags.category
+          ? `category: ${flags.category}`
+          : 'public snippets';
     log(`Searching ${searchLabel}...\n`);
 
     try {
@@ -840,7 +891,7 @@ async function snippetExplore(args: string[]): Promise<void> {
             process.exit(1);
         }
 
-        const body: SnippetListResponse = await res.json() as SnippetListResponse;
+        const body: SnippetListResponse = (await res.json()) as SnippetListResponse;
         const snippets: SnippetData[] = body.data || [];
         const pagination: Pagination | null = body.pagination || null;
 
@@ -867,16 +918,22 @@ async function snippetExplore(args: string[]): Promise<void> {
             const badgeStr: string = badges.length ? ' ' + badges.join(' ') : '';
 
             log(color.bold('  ' + name) + badgeStr);
-            log(`    ${color.dim('by')} ${author}  ${color.dim('|')} ${cat}  ${color.dim('|')} \u2605 ${stars}  ${color.dim('|')} ${color.dim(updated)}`);
+            log(
+                `    ${color.dim('by')} ${author}  ${color.dim('|')} ${cat}  ${color.dim('|')} \u2605 ${stars}  ${color.dim('|')} ${color.dim(updated)}`,
+            );
             if (s.description) log(`    ${color.dim(s.description.slice(0, 80))}`);
             // Code preview — first 2 non-empty lines
             if (s.code) {
-                const previewLines: string[] = s.code.split('\n').filter(l => l.trim()).slice(0, 2);
+                const previewLines: string[] = s.code
+                    .split('\n')
+                    .filter((l) => l.trim())
+                    .slice(0, 2);
                 if (previewLines.length) {
                     log(color.dim('    \u250C ') + color.dim(previewLines[0].trim().slice(0, 70)));
                     if (previewLines[1]) log(color.dim('    \u2502 ') + color.dim(previewLines[1].trim().slice(0, 70)));
-                    const totalLines: number = s.code.split('\n').filter(l => l.trim()).length;
-                    if (totalLines > 2) log(color.dim(`    \u2514 ... ${totalLines - 2} more line${totalLines - 2 !== 1 ? 's' : ''}`));
+                    const totalLines: number = s.code.split('\n').filter((l) => l.trim()).length;
+                    if (totalLines > 2)
+                        log(color.dim(`    \u2514 ... ${totalLines - 2} more line${totalLines - 2 !== 1 ? 's' : ''}`));
                     else log(color.dim('    \u2514'));
                 }
             }
@@ -927,7 +984,10 @@ async function snippetStar(args: string[]): Promise<void> {
 
         if (!res.ok) {
             const body: Record<string, any> = await res.json().catch(() => ({}));
-            console.error(color.red('Error:') + ` Failed to star snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+            console.error(
+                color.red('Error:') +
+                    ` Failed to star snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`,
+            );
             process.exit(1);
         }
 
@@ -964,7 +1024,10 @@ async function snippetUnstar(args: string[]): Promise<void> {
 
         if (!res.ok) {
             const body: Record<string, any> = await res.json().catch(() => ({}));
-            console.error(color.red('Error:') + ` Failed to unstar snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+            console.error(
+                color.red('Error:') +
+                    ` Failed to unstar snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`,
+            );
             process.exit(1);
         }
 
@@ -1001,11 +1064,14 @@ async function snippetFork(args: string[]): Promise<void> {
 
         if (!res.ok) {
             const body: Record<string, any> = await res.json().catch(() => ({}));
-            console.error(color.red('Error:') + ` Failed to fork snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+            console.error(
+                color.red('Error:') +
+                    ` Failed to fork snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`,
+            );
             process.exit(1);
         }
 
-        const body: SnippetCreateResponse = await res.json() as SnippetCreateResponse;
+        const body: SnippetCreateResponse = (await res.json()) as SnippetCreateResponse;
         const newId: string | undefined = body.id || body.data?.id;
 
         if (flags.json) {
@@ -1047,7 +1113,10 @@ async function snippetPublish(args: string[]): Promise<void> {
 
         if (!res.ok) {
             const body: Record<string, any> = await res.json().catch(() => ({}));
-            console.error(color.red('Error:') + ` Failed to publish snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+            console.error(
+                color.red('Error:') +
+                    ` Failed to publish snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`,
+            );
             process.exit(1);
         }
 
@@ -1089,7 +1158,10 @@ async function snippetUnpublish(args: string[]): Promise<void> {
 
         if (!res.ok) {
             const body: Record<string, any> = await res.json().catch(() => ({}));
-            console.error(color.red('Error:') + ` Failed to unpublish snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+            console.error(
+                color.red('Error:') +
+                    ` Failed to unpublish snippet (HTTP ${res.status}): ${body.error?.message || res.statusText}`,
+            );
             process.exit(1);
         }
 
@@ -1125,14 +1197,17 @@ async function snippetCopy(args: string[]): Promise<void> {
         const res: Response = await fetchSnippet(id);
         if (!res.ok) {
             if (res.status === 404) {
-                console.error(color.red('Error:') + ` Snippet '${id}' not found. Private snippets require login (${color.cyan('robinpath login')}).`);
+                console.error(
+                    color.red('Error:') +
+                        ` Snippet '${id}' not found. Private snippets require login (${color.cyan('robinpath login')}).`,
+                );
             } else {
                 console.error(color.red('Error:') + ` Failed to fetch snippet (HTTP ${res.status})`);
             }
             process.exit(1);
         }
 
-        const body: SnippetGetResponse = await res.json() as SnippetGetResponse;
+        const body: SnippetGetResponse = (await res.json()) as SnippetGetResponse;
         const s: SnippetData = (body.data || body) as SnippetData;
         const code: string = s.code || '';
 
@@ -1154,7 +1229,9 @@ async function snippetCopy(args: string[]): Promise<void> {
             exec(clipCmd, { input: code, stdio: ['pipe', 'ignore', 'ignore'] });
 
             if (flags.json) {
-                console.log(JSON.stringify({ copied: true, id, name: s.name, bytes: Buffer.byteLength(code) }, null, 2));
+                console.log(
+                    JSON.stringify({ copied: true, id, name: s.name, bytes: Buffer.byteLength(code) }, null, 2),
+                );
                 return;
             }
 
@@ -1242,14 +1319,17 @@ async function snippetRun(args: string[]): Promise<void> {
                     s = stale;
                 } else {
                     if (res.status === 404) {
-                        console.error(color.red('Error:') + ` Snippet '${id}' not found. Private snippets require login (${color.cyan('robinpath login')}).`);
+                        console.error(
+                            color.red('Error:') +
+                                ` Snippet '${id}' not found. Private snippets require login (${color.cyan('robinpath login')}).`,
+                        );
                     } else {
                         console.error(color.red('Error:') + ` Failed to fetch snippet (HTTP ${res.status})`);
                     }
                     process.exit(1);
                 }
             } else {
-                const body: SnippetGetResponse = await res.json() as SnippetGetResponse;
+                const body: SnippetGetResponse = (await res.json()) as SnippetGetResponse;
                 s = (body.data || body) as SnippetData;
                 writeSnippetCache(id, s);
             }
@@ -1291,14 +1371,17 @@ async function snippetPull(args: string[]): Promise<void> {
         const res: Response = await fetchSnippet(id);
         if (!res.ok) {
             if (res.status === 404) {
-                console.error(color.red('Error:') + ` Snippet '${id}' not found. Private snippets require login (${color.cyan('robinpath login')}).`);
+                console.error(
+                    color.red('Error:') +
+                        ` Snippet '${id}' not found. Private snippets require login (${color.cyan('robinpath login')}).`,
+                );
             } else {
                 console.error(color.red('Error:') + ` Failed to fetch snippet (HTTP ${res.status})`);
             }
             process.exit(1);
         }
 
-        const body: SnippetGetResponse = await res.json() as SnippetGetResponse;
+        const body: SnippetGetResponse = (await res.json()) as SnippetGetResponse;
         const s: SnippetData = (body.data || body) as SnippetData;
         const code: string = s.code || '';
 
@@ -1335,7 +1418,7 @@ async function snippetPush(args: string[]): Promise<void> {
     if (!fileArg || !id) {
         console.error(color.red('Error:') + ' Usage: robinpath snippet push <file> <id>');
         console.error('');
-        console.error('  Uploads a local file as the snippet\'s code.');
+        console.error("  Uploads a local file as the snippet's code.");
         console.error('');
         console.error('  Examples:');
         console.error('    robinpath snippet push app.rp abc123');
@@ -1364,7 +1447,10 @@ async function snippetPush(args: string[]): Promise<void> {
 
         if (!res.ok) {
             const body: Record<string, any> = await res.json().catch(() => ({}));
-            console.error(color.red('Error:') + ` Failed to push code (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+            console.error(
+                color.red('Error:') +
+                    ` Failed to push code (HTTP ${res.status}): ${body.error?.message || res.statusText}`,
+            );
             process.exit(1);
         }
 
@@ -1413,7 +1499,10 @@ async function snippetVersion(args: string[]): Promise<void> {
 
         if (!res.ok) {
             const body: Record<string, any> = await res.json().catch(() => ({}));
-            console.error(color.red('Error:') + ` Failed to set version (HTTP ${res.status}): ${body.error?.message || res.statusText}`);
+            console.error(
+                color.red('Error:') +
+                    ` Failed to set version (HTTP ${res.status}): ${body.error?.message || res.statusText}`,
+            );
             process.exit(1);
         }
 
@@ -1442,7 +1531,7 @@ async function snippetDiff(args: string[]): Promise<void> {
     if (!fileArg || !id) {
         console.error(color.red('Error:') + ' Usage: robinpath snippet diff <file> <id>');
         console.error('');
-        console.error('  Compare a local file with a remote snippet\'s code.');
+        console.error("  Compare a local file with a remote snippet's code.");
         console.error('');
         console.error('  Examples:');
         console.error('    robinpath snippet diff app.rp abc123');
@@ -1469,7 +1558,7 @@ async function snippetDiff(args: string[]): Promise<void> {
             process.exit(1);
         }
 
-        const body: SnippetGetResponse = await res.json() as SnippetGetResponse;
+        const body: SnippetGetResponse = (await res.json()) as SnippetGetResponse;
         const s: SnippetData = (body.data || body) as SnippetData;
         const remoteCode: string = s.code || '';
 
@@ -1486,7 +1575,9 @@ async function snippetDiff(args: string[]): Promise<void> {
         log(color.bold(`Diff: ${fileArg} (local) vs ${s.name || id} (remote)`));
         log(color.dim('\u2500'.repeat(60)));
 
-        let additions: number = 0, deletions: number = 0, unchanged: number = 0;
+        let additions: number = 0,
+            deletions: number = 0,
+            unchanged: number = 0;
 
         for (let i: number = 0; i < maxLines; i++) {
             const local: string | undefined = localLines[i];
@@ -1514,7 +1605,9 @@ async function snippetDiff(args: string[]): Promise<void> {
         }
 
         log(color.dim('\u2500'.repeat(60)));
-        log(`${color.green(`+${additions}`)} additions, ${color.red(`-${deletions}`)} deletions, ${unchanged} unchanged`);
+        log(
+            `${color.green(`+${additions}`)} additions, ${color.red(`-${deletions}`)} deletions, ${unchanged} unchanged`,
+        );
 
         if (additions > 0 || deletions > 0) {
             log('');
@@ -1549,7 +1642,7 @@ async function snippetExport(args: string[]): Promise<void> {
                 process.exit(1);
             }
 
-            const body: SnippetListResponse = await res.json() as SnippetListResponse;
+            const body: SnippetListResponse = (await res.json()) as SnippetListResponse;
             const snippets: SnippetData[] = body.data || [];
             allSnippets.push(...snippets);
 
@@ -1566,7 +1659,7 @@ async function snippetExport(args: string[]): Promise<void> {
         const exportData = {
             exportedAt: new Date().toISOString(),
             count: allSnippets.length,
-            snippets: allSnippets.map(s => ({
+            snippets: allSnippets.map((s) => ({
                 name: s.name,
                 description: s.description,
                 code: s.code,
@@ -1585,7 +1678,10 @@ async function snippetExport(args: string[]): Promise<void> {
             const outputFile: string = flags.positional[0] || 'snippets-export.json';
             const filePath: string = resolve(outputFile);
             writeFileSync(filePath, JSON.stringify(exportData, null, 2), 'utf-8');
-            log(color.green('\u2713') + ` Exported ${allSnippets.length} snippet${allSnippets.length !== 1 ? 's' : ''} to: ${color.cyan(outputFile)}`);
+            log(
+                color.green('\u2713') +
+                    ` Exported ${allSnippets.length} snippet${allSnippets.length !== 1 ? 's' : ''} to: ${color.cyan(outputFile)}`,
+            );
         }
     } catch (err: any) {
         console.error(color.red('Error:') + ` Failed to export snippets: ${err.message}`);
@@ -1628,7 +1724,8 @@ async function snippetImport(args: string[]): Promise<void> {
 
     log(`Importing ${snippets.length} snippet${snippets.length !== 1 ? 's' : ''}...\n`);
 
-    let created: number = 0, failed: number = 0;
+    let created: number = 0,
+        failed: number = 0;
     const results: ImportResult[] = [];
 
     for (const s of snippets) {
@@ -1645,13 +1742,13 @@ async function snippetImport(args: string[]): Promise<void> {
                 language: s.language || 'robinpath',
             };
             if (s.description) payload.description = s.description;
-            if (s.visibility)  payload.visibility = s.visibility;
-            if (s.category)    payload.category = s.category;
-            if (s.tags)        payload.tags = typeof s.tags === 'string' ? JSON.parse(s.tags) : s.tags;
-            if (s.status)      payload.status = s.status;
-            if (s.license)     payload.license = s.license;
-            if (s.version)     payload.version = s.version;
-            if (s.readme)      payload.readme = s.readme;
+            if (s.visibility) payload.visibility = s.visibility;
+            if (s.category) payload.category = s.category;
+            if (s.tags) payload.tags = typeof s.tags === 'string' ? JSON.parse(s.tags) : s.tags;
+            if (s.status) payload.status = s.status;
+            if (s.license) payload.license = s.license;
+            if (s.version) payload.version = s.version;
+            if (s.readme) payload.readme = s.readme;
 
             const res: Response = await platformFetch('/v1/snippets', {
                 method: 'POST',
@@ -1660,7 +1757,7 @@ async function snippetImport(args: string[]): Promise<void> {
             });
 
             if (res.ok) {
-                const body: SnippetCreateResponse = await res.json() as SnippetCreateResponse;
+                const body: SnippetCreateResponse = (await res.json()) as SnippetCreateResponse;
                 created++;
                 results.push({ name: s.name, status: 'created', id: body.id || body.data?.id });
                 log(color.green('  \u2713') + ' ' + s.name);
@@ -1682,5 +1779,9 @@ async function snippetImport(args: string[]): Promise<void> {
         return;
     }
 
-    log(color.green(`\u2713 Imported: ${created}`) + (failed > 0 ? color.red(` | Failed: ${failed}`) : '') + ` | Total: ${snippets.length}`);
+    log(
+        color.green(`\u2713 Imported: ${created}`) +
+            (failed > 0 ? color.red(` | Failed: ${failed}`) : '') +
+            ` | Total: ${snippets.length}`,
+    );
 }

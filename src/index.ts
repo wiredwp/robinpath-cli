@@ -5,16 +5,17 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve, extname, basename } from 'node:path';
 
-import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErrorWithContext, nativeModules } from './runtime';
-
 import {
-    CLI_VERSION,
-    color,
-    log,
-    setFlags,
-    FLAG_AUTO_ACCEPT,
-    FLAG_DEV_MODE,
-} from './utils';
+    RobinPath,
+    ROBINPATH_VERSION,
+    Parser,
+    Printer,
+    LineIndexImpl,
+    formatErrorWithContext,
+    nativeModules,
+} from './runtime';
+
+import { CLI_VERSION, color, log, setFlags, FLAG_AUTO_ACCEPT, FLAG_DEV_MODE } from './utils';
 import { readAiConfig } from './config';
 import { listSessions } from './sessions';
 import { showMainHelp, showCommandHelp } from './help';
@@ -71,7 +72,12 @@ async function handleAi(args: string[]): Promise<void> {
             log(`\nSaved Sessions (${sessions.length}):`);
             for (const s of sessions) {
                 const age = Math.round((Date.now() - new Date(s.updated).getTime()) / 60000);
-                const ageStr = age < 60 ? `${age}m ago` : age < 1440 ? `${Math.round(age / 60)}h ago` : `${Math.round(age / 1440)}d ago`;
+                const ageStr =
+                    age < 60
+                        ? `${age}m ago`
+                        : age < 1440
+                          ? `${Math.round(age / 60)}h ago`
+                          : `${Math.round(age / 1440)}d ago`;
                 log(`  ${s.id}  ${s.name}  (${s.messages} msgs, ${ageStr})`);
             }
             log(`\nResume with: robinpath ai --resume <id>`);
@@ -237,7 +243,7 @@ async function main(): Promise<void> {
 
     // Find actual command (skip global flags)
     const globalFlags = new Set(['--quiet', '-q', '--verbose', '--auto', '--dev']);
-    const command = args.find(a => !globalFlags.has(a));
+    const command = args.find((a) => !globalFlags.has(a));
 
     if (command === 'help') {
         const subCommand = args[1];
@@ -246,11 +252,26 @@ async function main(): Promise<void> {
     }
 
     // ── Module management ──
-    if (command === 'add') { await handleAdd(args.slice(1)); return; }
-    if (command === 'remove') { await handleRemove(args.slice(1)); return; }
-    if (command === 'upgrade') { await handleUpgrade(args.slice(1)); return; }
-    if (command === 'search') { await handleSearch(args.slice(1)); return; }
-    if (command === 'info') { await handleInfo(args.slice(1)); return; }
+    if (command === 'add') {
+        await handleAdd(args.slice(1));
+        return;
+    }
+    if (command === 'remove') {
+        await handleRemove(args.slice(1));
+        return;
+    }
+    if (command === 'upgrade') {
+        await handleUpgrade(args.slice(1));
+        return;
+    }
+    if (command === 'search') {
+        await handleSearch(args.slice(1));
+        return;
+    }
+    if (command === 'info') {
+        await handleInfo(args.slice(1));
+        return;
+    }
     if (command === 'modules' || command === 'module') {
         const sub = args[1];
         if (!sub || sub === 'list') await handleModulesList();
@@ -263,47 +284,116 @@ async function main(): Promise<void> {
         }
         return;
     }
-    if (command === 'pack') { await handlePack(args.slice(1)); return; }
-    if (command === 'audit') { await handleAudit(); return; }
-    if (command === 'deprecate') { await handleDeprecate(args.slice(1)); return; }
-    if (command === 'env') { await handleEnv(args.slice(1)); return; }
-    if (command === 'cache') { await handleCache(args.slice(1)); return; }
-    if (command === 'doctor') { await handleDoctor(); return; }
-    if (command === 'init') { await handleInit(args.slice(1)); return; }
+    if (command === 'pack') {
+        await handlePack(args.slice(1));
+        return;
+    }
+    if (command === 'audit') {
+        await handleAudit();
+        return;
+    }
+    if (command === 'deprecate') {
+        await handleDeprecate(args.slice(1));
+        return;
+    }
+    if (command === 'env') {
+        await handleEnv(args.slice(1));
+        return;
+    }
+    if (command === 'cache') {
+        await handleCache(args.slice(1));
+        return;
+    }
+    if (command === 'doctor') {
+        await handleDoctor();
+        return;
+    }
+    if (command === 'init') {
+        await handleInit(args.slice(1));
+        return;
+    }
 
     // ── Install / Update ──
     if (command === 'install') {
         existsSync(resolve('robinpath.json')) ? await handleProjectInstall() : handleInstall();
         return;
     }
-    if (command === 'uninstall') { handleUninstall(); return; }
-    if (command === 'update') { await handleUpdate(); return; }
+    if (command === 'uninstall') {
+        handleUninstall();
+        return;
+    }
+    if (command === 'update') {
+        await handleUpdate();
+        return;
+    }
 
     // ── Dev tools ──
-    if (command === 'check') { await handleCheck(args.slice(1)); return; }
-    if (command === 'ast') { await handleAST(args.slice(1)); return; }
-    if (command === 'fmt') { await handleFmt(args.slice(1)); return; }
-    if (command === 'test') { await handleTest(args.slice(1)); return; }
+    if (command === 'check') {
+        await handleCheck(args.slice(1));
+        return;
+    }
+    if (command === 'ast') {
+        await handleAST(args.slice(1));
+        return;
+    }
+    if (command === 'fmt') {
+        await handleFmt(args.slice(1));
+        return;
+    }
+    if (command === 'test') {
+        await handleTest(args.slice(1));
+        return;
+    }
 
     // ── Cloud ──
-    if (command === 'login') { await handleLogin(); return; }
-    if (command === 'logout') { handleLogout(); return; }
-    if (command === 'whoami') { await handleWhoami(); return; }
-    if (command === 'publish') { await handlePublish(args.slice(1)); return; }
-    if (command === 'sync') { await handleSync(); return; }
+    if (command === 'login') {
+        await handleLogin();
+        return;
+    }
+    if (command === 'logout') {
+        handleLogout();
+        return;
+    }
+    if (command === 'whoami') {
+        await handleWhoami();
+        return;
+    }
+    if (command === 'publish') {
+        await handlePublish(args.slice(1));
+        return;
+    }
+    if (command === 'sync') {
+        await handleSync();
+        return;
+    }
 
     // ── Snippets ──
-    if (command === 'snippet' || command === 'snippets') { await handleSnippet(args.slice(1)); return; }
+    if (command === 'snippet' || command === 'snippets') {
+        await handleSnippet(args.slice(1));
+        return;
+    }
 
     // ── AI ──
-    if (command === 'ai') { await handleAi(args.slice(1)); return; }
+    if (command === 'ai') {
+        await handleAi(args.slice(1));
+        return;
+    }
 
     // ── Language REPL ──
-    if (command === 'repl') { await startREPL(); return; }
+    if (command === 'repl') {
+        await startREPL();
+        return;
+    }
 
     // ── Server ──
-    if (command === 'start') { await handleStart(args.slice(1)); return; }
-    if (command === 'status') { await handleStatus(args.slice(1)); return; }
+    if (command === 'start') {
+        await handleStart(args.slice(1));
+        return;
+    }
+    if (command === 'status') {
+        await handleStatus(args.slice(1));
+        return;
+    }
 
     // ── Headless prompt (-p) ──
     const promptIdx = args.indexOf('-p') !== -1 ? args.indexOf('-p') : args.indexOf('--prompt');
@@ -316,7 +406,10 @@ async function main(): Promise<void> {
         const skipSet = new Set([promptIdx]);
         if (hasSave) skipSet.add(args.indexOf('--save'));
         if (hasRun) skipSet.add(args.indexOf('--run'));
-        if (outIdx !== -1) { skipSet.add(outIdx); skipSet.add(outIdx + 1); }
+        if (outIdx !== -1) {
+            skipSet.add(outIdx);
+            skipSet.add(outIdx + 1);
+        }
         const promptParts: string[] = [];
         for (let pi = promptIdx + 1; pi < args.length; pi++) {
             if (!skipSet.has(pi)) promptParts.push(args[pi]);
@@ -349,7 +442,7 @@ async function main(): Promise<void> {
         fileArg = args[dashDashIdx + 1];
     } else {
         const flagsToSkip = new Set(['-q', '--quiet', '--verbose', '-p', '--prompt', '--auto', '--dev']);
-        fileArg = args.find(a => !a.startsWith('-') && !flagsToSkip.has(a));
+        fileArg = args.find((a) => !a.startsWith('-') && !flagsToSkip.has(a));
     }
 
     if (fileArg) {
@@ -395,7 +488,7 @@ async function main(): Promise<void> {
     await startAiREPL(null, null, { autoAccept: FLAG_AUTO_ACCEPT, devMode: FLAG_DEV_MODE });
 }
 
-main().catch(err => {
+main().catch((err) => {
     console.error(color.red('Fatal:') + ` ${err.message}`);
     process.exit(1);
 });

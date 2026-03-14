@@ -175,7 +175,7 @@ export async function handleStart(args: string[]): Promise<void> {
     // ========================================================================
     // Job management
     // ========================================================================
-    const jobs = new Map<string, Job>();     // jobId -> { status, output, result, error, startedAt, completedAt, script, abortController, sseClients }
+    const jobs = new Map<string, Job>(); // jobId -> { status, output, result, error, startedAt, completedAt, script, abortController, sseClients }
     const idempotencyCache = new Map<string, IdempotencyCacheEntry>(); // idempotency key -> { jobId, response }
 
     function generateJobId(): string {
@@ -197,7 +197,12 @@ export async function handleStart(args: string[]): Promise<void> {
     // Collect module info for /v1/modules endpoint
     const moduleList: ModuleListEntry[] = [];
     for (const mod of nativeModules) {
-        moduleList.push({ name: mod.name, type: 'native', methods: mod.moduleMetadata?.methods || [], functionMetadata: mod.functionMetadata || null });
+        moduleList.push({
+            name: mod.name,
+            type: 'native',
+            methods: mod.moduleMetadata?.methods || [],
+            functionMetadata: mod.functionMetadata || null,
+        });
     }
 
     // Server start time for uptime tracking
@@ -206,8 +211,8 @@ export async function handleStart(args: string[]): Promise<void> {
     // ========================================================================
     // Rate limiting (simple sliding window per session)
     // ========================================================================
-    const RATE_LIMIT: number = 100;           // requests per window
-    const RATE_WINDOW_MS: number = 60_000;    // 1 minute
+    const RATE_LIMIT: number = 100; // requests per window
+    const RATE_WINDOW_MS: number = 60_000; // 1 minute
     let rateWindowStart: number = Date.now();
     let rateCount: number = 0;
 
@@ -252,7 +257,9 @@ export async function handleStart(args: string[]): Promise<void> {
     function logEntry(entry: LogEntry): void {
         if (!logFile) return;
         const line = JSON.stringify({ ts: new Date().toISOString(), ...entry }) + '\n';
-        try { appendFileSync(logFile, line); } catch {}
+        try {
+            appendFileSync(logFile, line);
+        } catch {}
     }
 
     // Write PID file for process management
@@ -262,7 +269,11 @@ export async function handleStart(args: string[]): Promise<void> {
         writeFileSync(pidFile, String(process.pid));
     } catch {}
     // Clean up PID file on exit
-    process.on('exit', () => { try { unlinkSync(pidFile); } catch {} });
+    process.on('exit', () => {
+        try {
+            unlinkSync(pidFile);
+        } catch {}
+    });
 
     // ========================================================================
     // Helpers
@@ -288,8 +299,11 @@ export async function handleStart(args: string[]): Promise<void> {
                     return resolvePromise({ script: body });
                 }
                 // JSON
-                try { resolvePromise(JSON.parse(body)); }
-                catch { reject(new Error('Invalid JSON body. Tip: use Content-Type: text/plain to send raw script code.')); }
+                try {
+                    resolvePromise(JSON.parse(body));
+                } catch {
+                    reject(new Error('Invalid JSON body. Tip: use Content-Type: text/plain to send raw script code.'));
+                }
             });
             req.on('error', reject);
         });
@@ -410,14 +424,21 @@ export async function handleStart(args: string[]): Promise<void> {
         // Clean up SSE clients on done
         if (event === 'done') {
             for (const client of job.sseClients) {
-                try { client.end(); } catch {}
+                try {
+                    client.end();
+                } catch {}
             }
             job.sseClients = [];
         }
     }
 
     // Webhook delivery helper
-    async function deliverWebhook(webhookUrl: string, webhookSecret: string | null, event: string, payload: Record<string, unknown>): Promise<void> {
+    async function deliverWebhook(
+        webhookUrl: string,
+        webhookSecret: string | null,
+        event: string,
+        payload: Record<string, unknown>,
+    ): Promise<void> {
         try {
             const body = JSON.stringify({ event, ...payload, timestamp: new Date().toISOString() });
             const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -452,33 +473,218 @@ export async function handleStart(args: string[]): Promise<void> {
     // ========================================================================
     const openApiSpec: Record<string, unknown> = {
         openapi: '3.1.0',
-        info: { title: 'RobinPath Server API', version: CLI_VERSION, description: 'HTTP API for the RobinPath scripting language runtime. Session token required via x-robinpath-session header.' },
+        info: {
+            title: 'RobinPath Server API',
+            version: CLI_VERSION,
+            description:
+                'HTTP API for the RobinPath scripting language runtime. Session token required via x-robinpath-session header.',
+        },
         servers: [{ url: `http://${host}:${port}`, description: 'Local server' }],
         security: [{ sessionAuth: [] }],
         components: {
             securitySchemes: {
-                sessionAuth: { type: 'apiKey', in: 'header', name: 'x-robinpath-session', description: 'Session token from robinpath start' },
+                sessionAuth: {
+                    type: 'apiKey',
+                    in: 'header',
+                    name: 'x-robinpath-session',
+                    description: 'Session token from robinpath start',
+                },
             },
             schemas: {
-                Error: { type: 'object', properties: { ok: { type: 'boolean', example: false }, error: { type: 'object', properties: { code: { type: 'string' }, message: { type: 'string' } } }, requestId: { type: 'string' }, timestamp: { type: 'string', format: 'date-time' } } },
-                Job: { type: 'object', properties: { jobId: { type: 'string' }, status: { type: 'string', enum: ['running', 'completed', 'failed', 'cancelled'] }, output: { type: 'array', items: { type: 'string' } }, result: {}, error: {}, startedAt: { type: 'string', format: 'date-time' }, completedAt: { type: 'string', format: 'date-time' }, duration: { type: 'integer' }, source: { type: 'string' }, usage: { type: 'object', properties: { execution_ms: { type: 'integer' }, memory_bytes: { type: 'integer' } } } } },
+                Error: {
+                    type: 'object',
+                    properties: {
+                        ok: { type: 'boolean', example: false },
+                        error: {
+                            type: 'object',
+                            properties: { code: { type: 'string' }, message: { type: 'string' } },
+                        },
+                        requestId: { type: 'string' },
+                        timestamp: { type: 'string', format: 'date-time' },
+                    },
+                },
+                Job: {
+                    type: 'object',
+                    properties: {
+                        jobId: { type: 'string' },
+                        status: { type: 'string', enum: ['running', 'completed', 'failed', 'cancelled'] },
+                        output: { type: 'array', items: { type: 'string' } },
+                        result: {},
+                        error: {},
+                        startedAt: { type: 'string', format: 'date-time' },
+                        completedAt: { type: 'string', format: 'date-time' },
+                        duration: { type: 'integer' },
+                        source: { type: 'string' },
+                        usage: {
+                            type: 'object',
+                            properties: { execution_ms: { type: 'integer' }, memory_bytes: { type: 'integer' } },
+                        },
+                    },
+                },
             },
         },
         paths: {
-            '/v1/health': { get: { summary: 'Health check', security: [], responses: { 200: { description: 'Server is healthy' } } } },
-            '/v1/execute': { post: { summary: 'Execute a script', description: 'Run inline script or file. Supports sync, SSE streaming (accept: text/event-stream), and webhook modes.', parameters: [{ name: 'dry', in: 'query', schema: { type: 'string', enum: ['true'] }, description: 'Validate without executing' }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { script: { type: 'string', description: 'Inline RobinPath code' }, file: { type: 'string', description: 'Path to .rp file' }, webhook: { type: 'string', format: 'uri', description: 'URL for async result delivery' }, webhook_secret: { type: 'string', description: 'Secret for webhook signature' }, dry: { type: 'boolean', description: 'Validate without executing' } } } } } }, responses: { 200: { description: 'Job result (sync mode)' }, 202: { description: 'Job accepted (webhook mode)' } } } },
-            '/v1/execute/file': { post: { summary: 'Execute a file', description: 'Same as /v1/execute but conventionally for file-based execution.', requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { file: { type: 'string' } }, required: ['file'] } } } }, responses: { 200: { description: 'Job result' } } } },
-            '/v1/check': { post: { summary: 'Syntax check', requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { script: { type: 'string' } }, required: ['script'] } } } }, responses: { 200: { description: 'Check result' } } } },
-            '/v1/fmt': { post: { summary: 'Format code', requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { script: { type: 'string' } }, required: ['script'] } } } }, responses: { 200: { description: 'Formatted code' } } } },
-            '/v1/jobs': { get: { summary: 'List jobs', parameters: [{ name: 'limit', in: 'query', schema: { type: 'integer', default: 50, maximum: 200 } }, { name: 'offset', in: 'query', schema: { type: 'integer', default: 0 } }, { name: 'status', in: 'query', schema: { type: 'string', enum: ['running', 'completed', 'failed', 'cancelled'] } }], responses: { 200: { description: 'Paginated job list' } } } },
-            '/v1/jobs/{jobId}': { get: { summary: 'Job detail', parameters: [{ name: 'jobId', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: { description: 'Job detail' }, 404: { description: 'Job not found' } } } },
-            '/v1/jobs/{jobId}/stream': { get: { summary: 'SSE job stream', description: 'Server-Sent Events stream for real-time job progress.', parameters: [{ name: 'jobId', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: { description: 'SSE event stream', content: { 'text/event-stream': {} } } } } },
-            '/v1/jobs/{jobId}/cancel': { post: { summary: 'Cancel a job', parameters: [{ name: 'jobId', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: { description: 'Job cancelled' }, 409: { description: 'Job not running' } } } },
-            '/v1/modules': { get: { summary: 'List loaded modules', responses: { 200: { description: 'Module list' } } } },
-            '/v1/info': { get: { summary: 'Server info', responses: { 200: { description: 'Server configuration and status' } } } },
-            '/v1/metrics': { get: { summary: 'Prometheus metrics', responses: { 200: { description: 'Plain text metrics', content: { 'text/plain': {} } } } } },
-            '/v1/openapi.json': { get: { summary: 'OpenAPI specification', security: [], responses: { 200: { description: 'This document' } } } },
-            '/v1/stop': { post: { summary: 'Graceful shutdown', responses: { 200: { description: 'Server stopping' } } } },
+            '/v1/health': {
+                get: {
+                    summary: 'Health check',
+                    security: [],
+                    responses: { 200: { description: 'Server is healthy' } },
+                },
+            },
+            '/v1/execute': {
+                post: {
+                    summary: 'Execute a script',
+                    description:
+                        'Run inline script or file. Supports sync, SSE streaming (accept: text/event-stream), and webhook modes.',
+                    parameters: [
+                        {
+                            name: 'dry',
+                            in: 'query',
+                            schema: { type: 'string', enum: ['true'] },
+                            description: 'Validate without executing',
+                        },
+                    ],
+                    requestBody: {
+                        required: true,
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: {
+                                        script: { type: 'string', description: 'Inline RobinPath code' },
+                                        file: { type: 'string', description: 'Path to .rp file' },
+                                        webhook: {
+                                            type: 'string',
+                                            format: 'uri',
+                                            description: 'URL for async result delivery',
+                                        },
+                                        webhook_secret: { type: 'string', description: 'Secret for webhook signature' },
+                                        dry: { type: 'boolean', description: 'Validate without executing' },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                    responses: {
+                        200: { description: 'Job result (sync mode)' },
+                        202: { description: 'Job accepted (webhook mode)' },
+                    },
+                },
+            },
+            '/v1/execute/file': {
+                post: {
+                    summary: 'Execute a file',
+                    description: 'Same as /v1/execute but conventionally for file-based execution.',
+                    requestBody: {
+                        required: true,
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: { file: { type: 'string' } },
+                                    required: ['file'],
+                                },
+                            },
+                        },
+                    },
+                    responses: { 200: { description: 'Job result' } },
+                },
+            },
+            '/v1/check': {
+                post: {
+                    summary: 'Syntax check',
+                    requestBody: {
+                        required: true,
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: { script: { type: 'string' } },
+                                    required: ['script'],
+                                },
+                            },
+                        },
+                    },
+                    responses: { 200: { description: 'Check result' } },
+                },
+            },
+            '/v1/fmt': {
+                post: {
+                    summary: 'Format code',
+                    requestBody: {
+                        required: true,
+                        content: {
+                            'application/json': {
+                                schema: {
+                                    type: 'object',
+                                    properties: { script: { type: 'string' } },
+                                    required: ['script'],
+                                },
+                            },
+                        },
+                    },
+                    responses: { 200: { description: 'Formatted code' } },
+                },
+            },
+            '/v1/jobs': {
+                get: {
+                    summary: 'List jobs',
+                    parameters: [
+                        { name: 'limit', in: 'query', schema: { type: 'integer', default: 50, maximum: 200 } },
+                        { name: 'offset', in: 'query', schema: { type: 'integer', default: 0 } },
+                        {
+                            name: 'status',
+                            in: 'query',
+                            schema: { type: 'string', enum: ['running', 'completed', 'failed', 'cancelled'] },
+                        },
+                    ],
+                    responses: { 200: { description: 'Paginated job list' } },
+                },
+            },
+            '/v1/jobs/{jobId}': {
+                get: {
+                    summary: 'Job detail',
+                    parameters: [{ name: 'jobId', in: 'path', required: true, schema: { type: 'string' } }],
+                    responses: { 200: { description: 'Job detail' }, 404: { description: 'Job not found' } },
+                },
+            },
+            '/v1/jobs/{jobId}/stream': {
+                get: {
+                    summary: 'SSE job stream',
+                    description: 'Server-Sent Events stream for real-time job progress.',
+                    parameters: [{ name: 'jobId', in: 'path', required: true, schema: { type: 'string' } }],
+                    responses: { 200: { description: 'SSE event stream', content: { 'text/event-stream': {} } } },
+                },
+            },
+            '/v1/jobs/{jobId}/cancel': {
+                post: {
+                    summary: 'Cancel a job',
+                    parameters: [{ name: 'jobId', in: 'path', required: true, schema: { type: 'string' } }],
+                    responses: { 200: { description: 'Job cancelled' }, 409: { description: 'Job not running' } },
+                },
+            },
+            '/v1/modules': {
+                get: { summary: 'List loaded modules', responses: { 200: { description: 'Module list' } } },
+            },
+            '/v1/info': {
+                get: { summary: 'Server info', responses: { 200: { description: 'Server configuration and status' } } },
+            },
+            '/v1/metrics': {
+                get: {
+                    summary: 'Prometheus metrics',
+                    responses: { 200: { description: 'Plain text metrics', content: { 'text/plain': {} } } },
+                },
+            },
+            '/v1/openapi.json': {
+                get: {
+                    summary: 'OpenAPI specification',
+                    security: [],
+                    responses: { 200: { description: 'This document' } },
+                },
+            },
+            '/v1/stop': {
+                post: { summary: 'Graceful shutdown', responses: { 200: { description: 'Server stopping' } } },
+            },
         },
     };
 
@@ -495,8 +701,14 @@ export async function handleStart(args: string[]): Promise<void> {
         // CORS headers
         res.setHeader('Access-Control-Allow-Origin', corsOrigin);
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-robinpath-session, x-request-id, x-idempotency-key, Accept');
-        res.setHeader('Access-Control-Expose-Headers', 'x-request-id, x-ratelimit-limit, x-ratelimit-remaining, x-ratelimit-reset, x-processing-ms');
+        res.setHeader(
+            'Access-Control-Allow-Headers',
+            'Content-Type, x-robinpath-session, x-request-id, x-idempotency-key, Accept',
+        );
+        res.setHeader(
+            'Access-Control-Expose-Headers',
+            'x-request-id, x-ratelimit-limit, x-ratelimit-remaining, x-ratelimit-reset, x-processing-ms',
+        );
 
         // Always include request ID
         res.setHeader('x-request-id', requestId);
@@ -541,12 +753,22 @@ export async function handleStart(args: string[]): Promise<void> {
         }
 
         // Log every request
-        logEntry({ level: 'info', event: 'request', method: method!, path, requestId, session: reqSession ? reqSession.slice(0, 4) + '***' : null });
+        logEntry({
+            level: 'info',
+            event: 'request',
+            method: method!,
+            path,
+            requestId,
+            session: reqSession ? reqSession.slice(0, 4) + '***' : null,
+        });
 
         // Deprecation warning for non-versioned paths
         const isLegacyPath = !path.startsWith('/v1/') && path !== '/health';
         if (isLegacyPath) {
-            res.setHeader('x-robinpath-deprecation', 'Use /v1/ prefix. Non-versioned paths will be removed in a future release.');
+            res.setHeader(
+                'x-robinpath-deprecation',
+                'Use /v1/ prefix. Non-versioned paths will be removed in a future release.',
+            );
             logEntry({ level: 'warn', event: 'deprecated_path', path, requestId });
         }
 
@@ -556,7 +778,13 @@ export async function handleStart(args: string[]): Promise<void> {
             // Accepts: { script: "..." } or { file: "./path.rp" }
             // Also supports webhook: { ..., webhook: "url", webhook_secret: "..." }
             // ================================================================
-            if (method === 'POST' && (path === '/v1/execute' || path === '/execute' || path === '/v1/execute/file' || path === '/execute/file')) {
+            if (
+                method === 'POST' &&
+                (path === '/v1/execute' ||
+                    path === '/execute' ||
+                    path === '/v1/execute/file' ||
+                    path === '/execute/file')
+            ) {
                 const body = await parseBody(req);
 
                 // Resolve script from inline code or file path
@@ -578,10 +806,22 @@ export async function handleStart(args: string[]): Promise<void> {
                     } catch (err: unknown) {
                         const lineMatch = (err as Error).message.match(/line (\d+)/i);
                         const colMatch = (err as Error).message.match(/column (\d+)/i);
-                        json(res, 200, {
-                            ok: false, dry_run: true, source,
-                            error: { code: 'SYNTAX_ERROR', message: (err as Error).message, line: lineMatch ? parseInt(lineMatch[1]) : null, column: colMatch ? parseInt(colMatch[1]) : null },
-                        }, requestId);
+                        json(
+                            res,
+                            200,
+                            {
+                                ok: false,
+                                dry_run: true,
+                                source,
+                                error: {
+                                    code: 'SYNTAX_ERROR',
+                                    message: (err as Error).message,
+                                    line: lineMatch ? parseInt(lineMatch[1]) : null,
+                                    column: colMatch ? parseInt(colMatch[1]) : null,
+                                },
+                            },
+                            requestId,
+                        );
                     }
                     return;
                 }
@@ -599,7 +839,13 @@ export async function handleStart(args: string[]): Promise<void> {
                 // Concurrency check
                 if (getActiveJobCount() >= maxConcurrent) {
                     res.setHeader('retry-after', '2');
-                    jsonError(res, 503, 'MAX_CONCURRENT', `Server is at max capacity (${maxConcurrent} concurrent jobs)`, requestId);
+                    jsonError(
+                        res,
+                        503,
+                        'MAX_CONCURRENT',
+                        `Server is at max capacity (${maxConcurrent} concurrent jobs)`,
+                        requestId,
+                    );
                     return;
                 }
 
@@ -625,7 +871,14 @@ export async function handleStart(args: string[]): Promise<void> {
                     sseClients: [],
                 });
 
-                logEntry({ level: 'info', event: 'job.started', jobId, source, requestId, mode: wantsStream ? 'stream' : (webhookUrl ? 'webhook' : 'sync') });
+                logEntry({
+                    level: 'info',
+                    event: 'job.started',
+                    jobId,
+                    source,
+                    requestId,
+                    mode: wantsStream ? 'stream' : webhookUrl ? 'webhook' : 'sync',
+                });
 
                 // Webhook callback after job completes
                 function onJobDone(): void {
@@ -634,8 +887,12 @@ export async function handleStart(args: string[]): Promise<void> {
                     logEntry({ level: 'info', event: `job.${job.status}`, jobId, duration: job.duration, requestId });
                     if (webhookUrl) {
                         deliverWebhook(webhookUrl, webhookSecret, `job.${job.status}`, {
-                            jobId, status: job.status, output: job.output, result: job.result,
-                            error: job.error, duration: job.duration,
+                            jobId,
+                            status: job.status,
+                            output: job.output,
+                            result: job.result,
+                            error: job.error,
+                            duration: job.duration,
                         });
                     }
                 }
@@ -645,7 +902,7 @@ export async function handleStart(args: string[]): Promise<void> {
                     res.writeHead(200, {
                         'Content-Type': 'text/event-stream',
                         'Cache-Control': 'no-cache',
-                        'Connection': 'keep-alive',
+                        Connection: 'keep-alive',
                         'x-request-id': requestId,
                     });
                     res.write(`event: job.started\ndata: ${JSON.stringify({ jobId, requestId, source })}\n\n`);
@@ -655,14 +912,25 @@ export async function handleStart(args: string[]): Promise<void> {
 
                     req.on('close', () => {
                         const j = jobs.get(jobId);
-                        if (j) j.sseClients = j.sseClients.filter(c => c !== res);
+                        if (j) j.sseClients = j.sseClients.filter((c) => c !== res);
                     });
 
                     // Fire and forget — SSE events are sent via broadcastSSE
                     executeJob(jobId, script).then(onJobDone);
                 } else if (webhookUrl) {
                     // Webhook mode — return jobId immediately, deliver result via webhook
-                    json(res, 202, { ok: true, jobId, status: 'running', source, message: `Result will be delivered to ${webhookUrl}` }, requestId);
+                    json(
+                        res,
+                        202,
+                        {
+                            ok: true,
+                            jobId,
+                            status: 'running',
+                            source,
+                            message: `Result will be delivered to ${webhookUrl}`,
+                        },
+                        requestId,
+                    );
                     executeJob(jobId, script).then(onJobDone);
                 } else {
                     // Synchronous mode — wait for completion, return full result
@@ -715,10 +983,20 @@ export async function handleStart(args: string[]): Promise<void> {
                 } catch (err: unknown) {
                     const lineMatch = (err as Error).message.match(/line (\d+)/i);
                     const colMatch = (err as Error).message.match(/column (\d+)/i);
-                    json(res, 200, {
-                        ok: false,
-                        error: { code: 'SYNTAX_ERROR', message: (err as Error).message, line: lineMatch ? parseInt(lineMatch[1]) : null, column: colMatch ? parseInt(colMatch[1]) : null },
-                    }, requestId);
+                    json(
+                        res,
+                        200,
+                        {
+                            ok: false,
+                            error: {
+                                code: 'SYNTAX_ERROR',
+                                message: (err as Error).message,
+                                line: lineMatch ? parseInt(lineMatch[1]) : null,
+                                column: colMatch ? parseInt(colMatch[1]) : null,
+                            },
+                        },
+                        requestId,
+                    );
                 }
                 return;
             }
@@ -737,7 +1015,12 @@ export async function handleStart(args: string[]): Promise<void> {
                     const formatted = await formatScript(script);
                     json(res, 200, { ok: true, formatted }, requestId);
                 } catch (err: unknown) {
-                    json(res, 200, { ok: false, error: { code: 'FORMAT_ERROR', message: (err as Error).message } }, requestId);
+                    json(
+                        res,
+                        200,
+                        { ok: false, error: { code: 'FORMAT_ERROR', message: (err as Error).message } },
+                        requestId,
+                    );
                 }
                 return;
             }
@@ -772,7 +1055,12 @@ export async function handleStart(args: string[]): Promise<void> {
                 }
                 const total = allJobs.length;
                 const page = allJobs.slice(offset, offset + limit);
-                json(res, 200, { ok: true, jobs: page, total, limit, offset, has_more: offset + limit < total }, requestId);
+                json(
+                    res,
+                    200,
+                    { ok: true, jobs: page, total, limit, offset, has_more: offset + limit < total },
+                    requestId,
+                );
                 return;
             }
 
@@ -787,18 +1075,25 @@ export async function handleStart(args: string[]): Promise<void> {
                     jsonError(res, 404, 'JOB_NOT_FOUND', `Job ${jobId} not found`, requestId);
                     return;
                 }
-                json(res, 200, {
-                    ok: true,
-                    jobId,
-                    status: job.status,
-                    output: job.output,
-                    result: job.result,
-                    error: job.error,
-                    startedAt: job.startedAt,
-                    completedAt: job.completedAt,
-                    duration: job.duration,
-                    usage: job.memoryUsed ? { execution_ms: job.duration, memory_bytes: job.memoryUsed } : undefined,
-                }, requestId);
+                json(
+                    res,
+                    200,
+                    {
+                        ok: true,
+                        jobId,
+                        status: job.status,
+                        output: job.output,
+                        result: job.result,
+                        error: job.error,
+                        startedAt: job.startedAt,
+                        completedAt: job.completedAt,
+                        duration: job.duration,
+                        usage: job.memoryUsed
+                            ? { execution_ms: job.duration, memory_bytes: job.memoryUsed }
+                            : undefined,
+                    },
+                    requestId,
+                );
                 return;
             }
 
@@ -817,7 +1112,7 @@ export async function handleStart(args: string[]): Promise<void> {
                 res.writeHead(200, {
                     'Content-Type': 'text/event-stream',
                     'Cache-Control': 'no-cache',
-                    'Connection': 'keep-alive',
+                    Connection: 'keep-alive',
                     'x-request-id': requestId,
                 });
 
@@ -828,13 +1123,17 @@ export async function handleStart(args: string[]): Promise<void> {
 
                 // If job already done, send final event and close
                 if (job.status === 'completed') {
-                    res.write(`event: job.completed\ndata: ${JSON.stringify({ result: job.result, duration: job.duration })}\n\n`);
+                    res.write(
+                        `event: job.completed\ndata: ${JSON.stringify({ result: job.result, duration: job.duration })}\n\n`,
+                    );
                     res.write(`event: done\ndata: null\n\n`);
                     res.end();
                     return;
                 }
                 if (job.status === 'failed') {
-                    res.write(`event: job.failed\ndata: ${JSON.stringify({ error: job.error, duration: job.duration })}\n\n`);
+                    res.write(
+                        `event: job.failed\ndata: ${JSON.stringify({ error: job.error, duration: job.duration })}\n\n`,
+                    );
                     res.write(`event: done\ndata: null\n\n`);
                     res.end();
                     return;
@@ -849,7 +1148,7 @@ export async function handleStart(args: string[]): Promise<void> {
                 // Still running — subscribe for live updates
                 job.sseClients.push(res);
                 req.on('close', () => {
-                    job.sseClients = job.sseClients.filter(c => c !== res);
+                    job.sseClients = job.sseClients.filter((c) => c !== res);
                 });
                 return;
             }
@@ -891,29 +1190,34 @@ export async function handleStart(args: string[]): Promise<void> {
             // ================================================================
             if (method === 'GET' && (path === '/v1/info' || path === '/info')) {
                 const mem = process.memoryUsage();
-                json(res, 200, {
-                    ok: true,
-                    version: CLI_VERSION,
-                    lang_version: ROBINPATH_VERSION,
-                    host,
-                    port,
-                    uptime_seconds: Math.round(process.uptime()),
-                    started_at: serverStartedAt,
-                    config: {
-                        max_concurrent: maxConcurrent,
-                        job_timeout_ms: jobTimeout,
-                        rate_limit: RATE_LIMIT,
+                json(
+                    res,
+                    200,
+                    {
+                        ok: true,
+                        version: CLI_VERSION,
+                        lang_version: ROBINPATH_VERSION,
+                        host,
+                        port,
+                        uptime_seconds: Math.round(process.uptime()),
+                        started_at: serverStartedAt,
+                        config: {
+                            max_concurrent: maxConcurrent,
+                            job_timeout_ms: jobTimeout,
+                            rate_limit: RATE_LIMIT,
+                        },
+                        memory: {
+                            heap_used: mem.heapUsed,
+                            heap_total: mem.heapTotal,
+                            rss: mem.rss,
+                        },
+                        jobs: {
+                            total: jobs.size,
+                            active: getActiveJobCount(),
+                        },
                     },
-                    memory: {
-                        heap_used: mem.heapUsed,
-                        heap_total: mem.heapTotal,
-                        rss: mem.rss,
-                    },
-                    jobs: {
-                        total: jobs.size,
-                        active: getActiveJobCount(),
-                    },
-                }, requestId);
+                    requestId,
+                );
                 return;
             }
 
@@ -921,11 +1225,20 @@ export async function handleStart(args: string[]): Promise<void> {
             // GET /v1/metrics — prometheus-style plain text metrics
             // ================================================================
             if (method === 'GET' && (path === '/v1/metrics' || path === '/metrics')) {
-                let completed = 0, failed = 0, cancelled = 0, running = 0;
-                let totalDuration = 0, durationCount = 0;
+                let completed = 0,
+                    failed = 0,
+                    cancelled = 0,
+                    running = 0;
+                let totalDuration = 0,
+                    durationCount = 0;
                 for (const job of jobs.values()) {
-                    if (job.status === 'completed') { completed++; if (job.duration) { totalDuration += job.duration; durationCount++; } }
-                    else if (job.status === 'failed') failed++;
+                    if (job.status === 'completed') {
+                        completed++;
+                        if (job.duration) {
+                            totalDuration += job.duration;
+                            durationCount++;
+                        }
+                    } else if (job.status === 'failed') failed++;
                     else if (job.status === 'cancelled') cancelled++;
                     else if (job.status === 'running') running++;
                 }
@@ -967,13 +1280,19 @@ export async function handleStart(args: string[]): Promise<void> {
                     if (job.status === 'running') activeJobs.push(id);
                 }
 
-                json(res, 200, {
-                    ok: true,
-                    message: activeJobs.length > 0
-                        ? `Server stopping after ${activeJobs.length} active job(s) complete`
-                        : 'Server stopping',
-                    active_jobs: activeJobs,
-                }, requestId);
+                json(
+                    res,
+                    200,
+                    {
+                        ok: true,
+                        message:
+                            activeJobs.length > 0
+                                ? `Server stopping after ${activeJobs.length} active job(s) complete`
+                                : 'Server stopping',
+                        active_jobs: activeJobs,
+                    },
+                    requestId,
+                );
 
                 // Graceful shutdown: wait for active jobs, max 5 seconds
                 const shutdownTimeout = setTimeout(() => {
@@ -1003,14 +1322,23 @@ export async function handleStart(args: string[]): Promise<void> {
             // 404 — unknown endpoint
             // ================================================================
             jsonError(res, 404, 'NOT_FOUND', `Unknown endpoint: ${method} ${path}`, requestId);
-
         } catch (err: unknown) {
             totalErrors++;
             const processingMs = Math.round(performance.now() - startTime);
-            logEntry({ level: 'error', event: 'request.error', method: method!, path, requestId, error: (err as Error).message, duration: processingMs });
+            logEntry({
+                level: 'error',
+                event: 'request.error',
+                method: method!,
+                path,
+                requestId,
+                error: (err as Error).message,
+                duration: processingMs,
+            });
             // Guard: if headers already sent (e.g. SSE streaming), we can't send JSON error
             if (res.headersSent) {
-                try { res.end(); } catch {}
+                try {
+                    res.end();
+                } catch {}
             } else {
                 res.setHeader('x-processing-ms', processingMs);
                 jsonError(res, 500, 'INTERNAL_ERROR', (err as Error).message, requestId);
@@ -1085,20 +1413,24 @@ export async function handleStatus(args: string[]): Promise<void> {
         const timeout = setTimeout(() => controller.abort(), 3000);
         const res = await fetch(`http://127.0.0.1:${port}/v1/health`, { signal: controller.signal });
         clearTimeout(timeout);
-        const data = await res.json() as { ok: boolean; version?: string };
+        const data = (await res.json()) as { ok: boolean; version?: string };
         if (data.ok) {
-            console.log(JSON.stringify({
-                ok: true,
-                running: true,
-                port,
-                pid: pid || null,
-                version: data.version,
-            }));
+            console.log(
+                JSON.stringify({
+                    ok: true,
+                    running: true,
+                    port,
+                    pid: pid || null,
+                    version: data.version,
+                }),
+            );
         } else {
             console.log(JSON.stringify({ ok: true, running: false, port, reason: 'Unexpected response' }));
         }
     } catch {
-        console.log(JSON.stringify({ ok: true, running: false, port, pid: pid || null, reason: 'Server not reachable' }));
+        console.log(
+            JSON.stringify({ ok: true, running: false, port, pid: pid || null, reason: 'Server not reachable' }),
+        );
     }
 }
 
@@ -1109,7 +1441,11 @@ export function readStdin(): Promise<string> {
     return new Promise((resolve) => {
         let data = '';
         process.stdin.setEncoding('utf-8');
-        process.stdin.on('data', (chunk: string) => { data += chunk; });
-        process.stdin.on('end', () => { resolve(data); });
+        process.stdin.on('data', (chunk: string) => {
+            data += chunk;
+        });
+        process.stdin.on('end', () => {
+            resolve(data);
+        });
     });
 }

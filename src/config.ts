@@ -97,6 +97,10 @@ export function writeAiConfig(config: AiConfig): void {
     }
     writeFileSync(AI_CONFIG_PATH, JSON.stringify(toSave, null, 2), 'utf-8');
     if (platform() !== 'win32') {
-        try { chmodSync(AI_CONFIG_PATH, 0o600); } catch { /* ignore */ }
+        try {
+            chmodSync(AI_CONFIG_PATH, 0o600);
+        } catch {
+            /* ignore */
+        }
     }
 }

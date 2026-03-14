@@ -3,21 +3,23 @@
  * Extracted from cli-entry.js and converted to TypeScript.
  */
 import { createInterface } from 'node:readline';
-import { readFileSync, existsSync, mkdirSync, copyFileSync, rmSync, writeFileSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import {
+    readFileSync,
+    existsSync,
+    mkdirSync,
+    copyFileSync,
+    rmSync,
+    writeFileSync,
+    readdirSync,
+    statSync,
+    unlinkSync,
+} from 'node:fs';
 import { resolve, join, dirname, basename } from 'node:path';
 import { execSync } from 'node:child_process';
 import { homedir, platform, tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 
-import {
-    CLI_VERSION,
-    FLAG_QUIET,
-    color,
-    log,
-    logVerbose,
-    getRobinPathHome,
-    getInstallDir,
-} from './utils';
+import { CLI_VERSION, FLAG_QUIET, color, log, logVerbose, getRobinPathHome, getInstallDir } from './utils';
 
 import {
     readModulesManifest,
@@ -45,7 +47,7 @@ import { nativeModules, ROBINPATH_VERSION } from './runtime';
 
 interface NativeModule {
     name: string;
-    functions: Record<string, Function>;
+    functions: Record<string, (...args: any[]) => any>;
     functionMetadata?: Record<string, unknown>;
     moduleMetadata?: { description?: string; [key: string]: unknown };
 }
@@ -57,7 +59,17 @@ interface NativeModule {
 const PLATFORM_URL: string = process.env.ROBINPATH_PLATFORM_URL || 'https://api.robinpath.com';
 const isTTY: boolean = !!(process.stdout.isTTY || process.stderr.isTTY);
 
-const VALID_CATEGORIES: string[] = ['utilities', 'devops', 'productivity', 'web', 'sales', 'marketing', 'data', 'communication', 'ai'];
+const VALID_CATEGORIES: string[] = [
+    'utilities',
+    'devops',
+    'productivity',
+    'web',
+    'sales',
+    'marketing',
+    'data',
+    'communication',
+    'ai',
+];
 const VALID_SORTS: string[] = ['downloads', 'stars', 'updated', 'created', 'name'];
 
 // ---------------------------------------------------------------------------
@@ -68,7 +80,7 @@ const VALID_SORTS: string[] = ['downloads', 'stars', 'updated', 'created', 'name
  * robinpath add <pkg>[@version] — Install a module from the registry
  */
 export async function handleAdd(args: string[]): Promise<void> {
-    const spec: string | undefined = args.find(a => !a.startsWith('-'));
+    const spec: string | undefined = args.find((a) => !a.startsWith('-'));
     if (!spec) {
         console.error(color.red('Error:') + ' Usage: robinpath add <module>[@version]');
         console.error('  Example: robinpath add @robinpath/slack');
@@ -111,7 +123,7 @@ export async function handleAdd(args: string[]): Promise<void> {
                 console.error(color.red('Error:') + ` Module not found: ${fullName}`);
                 process.exit(1);
             }
-            const info = await infoRes.json() as { data?: { latestVersion?: string; version?: string } };
+            const info = (await infoRes.json()) as { data?: { latestVersion?: string; version?: string } };
             resolvedVersion = info.data?.latestVersion || info.data?.version || null;
             if (!resolvedVersion) {
                 console.error(color.red('Error:') + ` No versions available for ${fullName}`);
@@ -134,10 +146,16 @@ export async function handleAdd(args: string[]): Promise<void> {
             if (res.status === 404) {
                 console.error(color.red('Error:') + ` Module or version not found: ${fullName}@${resolvedVersion}`);
             } else if (res.status === 401 || res.status === 403) {
-                console.error(color.red('Error:') + ' Access denied. You may not have permission to install this module.');
+                console.error(
+                    color.red('Error:') + ' Access denied. You may not have permission to install this module.',
+                );
             } else {
-                const body = await res.json().catch(() => ({} as Record<string, unknown>)) as { error?: { message?: string } };
-                console.error(color.red('Error:') + ` Failed to download: ${body?.error?.message || 'HTTP ' + res.status}`);
+                const body = (await res.json().catch(() => ({}) as Record<string, unknown>)) as {
+                    error?: { message?: string };
+                };
+                console.error(
+                    color.red('Error:') + ` Failed to download: ${body?.error?.message || 'HTTP ' + res.status}`,
+                );
             }
             process.exit(1);
         }
@@ -174,12 +192,20 @@ export async function handleAdd(args: string[]): Promise<void> {
     } catch (err: unknown) {
         // Clean up on failure
         rmSync(modDir, { recursive: true, force: true });
-        try { unlinkSync(tmpFile); } catch { /* ignore */ }
+        try {
+            unlinkSync(tmpFile);
+        } catch {
+            /* ignore */
+        }
         console.error(color.red('Error:') + ` Failed to extract module: ${(err as Error).message}`);
         process.exit(1);
     }
 
-    try { unlinkSync(tmpFile); } catch { /* ignore */ }
+    try {
+        unlinkSync(tmpFile);
+    } catch {
+        /* ignore */
+    }
 
     // Build if dist/ is missing but src/ exists (module published without build)
     const distDir: string = join(modDir, 'dist');
@@ -189,7 +215,7 @@ export async function handleAdd(args: string[]): Promise<void> {
         mkdirSync(distDir, { recursive: true });
         // Strip TypeScript types using Node 22's built-in --experimental-strip-types
         // Each .ts file → .js file with types removed
-        const tsFiles: string[] = readdirSync(srcDir).filter(f => f.endsWith('.ts'));
+        const tsFiles: string[] = readdirSync(srcDir).filter((f) => f.endsWith('.ts'));
         for (const file of tsFiles) {
             const srcFile: string = join(srcDir, file);
             const outFile: string = join(distDir, file.replace('.ts', '.js'));
@@ -217,7 +243,9 @@ export async function handleAdd(args: string[]): Promise<void> {
         try {
             const pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf-8')) as { version?: string };
             installedVersion = pkg.version || installedVersion;
-        } catch { /* ignore */ }
+        } catch {
+            /* ignore */
+        }
     }
 
     // Check for module dependencies
@@ -231,7 +259,9 @@ export async function handleAdd(args: string[]): Promise<void> {
                     await handleAdd([dep]);
                 }
             }
-        } catch { /* ignore dependency errors */ }
+        } catch {
+            /* ignore dependency errors */
+        }
     }
 
     // Update manifest
@@ -251,7 +281,9 @@ export async function handleAdd(args: string[]): Promise<void> {
             if (!config.modules) config.modules = {};
             config.modules[fullName] = `^${installedVersion}`;
             writeFileSync(projectFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
-        } catch { /* ignore project file errors */ }
+        } catch {
+            /* ignore project file errors */
+        }
     }
 
     log(color.green('Installed') + ` ${fullName}@${installedVersion}`);
@@ -265,7 +297,7 @@ export async function handleAdd(args: string[]): Promise<void> {
  * robinpath remove <pkg> — Uninstall a module
  */
 export async function handleRemove(args: string[]): Promise<void> {
-    const spec: string | undefined = args.find(a => !a.startsWith('-'));
+    const spec: string | undefined = args.find((a) => !a.startsWith('-'));
     if (!spec) {
         console.error(color.red('Error:') + ' Usage: robinpath remove <module>');
         console.error('  Example: robinpath remove @robinpath/slack');
@@ -299,7 +331,9 @@ export async function handleRemove(args: string[]): Promise<void> {
         if (remaining.length === 0) {
             rmSync(scopeDir, { recursive: true, force: true });
         }
-    } catch { /* ignore */ }
+    } catch {
+        /* ignore */
+    }
 
     // Update manifest
     delete manifest[fullName];
@@ -314,7 +348,9 @@ export async function handleRemove(args: string[]): Promise<void> {
                 delete config.modules[fullName];
                 writeFileSync(projectFile, JSON.stringify(config, null, 2) + '\n', 'utf-8');
             }
-        } catch { /* ignore project file errors */ }
+        } catch {
+            /* ignore project file errors */
+        }
     }
 
     log(color.green('Removed') + ` ${fullName}`);
@@ -328,7 +364,7 @@ export async function handleRemove(args: string[]): Promise<void> {
  * robinpath upgrade <pkg> — Upgrade a single module to the latest version
  */
 export async function handleUpgrade(args: string[]): Promise<void> {
-    const spec: string | undefined = args.find(a => !a.startsWith('-'));
+    const spec: string | undefined = args.find((a) => !a.startsWith('-'));
     if (!spec) {
         console.error(color.red('Error:') + ' Usage: robinpath upgrade <module>');
         console.error('  Example: robinpath upgrade @robinpath/slack');
@@ -345,7 +381,10 @@ export async function handleUpgrade(args: string[]): Promise<void> {
     const manifest = readModulesManifest();
 
     if (!manifest[fullName]) {
-        console.error(color.red('Error:') + ` Module not installed: ${fullName}. Use ${color.cyan('robinpath add ' + fullName)} first.`);
+        console.error(
+            color.red('Error:') +
+                ` Module not installed: ${fullName}. Use ${color.cyan('robinpath add ' + fullName)} first.`,
+        );
         process.exit(1);
     }
 
@@ -364,7 +403,11 @@ export async function handleUpgrade(args: string[]): Promise<void> {
             process.exit(1);
         }
 
-        const body = await res.json() as { data?: { latestVersion?: string; version?: string }; latestVersion?: string; version?: string };
+        const body = (await res.json()) as {
+            data?: { latestVersion?: string; version?: string };
+            latestVersion?: string;
+            version?: string;
+        };
         const data = body.data || body;
         const latestVersion: string | undefined = data.latestVersion || data.version;
 
@@ -456,7 +499,11 @@ export async function handleModulesUpgradeAll(): Promise<void> {
                 continue;
             }
 
-            const body = await res.json() as { data?: { latestVersion?: string; version?: string }; latestVersion?: string; version?: string };
+            const body = (await res.json()) as {
+                data?: { latestVersion?: string; version?: string };
+                latestVersion?: string;
+                version?: string;
+            };
             const data = body.data || body;
             const latestVersion: string | undefined = data.latestVersion || data.version;
 
@@ -491,10 +538,11 @@ export async function handleModulesUpgradeAll(): Promise<void> {
  */
 export async function handleModulesInit(): Promise<void> {
     const rl = createInterface({ input: process.stdin, output: process.stdout });
-    const ask = (q: string, def?: string): Promise<string> => new Promise(resolve => {
-        const prompt: string = def ? `${q} (${def}): ` : `${q}: `;
-        rl.question(prompt, answer => resolve(answer.trim() || def || ''));
-    });
+    const ask = (q: string, def?: string): Promise<string> =>
+        new Promise((resolve) => {
+            const prompt: string = def ? `${q} (${def}): ` : `${q}: `;
+            rl.question(prompt, (answer) => resolve(answer.trim() || def || ''));
+        });
 
     log('');
     log(color.bold('  Create a new RobinPath module'));
@@ -544,7 +592,9 @@ export async function handleModulesInit(): Promise<void> {
     rl.close();
 
     const fullName: string = `@${scope}/${moduleName}`;
-    const pascalName: string = moduleName.replace(/(^|[-_])(\w)/g, (_: string, __: string, c: string) => c.toUpperCase());
+    const pascalName: string = moduleName.replace(/(^|[-_])(\w)/g, (_: string, __: string, c: string) =>
+        c.toUpperCase(),
+    );
     const targetDir: string = resolve(moduleName);
 
     log('');
@@ -560,25 +610,35 @@ export async function handleModulesInit(): Promise<void> {
     mkdirSync(join(targetDir, 'tests'), { recursive: true });
 
     // package.json
-    writeFileSync(join(targetDir, 'package.json'), JSON.stringify({
-        name: fullName,
-        version: '0.1.0',
-        description,
-        author,
-        license,
-        type: 'module',
-        main: 'dist/index.js',
-        types: 'dist/index.d.ts',
-        exports: { '.': { import: './dist/index.js', types: './dist/index.d.ts' } },
-        files: ['dist'],
-        scripts: { build: 'tsc', test: `robinpath test tests/` },
-        robinpath: { category, displayName },
-        peerDependencies: { '@wiredwp/robinpath': '>=1.30.0' },
-        devDependencies: { '@wiredwp/robinpath': '^0.30.1', typescript: '^5.6.0' },
-    }, null, 2) + '\n', 'utf-8');
+    writeFileSync(
+        join(targetDir, 'package.json'),
+        JSON.stringify(
+            {
+                name: fullName,
+                version: '0.1.0',
+                description,
+                author,
+                license,
+                type: 'module',
+                main: 'dist/index.js',
+                types: 'dist/index.d.ts',
+                exports: { '.': { import: './dist/index.js', types: './dist/index.d.ts' } },
+                files: ['dist'],
+                scripts: { build: 'tsc', test: `robinpath test tests/` },
+                robinpath: { category, displayName },
+                peerDependencies: { '@wiredwp/robinpath': '>=1.30.0' },
+                devDependencies: { '@wiredwp/robinpath': '^0.30.1', typescript: '^5.6.0' },
+            },
+            null,
+            2,
+        ) + '\n',
+        'utf-8',
+    );
 
     // src/index.ts
-    writeFileSync(join(targetDir, 'src', 'index.ts'), `import type { ModuleAdapter } from "@wiredwp/robinpath";
+    writeFileSync(
+        join(targetDir, 'src', 'index.ts'),
+        `import type { ModuleAdapter } from "@wiredwp/robinpath";
 import {
   ${pascalName}Functions,
   ${pascalName}FunctionMetadata,
@@ -595,10 +655,14 @@ const ${pascalName}Module: ModuleAdapter = {
 
 export default ${pascalName}Module;
 export { ${pascalName}Module };
-`, 'utf-8');
+`,
+        'utf-8',
+    );
 
     // src/<name>.ts
-    writeFileSync(join(targetDir, 'src', `${moduleName}.ts`), `import type {
+    writeFileSync(
+        join(targetDir, 'src', `${moduleName}.ts`),
+        `import type {
   BuiltinHandler,
   FunctionMetadata,
   ModuleMetadata,
@@ -664,28 +728,40 @@ export const ${pascalName}ModuleMetadata: ModuleMetadata = {
   author: "${author}",
   category: "${category}",
 };
-`, 'utf-8');
+`,
+        'utf-8',
+    );
 
     // tsconfig.json
-    writeFileSync(join(targetDir, 'tsconfig.json'), JSON.stringify({
-        compilerOptions: {
-            target: 'ES2022',
-            module: 'ES2022',
-            moduleResolution: 'node16',
-            declaration: true,
-            declarationMap: true,
-            sourceMap: true,
-            outDir: 'dist',
-            rootDir: 'src',
-            strict: true,
-            esModuleInterop: true,
-            skipLibCheck: true,
-        },
-        include: ['src'],
-    }, null, 2) + '\n', 'utf-8');
+    writeFileSync(
+        join(targetDir, 'tsconfig.json'),
+        JSON.stringify(
+            {
+                compilerOptions: {
+                    target: 'ES2022',
+                    module: 'ES2022',
+                    moduleResolution: 'node16',
+                    declaration: true,
+                    declarationMap: true,
+                    sourceMap: true,
+                    outDir: 'dist',
+                    rootDir: 'src',
+                    strict: true,
+                    esModuleInterop: true,
+                    skipLibCheck: true,
+                },
+                include: ['src'],
+            },
+            null,
+            2,
+        ) + '\n',
+        'utf-8',
+    );
 
     // tests/<name>.test.rp
-    writeFileSync(join(targetDir, 'tests', `${moduleName}.test.rp`), `# ${displayName} module tests
+    writeFileSync(
+        join(targetDir, 'tests', `${moduleName}.test.rp`),
+        `# ${displayName} module tests
 # Run: robinpath test tests/
 
 @desc "hello returns greeting"
@@ -699,10 +775,14 @@ do
   ${moduleName}.hello into $result
   test.assertContains $result "world"
 enddo
-`, 'utf-8');
+`,
+        'utf-8',
+    );
 
     // README.md
-    writeFileSync(join(targetDir, 'README.md'), `# ${fullName}
+    writeFileSync(
+        join(targetDir, 'README.md'),
+        `# ${fullName}
 
 ${description}
 
@@ -741,13 +821,19 @@ robinpath test tests/
 ## License
 
 ${license}
-`, 'utf-8');
+`,
+        'utf-8',
+    );
 
     // .gitignore
-    writeFileSync(join(targetDir, '.gitignore'), `node_modules/
+    writeFileSync(
+        join(targetDir, '.gitignore'),
+        `node_modules/
 dist/
 *.tgz
-`, 'utf-8');
+`,
+        'utf-8',
+    );
 
     log('');
     log(color.green('Generated:'));
@@ -778,7 +864,7 @@ dist/
  * robinpath pack — Create tarball locally without publishing
  */
 export async function handlePack(args: string[]): Promise<void> {
-    const targetArg: string = args.find(a => !a.startsWith('-')) || '.';
+    const targetArg: string = args.find((a) => !a.startsWith('-')) || '.';
     const targetDir: string = resolve(targetArg);
 
     const pkgPath: string = join(targetDir, 'package.json');
@@ -811,7 +897,7 @@ export async function handlePack(args: string[]): Promise<void> {
     try {
         execSync(
             `tar czf "${toTarPath(outputPath)}" --exclude=node_modules --exclude=.git --exclude=dist --exclude="*.tar.gz" -C "${toTarPath(parentDir)}" "${dirName}"`,
-            { stdio: 'pipe' }
+            { stdio: 'pipe' },
         );
     } catch (err: unknown) {
         // tar may exit 1 with "file changed as we read it" — check if tarball was created
@@ -870,11 +956,11 @@ export function formatTimeAgo(dateStr: string | null | undefined): string {
  * robinpath search [query] — Search the module registry
  */
 export async function handleSearch(args: string[]): Promise<void> {
-    const query: string = args.filter(a => !a.startsWith('-')).join(' ');
-    const category: string | undefined = args.find(a => a.startsWith('--category='))?.split('=')[1];
-    const sort: string | undefined = args.find(a => a.startsWith('--sort='))?.split('=')[1];
-    const page: string | undefined = args.find(a => a.startsWith('--page='))?.split('=')[1];
-    const limit: string | undefined = args.find(a => a.startsWith('--limit='))?.split('=')[1];
+    const query: string = args.filter((a) => !a.startsWith('-')).join(' ');
+    const category: string | undefined = args.find((a) => a.startsWith('--category='))?.split('=')[1];
+    const sort: string | undefined = args.find((a) => a.startsWith('--sort='))?.split('=')[1];
+    const page: string | undefined = args.find((a) => a.startsWith('--page='))?.split('=')[1];
+    const limit: string | undefined = args.find((a) => a.startsWith('--limit='))?.split('=')[1];
     const jsonOutput: boolean = args.includes('--json');
 
     if (!query && !category) {
@@ -928,7 +1014,7 @@ export async function handleSearch(args: string[]): Promise<void> {
             process.exit(1);
         }
 
-        const body = await res.json() as {
+        const body = (await res.json()) as {
             data?: unknown[];
             modules?: unknown[];
             pagination?: { page: number; pages: number; total: number } | null;
@@ -952,13 +1038,26 @@ export async function handleSearch(args: string[]): Promise<void> {
         const dlW: number = 10;
         const starW: number = 7;
         const updW: number = 10;
-        log(color.bold('  ' + 'Name'.padEnd(nameW) + 'Version'.padEnd(verW) + 'Downloads'.padEnd(dlW) + 'Stars'.padEnd(starW) + 'Updated'.padEnd(updW) + 'Description'));
+        log(
+            color.bold(
+                '  ' +
+                    'Name'.padEnd(nameW) +
+                    'Version'.padEnd(verW) +
+                    'Downloads'.padEnd(dlW) +
+                    'Stars'.padEnd(starW) +
+                    'Updated'.padEnd(updW) +
+                    'Description',
+            ),
+        );
         log(color.dim('  ' + '─'.repeat(nameW + verW + dlW + starW + updW + 25)));
 
         for (const mod of modules) {
-            const modName: string = (mod.scope ? `@${mod.scope}/${mod.name}` : mod.name as string) || mod.id as string || '?';
+            const modName: string =
+                (mod.scope ? `@${mod.scope}/${mod.name}` : (mod.name as string)) || (mod.id as string) || '?';
             const ver: string = (mod.version || mod.latestVersion || '-') as string;
-            const dl: string = formatCompactNumber((mod.downloadsTotal ?? mod.downloadsWeekly ?? mod.downloads ?? mod.downloadCount) as number | null);
+            const dl: string = formatCompactNumber(
+                (mod.downloadsTotal ?? mod.downloadsWeekly ?? mod.downloads ?? mod.downloadCount) as number | null,
+            );
             const stars: string = formatCompactNumber(mod.stars as number | null);
             const updated: string = formatTimeAgo(mod.updatedAt as string | null);
             const desc: string = ((mod.description || '') as string).slice(0, 25);
@@ -967,7 +1066,9 @@ export async function handleSearch(args: string[]): Promise<void> {
             if (mod.isVerified) badges.push(color.green('✓'));
             const badgeStr: string = badges.length ? ' ' + badges.join('') : '';
 
-            log(`  ${(modName + badgeStr).padEnd(nameW + (badgeStr.length - badges.length))}${ver.padEnd(verW)}${dl.padEnd(dlW)}${('★ ' + stars).padEnd(starW)}${color.dim(updated.padEnd(updW))}${color.dim(desc)}`);
+            log(
+                `  ${(modName + badgeStr).padEnd(nameW + (badgeStr.length - badges.length))}${ver.padEnd(verW)}${dl.padEnd(dlW)}${('★ ' + stars).padEnd(starW)}${color.dim(updated.padEnd(updW))}${color.dim(desc)}`,
+            );
         }
 
         log('');
@@ -993,11 +1094,14 @@ export async function handleSearch(args: string[]): Promise<void> {
  * robinpath info <pkg> — Show module details
  */
 export async function handleInfo(args: string[]): Promise<void> {
-    const spec: string | undefined = args.find(a => !a.startsWith('-'));
+    const spec: string | undefined = args.find((a) => !a.startsWith('-'));
     const jsonOutput: boolean = args.includes('--json');
     if (!spec) {
         // Collect native module info
-        const modulesInfo: Record<string, { functions: string[]; description: string | null; function_metadata: Record<string, unknown> | null }> = {};
+        const modulesInfo: Record<
+            string,
+            { functions: string[]; description: string | null; function_metadata: Record<string, unknown> | null }
+        > = {};
         for (const mod of nativeModules) {
             modulesInfo[mod.name] = {
                 functions: Object.keys(mod.functions),
@@ -1019,11 +1123,16 @@ export async function handleInfo(args: string[]): Promise<void> {
             try {
                 const pkgPath: string = join(getModulePath(packageName), 'package.json');
                 if (existsSync(pkgPath)) {
-                    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { description?: string; keywords?: string[] };
+                    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as {
+                        description?: string;
+                        keywords?: string[];
+                    };
                     if (pkg.description) entry.description = pkg.description;
                     if (pkg.keywords) entry.keywords = pkg.keywords;
                 }
-            } catch { /* ignore */ }
+            } catch {
+                /* ignore */
+            }
             installedModulesInfo[packageName] = entry;
         }
 
@@ -1051,7 +1160,8 @@ export async function handleInfo(args: string[]): Promise<void> {
             native_modules: modulesInfo,
             installed_modules: installedModulesInfo,
             docs: {
-                overview: 'RobinPath is a scripting language for automation and data processing. It can be used as a CLI tool, an embedded SDK for JavaScript apps, or an HTTP server for integration with any programming language.',
+                overview:
+                    'RobinPath is a scripting language for automation and data processing. It can be used as a CLI tool, an embedded SDK for JavaScript apps, or an HTTP server for integration with any programming language.',
                 install: {
                     unix: 'curl -fsSL https://dev.robinpath.com/install.sh | bash',
                     windows: 'irm https://dev.robinpath.com/install.ps1 | iex',
@@ -1059,7 +1169,7 @@ export async function handleInfo(args: string[]): Promise<void> {
                 cli_commands: {
                     run_file: 'robinpath <file.rp>',
                     run_inline: 'robinpath -e \'log "hello"\'',
-                    run_stdin: 'echo \'log 1\' | robinpath',
+                    run_stdin: "echo 'log 1' | robinpath",
                     fmt: 'robinpath fmt <file|dir> [--write] [--check] [--diff]',
                     check: 'robinpath check <file> [--json]',
                     ast: 'robinpath ast <file> [--compact]',
@@ -1088,11 +1198,13 @@ export async function handleInfo(args: string[]): Promise<void> {
                     login: 'robinpath login',
                     logout: 'robinpath logout',
                     whoami: 'robinpath whoami',
-                    publish: 'robinpath publish [dir] [--public|--private] [--org <name>] [--patch|--minor|--major] [--dry-run]',
+                    publish:
+                        'robinpath publish [dir] [--public|--private] [--org <name>] [--patch|--minor|--major] [--dry-run]',
                     pack: 'robinpath pack [dir]',
                     deprecate: 'robinpath deprecate <@scope/name> "reason"',
                     sync: 'robinpath sync',
-                    start_server: 'robinpath start [-p port] [-s session] [--host addr] [--timeout ms] [--max-concurrent n] [--cors-origin origin] [--log-file path] [--max-body bytes]',
+                    start_server:
+                        'robinpath start [-p port] [-s session] [--host addr] [--timeout ms] [--max-concurrent n] [--cors-origin origin] [--log-file path] [--max-body bytes]',
                     server_status: 'robinpath status [-p port]',
                     watch: 'robinpath --watch <file.rp>',
                     repl: 'robinpath (no arguments)',
@@ -1105,7 +1217,8 @@ export async function handleInfo(args: string[]): Promise<void> {
                     '-w, --watch': 'Re-run on file changes',
                 },
                 http_server: {
-                    description: 'Start an HTTP server that exposes the RobinPath engine via REST API. One server handles all requests. Variables persist across requests (conversational execution). Designed for integration with any language (Rust, Python, Go, PHP, Ruby, C#, Java, etc.).',
+                    description:
+                        'Start an HTTP server that exposes the RobinPath engine via REST API. One server handles all requests. Variables persist across requests (conversational execution). Designed for integration with any language (Rust, Python, Go, PHP, Ruby, C#, Java, etc.).',
                     start: 'robinpath start -p <port> -s <session-secret>',
                     startup_output: `{"ok":true,"port":6372,"host":"127.0.0.1","session":"<uuid>","version":"${CLI_VERSION}"}`,
                     auth_header: 'x-robinpath-session: <session-token> (required on all endpoints except /v1/health)',
@@ -1118,20 +1231,69 @@ export async function handleInfo(args: string[]): Promise<void> {
                         cors_origin: '*',
                     },
                     endpoints: {
-                        'GET /v1/health': { auth: false, description: 'Health check', response: '{"ok":true,"version":"...","uptime_ms":...}' },
-                        'POST /v1/execute': { auth: true, description: 'Execute script', body: '{"code":"log 1"} or Content-Type: text/plain with raw code', response: '{"ok":true,"jobId":"...","status":"completed","output":"1\\n","duration":12}', notes: 'Add Accept: text/event-stream for SSE streaming. Add webhook/webhook_secret for fire-and-forget callback.' },
-                        'POST /v1/execute/file': { auth: true, description: 'Execute script file', body: '{"file":"./script.rp"}', response: 'Same as /v1/execute' },
-                        'POST /v1/check': { auth: true, description: 'Syntax check without executing', body: '{"script":"log 1"}', response: '{"ok":true,"message":"No syntax errors"}' },
-                        'POST /v1/fmt': { auth: true, description: 'Format code', body: '{"script":"set $x as 1"}', response: '{"ok":true,"formatted":"$x = 1\\n"}' },
-                        'GET /v1/jobs': { auth: true, description: 'List jobs', query: '?status=running&limit=10', response: '{"ok":true,"jobs":[...]}' },
-                        'GET /v1/jobs/:id': { auth: true, description: 'Get job details', response: 'Single job object with output' },
-                        'GET /v1/jobs/:id/stream': { auth: true, description: 'SSE stream for job progress', notes: 'Returns event: started, output, completed, job.failed, done' },
-                        'POST /v1/jobs/:id/cancel': { auth: true, description: 'Cancel running job', response: '{"ok":true,"jobId":"...","status":"cancelled"}' },
+                        'GET /v1/health': {
+                            auth: false,
+                            description: 'Health check',
+                            response: '{"ok":true,"version":"...","uptime_ms":...}',
+                        },
+                        'POST /v1/execute': {
+                            auth: true,
+                            description: 'Execute script',
+                            body: '{"code":"log 1"} or Content-Type: text/plain with raw code',
+                            response: '{"ok":true,"jobId":"...","status":"completed","output":"1\\n","duration":12}',
+                            notes: 'Add Accept: text/event-stream for SSE streaming. Add webhook/webhook_secret for fire-and-forget callback.',
+                        },
+                        'POST /v1/execute/file': {
+                            auth: true,
+                            description: 'Execute script file',
+                            body: '{"file":"./script.rp"}',
+                            response: 'Same as /v1/execute',
+                        },
+                        'POST /v1/check': {
+                            auth: true,
+                            description: 'Syntax check without executing',
+                            body: '{"script":"log 1"}',
+                            response: '{"ok":true,"message":"No syntax errors"}',
+                        },
+                        'POST /v1/fmt': {
+                            auth: true,
+                            description: 'Format code',
+                            body: '{"script":"set $x as 1"}',
+                            response: '{"ok":true,"formatted":"$x = 1\\n"}',
+                        },
+                        'GET /v1/jobs': {
+                            auth: true,
+                            description: 'List jobs',
+                            query: '?status=running&limit=10',
+                            response: '{"ok":true,"jobs":[...]}',
+                        },
+                        'GET /v1/jobs/:id': {
+                            auth: true,
+                            description: 'Get job details',
+                            response: 'Single job object with output',
+                        },
+                        'GET /v1/jobs/:id/stream': {
+                            auth: true,
+                            description: 'SSE stream for job progress',
+                            notes: 'Returns event: started, output, completed, job.failed, done',
+                        },
+                        'POST /v1/jobs/:id/cancel': {
+                            auth: true,
+                            description: 'Cancel running job',
+                            response: '{"ok":true,"jobId":"...","status":"cancelled"}',
+                        },
                         'GET /v1/modules': { auth: true, description: 'List all loaded modules and functions' },
-                        'GET /v1/info': { auth: true, description: 'Server runtime info (uptime, memory, config, job counts)' },
+                        'GET /v1/info': {
+                            auth: true,
+                            description: 'Server runtime info (uptime, memory, config, job counts)',
+                        },
                         'GET /v1/metrics': { auth: true, description: 'Prometheus-style metrics (text/plain)' },
                         'GET /v1/openapi.json': { auth: true, description: 'OpenAPI 3.1 specification' },
-                        'POST /v1/stop': { auth: true, description: 'Graceful shutdown (waits for active jobs)', response: '{"ok":true,"message":"Server stopping","active_jobs":[]}' },
+                        'POST /v1/stop': {
+                            auth: true,
+                            description: 'Graceful shutdown (waits for active jobs)',
+                            response: '{"ok":true,"message":"Server stopping","active_jobs":[]}',
+                        },
                     },
                     optional_headers: {
                         'x-request-id': 'Client request ID (auto-generated UUID if missing)',
@@ -1148,14 +1310,31 @@ export async function handleInfo(args: string[]): Promise<void> {
                     },
                     sse_events: ['started', 'output', 'completed', 'job.failed', 'job.cancelled', 'done'],
                     webhook: {
-                        description: 'Add webhook URL to /v1/execute for fire-and-forget execution. Returns 202 immediately.',
+                        description:
+                            'Add webhook URL to /v1/execute for fire-and-forget execution. Returns 202 immediately.',
                         body_fields: 'webhook (URL), webhook_secret (for HMAC-SHA256 signature)',
                         signature_header: 'X-Webhook-Signature: sha256=<hmac-hex>',
                     },
-                    features: ['Session gatekeeper', 'API versioning (/v1/)', 'SSE streaming', 'Webhook callbacks with HMAC-SHA256', 'Idempotency keys', 'Rate limiting', 'Job queue with cancel', 'Structured JSON logging', 'Prometheus metrics', 'OpenAPI spec', 'Graceful shutdown', 'Persistent runtime state', 'Plain text body support', 'PID file management'],
+                    features: [
+                        'Session gatekeeper',
+                        'API versioning (/v1/)',
+                        'SSE streaming',
+                        'Webhook callbacks with HMAC-SHA256',
+                        'Idempotency keys',
+                        'Rate limiting',
+                        'Job queue with cancel',
+                        'Structured JSON logging',
+                        'Prometheus metrics',
+                        'OpenAPI spec',
+                        'Graceful shutdown',
+                        'Persistent runtime state',
+                        'Plain text body support',
+                        'PID file management',
+                    ],
                 },
                 sdk: {
-                    description: 'For JavaScript/TypeScript apps (React, Next.js, Vue, Angular, Express, Node.js). Direct in-process execution, no HTTP server needed.',
+                    description:
+                        'For JavaScript/TypeScript apps (React, Next.js, Vue, Angular, Express, Node.js). Direct in-process execution, no HTTP server needed.',
                     install: 'npm install @robinpath/sdk',
                     usage: [
                         'import { createRuntime } from "@robinpath/sdk";',
@@ -1165,7 +1344,8 @@ export async function handleInfo(args: string[]): Promise<void> {
                     ].join('\n'),
                     options: {
                         timeout: 'Max execution time in ms (0 = no limit)',
-                        permissions: '"all" | "none" | { fs, net, child, env, crypto } — restrict what scripts can access',
+                        permissions:
+                            '"all" | "none" | { fs, net, child, env, crypto } — restrict what scripts can access',
                         modules: 'Whitelist of allowed module names (undefined = all)',
                         customBuiltins: 'Record<string, handler> — add custom functions',
                         customModules: '[{ name, functions }] — add custom modules',
@@ -1176,15 +1356,18 @@ export async function handleInfo(args: string[]): Promise<void> {
                     engine_access: 'rp.engine — access underlying RobinPath instance for advanced use',
                 },
                 integration: {
-                    description: 'For non-JS languages (Rust, Python, Go, PHP, Ruby, C#, Java), use robinpath start HTTP server.',
+                    description:
+                        'For non-JS languages (Rust, Python, Go, PHP, Ruby, C#, Java), use robinpath start HTTP server.',
                     pattern: [
                         '1. Spawn: robinpath start -p <port> [-s <secret>]',
                         '2. Parse startup JSON from stdout to get session token',
                         '3. Send HTTP requests with x-robinpath-session header',
                         '4. Stop: POST /v1/stop or send SIGTERM',
                     ],
-                    rust_example: 'let child = Command::new("robinpath").args(["start","-p","6372"]).stdout(Stdio::piped()).spawn()?;\n// Read first line for session, then use reqwest to POST /v1/execute',
-                    python_example: 'proc = subprocess.Popen(["robinpath","start","-p","6372"], stdout=subprocess.PIPE)\nstartup = json.loads(proc.stdout.readline())\nsession = startup["session"]\nrequests.post(f"http://127.0.0.1:6372/v1/execute", headers={"x-robinpath-session": session}, json={"code": "log 1"})',
+                    rust_example:
+                        'let child = Command::new("robinpath").args(["start","-p","6372"]).stdout(Stdio::piped()).spawn()?;\n// Read first line for session, then use reqwest to POST /v1/execute',
+                    python_example:
+                        'proc = subprocess.Popen(["robinpath","start","-p","6372"], stdout=subprocess.PIPE)\nstartup = json.loads(proc.stdout.readline())\nsession = startup["session"]\nrequests.post(f"http://127.0.0.1:6372/v1/execute", headers={"x-robinpath-session": session}, json={"code": "log 1"})',
                     js_note: 'For JavaScript apps, prefer @robinpath/sdk (direct, no server needed) over HTTP.',
                 },
                 language_syntax: {
@@ -1276,13 +1459,13 @@ export async function handleInfo(args: string[]): Promise<void> {
             process.exit(1);
         }
 
-        const body = await res.json() as { data?: Record<string, unknown> };
+        const body = (await res.json()) as { data?: Record<string, unknown> };
         const data: Record<string, unknown> = body.data || (body as Record<string, unknown>);
 
         if (jsonOutput) {
             let versionsData: unknown = null;
             if (versionsRes?.ok) {
-                const vBody = await versionsRes.json() as { data?: unknown };
+                const vBody = (await versionsRes.json()) as { data?: unknown };
                 versionsData = vBody.data || vBody;
             }
             console.log(JSON.stringify({ module: data, versions: versionsData }, null, 2));
@@ -1294,12 +1477,17 @@ export async function handleInfo(args: string[]): Promise<void> {
         const badges: string[] = [];
         if (data.isOfficial) badges.push(color.cyan(' official'));
         if (data.isVerified) badges.push(color.green(' verified'));
-        log(`  ${color.bold(fullName)} ${color.cyan('v' + ((data.latestVersion || data.version || '-') as string))}${badges.join('')}`);
+        log(
+            `  ${color.bold(fullName)} ${color.cyan('v' + ((data.latestVersion || data.version || '-') as string))}${badges.join('')}`,
+        );
         if (data.description) log(`  ${data.description}`);
         log('');
 
         // Metadata
-        if (data.author || (data.publisher as Record<string, unknown> | undefined)?.name) log(`  Author:       ${data.author || (data.publisher as Record<string, unknown> | undefined)?.name || '-'}`);
+        if (data.author || (data.publisher as Record<string, unknown> | undefined)?.name)
+            log(
+                `  Author:       ${data.author || (data.publisher as Record<string, unknown> | undefined)?.name || '-'}`,
+            );
         if (data.license) log(`  License:      ${data.license}`);
         if (data.category) log(`  Category:     ${data.category}`);
         const visibility: string = (data.visibility || (data.isPublic === false ? 'private' : 'public')) as string;
@@ -1323,14 +1511,19 @@ export async function handleInfo(args: string[]): Promise<void> {
 
         let parsedKeywords = data.keywords as string[] | string | null;
         if (typeof parsedKeywords === 'string') {
-            try { parsedKeywords = JSON.parse(parsedKeywords) as string[]; } catch { parsedKeywords = null; }
+            try {
+                parsedKeywords = JSON.parse(parsedKeywords) as string[];
+            } catch {
+                parsedKeywords = null;
+            }
         }
-        if (parsedKeywords && (parsedKeywords as string[]).length) log(`  Keywords:     ${(parsedKeywords as string[]).join(', ')}`);
+        if (parsedKeywords && (parsedKeywords as string[]).length)
+            log(`  Keywords:     ${(parsedKeywords as string[]).join(', ')}`);
         log('');
 
         // Version history
         if (versionsRes?.ok) {
-            const vBody = await versionsRes.json() as { data?: Record<string, unknown> };
+            const vBody = (await versionsRes.json()) as { data?: Record<string, unknown> };
             const vData: Record<string, unknown> = vBody.data || (vBody as Record<string, unknown>);
             const versions = (vData.versions || vData) as Record<string, unknown>[];
             const distTags = (vData.distTags || vData.dist_tags || []) as Array<{ tag: string; version: string }>;
@@ -1353,10 +1546,16 @@ export async function handleInfo(args: string[]): Promise<void> {
                     const size: string = v.tarballSize ? ` (${((v.tarballSize as number) / 1024).toFixed(1)}KB)` : '';
                     const deprecated: string = v.deprecated ? color.red(' DEPRECATED') : '';
                     const published: string = formatTimeAgo(v.createdAt as string);
-                    log(`  ${('v' + v.version).padEnd(14)}${color.dim(published.padEnd(12))}${color.dim(size)}${tagStr}${deprecated}`);
+                    log(
+                        `  ${('v' + v.version).padEnd(14)}${color.dim(published.padEnd(12))}${color.dim(size)}${tagStr}${deprecated}`,
+                    );
                 }
                 if (versions.length > 10) {
-                    log(color.dim(`  ... and ${versions.length - 10} more version${versions.length - 10 !== 1 ? 's' : ''}`));
+                    log(
+                        color.dim(
+                            `  ... and ${versions.length - 10} more version${versions.length - 10 !== 1 ? 's' : ''}`,
+                        ),
+                    );
                 }
                 log('');
             }

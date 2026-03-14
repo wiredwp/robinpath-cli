@@ -74,7 +74,9 @@ export function executeShellCommand(command: string, timeout: number = 30000): P
         setTimeout(() => {
             if (settled) return;
             settled = true;
-            try { child.kill('SIGTERM'); } catch {}
+            try {
+                child.kill('SIGTERM');
+            } catch {}
             resolve({
                 stdout: stdout.slice(0, 50000),
                 stderr: 'Command timed out',
@@ -149,5 +151,8 @@ export function extractCommands(text: string): string[] {
 
 // Strip <cmd> tags from displayed text (they're invisible to user)
 export function stripCommandTags(text: string): string {
-    return text.replace(/<cmd>[\s\S]*?<\/cmd>/g, '').replace(/\n{3,}/g, '\n\n').trim();
+    return text
+        .replace(/<cmd>[\s\S]*?<\/cmd>/g, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
 }

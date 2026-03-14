@@ -834,7 +834,9 @@ EXAMPLES:
         console.log(page);
     } else {
         console.error(color.red('Error:') + ` Unknown command: ${command}`);
-        console.error('Available: add, remove, upgrade, search, info, modules, init, doctor, env, cache, audit, deprecate, pack, fmt, check, ast, test, install, uninstall, login, logout, whoami, publish, sync, snippet, ai, start, status');
+        console.error(
+            'Available: add, remove, upgrade, search, info, modules, init, doctor, env, cache, audit, deprecate, pack, fmt, check, ast, test, install, uninstall, login, logout, whoami, publish, sync, snippet, ai, start, status',
+        );
         process.exit(2);
     }
 }

@@ -7,15 +7,7 @@ import { resolve, join, basename } from 'node:path';
 import { createInterface } from 'node:readline';
 import { platform } from 'node:os';
 
-import {
-    color,
-    log,
-    logVerbose,
-    CLI_VERSION,
-    getRobinPathHome,
-    getInstallDir,
-    FLAG_VERBOSE,
-} from './utils';
+import { color, log, logVerbose, CLI_VERSION, getRobinPathHome, getInstallDir, FLAG_VERBOSE } from './utils';
 
 import {
     readModulesManifest,
@@ -43,7 +35,7 @@ import { ROBINPATH_VERSION, nativeModules } from './runtime';
 
 interface NativeModule {
     name: string;
-    functions: Record<string, Function>;
+    functions: Record<string, (...args: any[]) => any>;
     functionMetadata?: Record<string, unknown>;
     moduleMetadata?: Record<string, unknown>;
 }
@@ -71,10 +63,11 @@ export async function handleInit(args: string[]): Promise<void> {
     }
 
     const rl = createInterface({ input: process.stdin, output: process.stdout });
-    const ask = (q: string, def: string): Promise<string> => new Promise(resolve => {
-        const prompt: string = def ? `${q} (${def}): ` : `${q}: `;
-        rl.question(prompt, answer => resolve(answer.trim() || def || ''));
-    });
+    const ask = (q: string, def: string): Promise<string> =>
+        new Promise((resolve) => {
+            const prompt: string = def ? `${q} (${def}): ` : `${q}: `;
+            rl.question(prompt, (answer) => resolve(answer.trim() || def || ''));
+        });
 
     log('');
     log(color.bold('  Create a new RobinPath project'));
@@ -85,7 +78,7 @@ export async function handleInit(args: string[]): Promise<void> {
     const projectName: string = await ask('  Project name', dirName);
     const description: string = await ask('  Description', '');
     const auth = readAuth();
-    const author: string = await ask('  Author', auth?.email || '');
+    const author: string = await ask('  Author', (auth?.email as string) || '');
     const mainFile: string = await ask('  Entry file', 'main.rp');
 
     rl.close();
@@ -105,27 +98,39 @@ export async function handleInit(args: string[]): Promise<void> {
     // Create main.rp if it doesn't exist
     const mainPath: string = resolve(mainFile);
     if (!existsSync(mainPath)) {
-        writeFileSync(mainPath, `# ${projectName}
+        writeFileSync(
+            mainPath,
+            `# ${projectName}
 # Run: robinpath ${mainFile}
 
 log "Hello from RobinPath!"
-`, 'utf-8');
+`,
+            'utf-8',
+        );
     }
 
     // Create .env if it doesn't exist
     if (!existsSync(resolve('.env'))) {
-        writeFileSync(resolve('.env'), `# Add your secrets here
+        writeFileSync(
+            resolve('.env'),
+            `# Add your secrets here
 # SLACK_TOKEN=xoxb-...
 # OPENAI_KEY=sk-...
-`, 'utf-8');
+`,
+            'utf-8',
+        );
     }
 
     // Create .gitignore if it doesn't exist
     if (!existsSync(resolve('.gitignore'))) {
-        writeFileSync(resolve('.gitignore'), `.env
+        writeFileSync(
+            resolve('.gitignore'),
+            `.env
 .robinpath/
 node_modules/
-`, 'utf-8');
+`,
+            'utf-8',
+        );
     }
 
     log('');
@@ -210,7 +215,7 @@ export async function handleProjectInstall(): Promise<void> {
         if (updatedManifest[name]) {
             lockData[name] = {
                 version: updatedManifest[name].version,
-                integrity: updatedManifest[name].integrity,
+                integrity: updatedManifest[name].integrity as string,
             };
         }
     }
@@ -289,7 +294,9 @@ export async function handleDoctor(): Promise<void> {
                 try {
                     const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
                     if (pkg.main) entryPoint = pkg.main;
-                } catch { /* use default */ }
+                } catch {
+                    /* use default */
+                }
                 if (!existsSync(join(modDir, entryPoint))) {
                     log(color.red('  \u2717') + `   ${name}: entry point ${entryPoint} missing`);
                     issues++;
@@ -326,10 +333,16 @@ export async function handleDoctor(): Promise<void> {
         try {
             const cacheFiles: string[] = readdirSync(CACHE_DIR);
             const cacheSize: number = cacheFiles.reduce((total: number, f: string) => {
-                try { return total + statSync(join(CACHE_DIR, f)).size; } catch { return total; }
+                try {
+                    return total + statSync(join(CACHE_DIR, f)).size;
+                } catch {
+                    return total;
+                }
             }, 0);
             log(color.dim('  -') + ` Cache: ${cacheFiles.length} files (${(cacheSize / 1024).toFixed(0)}KB)`);
-        } catch { /* ignore */ }
+        } catch {
+            /* ignore */
+        }
     }
 
     log('');
@@ -370,10 +383,17 @@ export async function handleEnv(args: string[]): Promise<void> {
     function writeEnvFile(env: Record<string, string>): void {
         const dir: string = getRobinPathHome();
         if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-        const content: string = Object.entries(env).map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
+        const content: string =
+            Object.entries(env)
+                .map(([k, v]) => `${k}=${v}`)
+                .join('\n') + '\n';
         writeFileSync(envPath, content, 'utf-8');
         if (platform() !== 'win32') {
-            try { chmodSync(envPath, 0o600); } catch { /* ignore */ }
+            try {
+                chmodSync(envPath, 0o600);
+            } catch {
+                /* ignore */
+            }
         }
     }
 
@@ -400,7 +420,10 @@ export async function handleEnv(args: string[]): Promise<void> {
         log(color.bold('  Environment variables:'));
         log(color.dim('  ' + '\u2500'.repeat(40)));
         for (const [key, value] of entries) {
-            const masked: string = value.length > 4 ? value.slice(0, 2) + '\u2022'.repeat(Math.min(value.length - 4, 20)) + value.slice(-2) : '\u2022\u2022\u2022\u2022';
+            const masked: string =
+                value.length > 4
+                    ? value.slice(0, 2) + '\u2022'.repeat(Math.min(value.length - 4, 20)) + value.slice(-2)
+                    : '\u2022\u2022\u2022\u2022';
             log(`  ${key.padEnd(25)} ${color.dim(masked)}`);
         }
         log('');
@@ -456,7 +479,11 @@ export async function handleCache(args: string[]): Promise<void> {
                 log(`  ${file.padEnd(45)} ${color.dim((size / 1024).toFixed(1) + 'KB')}`);
             }
             log('');
-            log(color.dim(`${files.length} file${files.length !== 1 ? 's' : ''}, ${(totalSize / 1024).toFixed(0)}KB total`));
+            log(
+                color.dim(
+                    `${files.length} file${files.length !== 1 ? 's' : ''}, ${(totalSize / 1024).toFixed(0)}KB total`,
+                ),
+            );
             log('');
         } catch (err: any) {
             console.error(color.red('Error:') + ` Failed to list cache: ${err.message}`);
@@ -474,7 +501,10 @@ export async function handleCache(args: string[]): Promise<void> {
                 totalSize += statSync(join(CACHE_DIR, file)).size;
             }
             rmSync(CACHE_DIR, { recursive: true, force: true });
-            log(color.green('Cleared') + ` ${files.length} cached file${files.length !== 1 ? 's' : ''} (${(totalSize / 1024).toFixed(0)}KB freed)`);
+            log(
+                color.green('Cleared') +
+                    ` ${files.length} cached file${files.length !== 1 ? 's' : ''} (${(totalSize / 1024).toFixed(0)}KB freed)`,
+            );
         } catch (err: any) {
             console.error(color.red('Error:') + ` Failed to clean cache: ${err.message}`);
             process.exit(1);
@@ -515,7 +545,9 @@ export async function handleAudit(): Promise<void> {
             const headers: Record<string, string> = {};
             if (token) headers.Authorization = `Bearer ${token}`;
 
-            const res: Response = await fetch(`${PLATFORM_URL}/v1/registry/${parsed.scope}/${parsed.name}`, { headers });
+            const res: Response = await fetch(`${PLATFORM_URL}/v1/registry/${parsed.scope}/${parsed.name}`, {
+                headers,
+            });
 
             if (!res.ok) {
                 log(color.yellow('  !') + `  ${fullName}: could not check registry`);
@@ -523,12 +555,15 @@ export async function handleAudit(): Promise<void> {
                 continue;
             }
 
-            const body = await res.json() as any;
+            const body = (await res.json()) as any;
             const data = body.data || body;
 
             // Check if deprecated
             if (data.deprecated) {
-                log(color.red('  \u2717') + `  ${fullName}@${info.version} \u2014 ${color.red('deprecated')}: ${data.deprecated}`);
+                log(
+                    color.red('  \u2717') +
+                        `  ${fullName}@${info.version} \u2014 ${color.red('deprecated')}: ${data.deprecated}`,
+                );
                 warnings++;
                 continue;
             }
@@ -552,8 +587,7 @@ export async function handleAudit(): Promise<void> {
     if (warnings === 0) {
         log(color.green(`No issues found. ${ok} module${ok !== 1 ? 's' : ''} OK.`));
     } else {
-        log(`${color.yellow(warnings + ' warning' + (warnings !== 1 ? 's' : ''))}` +
-            (ok > 0 ? `, ${ok} OK` : ''));
+        log(`${color.yellow(warnings + ' warning' + (warnings !== 1 ? 's' : ''))}` + (ok > 0 ? `, ${ok} OK` : ''));
     }
     log('');
 }
@@ -562,7 +596,7 @@ export async function handleAudit(): Promise<void> {
  * robinpath deprecate <pkg> "reason" — Mark a module as deprecated
  */
 export async function handleDeprecate(args: string[]): Promise<void> {
-    const spec: string | undefined = args.find(a => !a.startsWith('-'));
+    const spec: string | undefined = args.find((a) => !a.startsWith('-'));
     if (!spec) {
         console.error(color.red('Error:') + ' Usage: robinpath deprecate <module> "reason"');
         process.exit(2);
@@ -574,7 +608,8 @@ export async function handleDeprecate(args: string[]): Promise<void> {
         process.exit(2);
     }
 
-    const reason: string = args.filter(a => a !== spec && !a.startsWith('-')).join(' ') || 'This module is deprecated';
+    const reason: string =
+        args.filter((a) => a !== spec && !a.startsWith('-')).join(' ') || 'This module is deprecated';
     const { scope, name, fullName } = parsed;
     const token: string = requireAuth();
 
@@ -593,8 +628,10 @@ export async function handleDeprecate(args: string[]): Promise<void> {
         if (res.ok) {
             log(color.yellow('Deprecated') + ` ${fullName}: ${reason}`);
         } else {
-            const body = await res.json().catch(() => ({})) as any;
-            console.error(color.red('Error:') + ` Failed to deprecate: ${body?.error?.message || 'HTTP ' + res.status}`);
+            const body = (await res.json().catch(() => ({}))) as any;
+            console.error(
+                color.red('Error:') + ` Failed to deprecate: ${body?.error?.message || 'HTTP ' + res.status}`,
+            );
             process.exit(1);
         }
     } catch (err: any) {

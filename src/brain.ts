@@ -112,7 +112,7 @@ export async function fetchBrainContext(prompt: string): Promise<BrainResult | n
  */
 export async function fetchBrainStream(
     prompt: string,
-    { onToken, conversationHistory, provider, model, apiKey, cliContext }: BrainStreamOptions = {}
+    { onToken, conversationHistory, provider, model, apiKey, cliContext }: BrainStreamOptions = {},
 ): Promise<BrainStreamResult | null> {
     try {
         const body: Record<string, unknown> = {
@@ -278,7 +278,7 @@ export function buildLocalContext(): CLIContext {
     }));
 
     // Native modules (just names)
-    ctx.nativeModuleNames = nativeModules.map(m => m.name);
+    ctx.nativeModuleNames = nativeModules.map((m) => m.name);
 
     // Project config
     try {
@@ -286,7 +286,9 @@ export function buildLocalContext(): CLIContext {
         if (existsSync(projectPath)) {
             ctx.projectConfig = JSON.parse(readFileSync(projectPath, 'utf-8'));
         }
-    } catch { /* ignore */ }
+    } catch {
+        /* ignore */
+    }
 
     // Relevant local files (scripts + data, max 20)
     try {
@@ -299,12 +301,16 @@ export function buildLocalContext(): CLIContext {
                     try {
                         const st = statSync(join(cwd, entry.name));
                         relevant.push({ name: entry.name, size: st.size });
-                    } catch { /* ignore */ }
+                    } catch {
+                        /* ignore */
+                    }
                 }
             }
         }
         ctx.localFiles = relevant.slice(0, 20);
-    } catch { /* ignore */ }
+    } catch {
+        /* ignore */
+    }
 
     // Environment variable names (from robinpath env, not values)
     try {
@@ -320,7 +326,9 @@ export function buildLocalContext(): CLIContext {
                 }
             }
         }
-    } catch { /* ignore */ }
+    } catch {
+        /* ignore */
+    }
 
     return ctx;
 }
@@ -334,13 +342,10 @@ export function buildLocalContext(): CLIContext {
  * This is what gets sent to the LLM — focused, relevant context only.
  */
 export async function buildEnrichedPrompt(prompt: string): Promise<EnrichedPromptResult> {
-    const [resolved, local] = await Promise.all([
-        resolveBrainModules(prompt),
-        Promise.resolve(buildLocalContext()),
-    ]);
+    const [resolved, local] = await Promise.all([resolveBrainModules(prompt), Promise.resolve(buildLocalContext())]);
 
     const installedNames = new Set<string>([
-        ...local.installedModules.map(m => m.name.replace(/^@robinpath\//, '')),
+        ...local.installedModules.map((m) => m.name.replace(/^@robinpath\//, '')),
         ...local.nativeModuleNames,
     ]);
 
@@ -359,9 +364,9 @@ export async function buildEnrichedPrompt(prompt: string): Promise<EnrichedPromp
     // Section 1: Module availability
     if (resolved && resolved.length > 0) {
         // Filter: score > 0.76, and exclude modules that overlap with core language features
-        const relevant = resolved.filter(m => m.score > 0.76 && !coreOverlaps.has(m.name));
+        const relevant = resolved.filter((m) => m.score > 0.76 && !coreOverlaps.has(m.name));
         if (relevant.length > 0) {
-            const moduleLines = relevant.map(m => {
+            const moduleLines = relevant.map((m) => {
                 const shortName = m.name;
                 const fullName = `@robinpath/${shortName}`;
                 const isInstalled = installedNames.has(shortName);
@@ -373,9 +378,7 @@ export async function buildEnrichedPrompt(prompt: string): Promise<EnrichedPromp
         }
 
         // Collect missing modules
-        const missing = relevant
-            .filter(m => !installedNames.has(m.name))
-            .map(m => `@robinpath/${m.name}`);
+        const missing = relevant.filter((m) => !installedNames.has(m.name)).map((m) => `@robinpath/${m.name}`);
         if (missing.length > 0) {
             sections.push(`Not installed: ${missing.join(', ')}`);
         }
@@ -383,12 +386,12 @@ export async function buildEnrichedPrompt(prompt: string): Promise<EnrichedPromp
 
     // Section 2: Installed modules
     if (local.installedModules.length > 0) {
-        sections.push(`Installed: ${local.installedModules.map(m => m.name).join(', ')}`);
+        sections.push(`Installed: ${local.installedModules.map((m) => m.name).join(', ')}`);
     }
 
     // Section 3: Local files
     if (local.localFiles.length > 0) {
-        sections.push(`Files: ${local.localFiles.map(f => `${f.name} (${formatFileSize(f.size)})`).join(', ')}`);
+        sections.push(`Files: ${local.localFiles.map((f) => `${f.name} (${formatFileSize(f.size)})`).join(', ')}`);
     }
 
     // Section 4: Environment variables
@@ -402,16 +405,16 @@ export async function buildEnrichedPrompt(prompt: string): Promise<EnrichedPromp
     }
 
     // Build the enriched prompt
-    const contextBlock = sections.length > 0
-        ? `[Context]\n${sections.join('\n\n')}\n[/Context]\n\n`
-        : '';
+    const contextBlock = sections.length > 0 ? `[Context]\n${sections.join('\n\n')}\n[/Context]\n\n` : '';
 
     return {
         enrichedPrompt: `${contextBlock}${prompt}`,
         resolved,
         local,
         missingModules: resolved
-            ? resolved.filter(m => m.score > 0.76 && !installedNames.has(m.name) && !coreOverlaps.has(m.name)).map(m => `@robinpath/${m.name}`)
+            ? resolved
+                  .filter((m) => m.score > 0.76 && !installedNames.has(m.name) && !coreOverlaps.has(m.name))
+                  .map((m) => `@robinpath/${m.name}`)
             : [],
     };
 }

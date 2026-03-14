@@ -30,9 +30,9 @@ const PLATFORM_URL: string = process.env.ROBINPATH_PLATFORM_URL || 'https://api.
 // ── Auth data shape (mirrors commands-core writeAuth / readAuth) ────────────
 interface AuthData {
     token: string;
-    email: string;
-    name: string;
-    expiresAt: number;
+    email?: string;
+    name?: string;
+    expiresAt?: number;
 }
 
 // ── JWT claims (minimal) ────────────────────────────────────────────────────
@@ -62,8 +62,8 @@ export async function handleLogin(): Promise<void> {
     // Check if already logged in
     const existing: AuthData | null = readAuth();
     if (existing && existing.expiresAt && Date.now() < existing.expiresAt * 1000) {
-        log(`Already logged in as ${color.cyan(existing.email)}`);
-        log(`Token expires ${new Date(existing.expiresAt * 1000).toLocaleDateString()}`);
+        log(`Already logged in as ${color.cyan(existing.email || 'unknown')}`);
+        log(`Token expires ${new Date(existing.expiresAt! * 1000).toLocaleDateString()}`);
         log(`Run ${color.cyan('robinpath logout')} to sign out first.`);
         return;
     }
@@ -89,7 +89,7 @@ export async function handleLogin(): Promise<void> {
 
             // Decode JWT to get expiry
             const claims: JWTClaims | null = decodeJWTPayload(token);
-            const expiresAt: number = claims?.exp || (Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60);
+            const expiresAt: number = claims?.exp || Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
 
             // Save auth
             writeAuth({ token, email: email || '', name: name || '', expiresAt });
@@ -119,7 +119,12 @@ export async function handleLogin(): Promise<void> {
             const callbackUrl: string = `http://localhost:${port}/callback`;
 
             // Generate a verification code the user can match in the browser
-            const code: string = 'ROBIN-' + Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 31)]).join('');
+            const code: string =
+                'ROBIN-' +
+                Array.from(
+                    { length: 4 },
+                    () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 31)],
+                ).join('');
             const deviceName: string = hostname();
             const deviceOS: string = process.platform;
 
@@ -140,11 +145,14 @@ export async function handleLogin(): Promise<void> {
         });
 
         // Timeout after 5 minutes
-        const timeout: NodeJS.Timeout = setTimeout(() => {
-            server.close();
-            console.error(color.red('Error:') + ' Login timed out (5 minutes). Please try again.');
-            process.exit(1);
-        }, 5 * 60 * 1000);
+        const timeout: NodeJS.Timeout = setTimeout(
+            () => {
+                server.close();
+                console.error(color.red('Error:') + ' Login timed out (5 minutes). Please try again.');
+                process.exit(1);
+            },
+            5 * 60 * 1000,
+        );
     });
 }
 
@@ -306,10 +314,14 @@ export async function handlePublish(args: string[]): Promise<void> {
     try {
         execSync(
             `tar czf "${toTarPath(tmpFile)}" --exclude=node_modules --exclude=.git --exclude="*.tar.gz" -C "${toTarPath(parentDir)}" "${dirName}"`,
-            { stdio: 'pipe' }
+            { stdio: 'pipe' },
         );
     } catch (err: any) {
-        try { unlinkSync(tmpFile); } catch { /* ignore */ }
+        try {
+            unlinkSync(tmpFile);
+        } catch {
+            /* ignore */
+        }
         console.error(color.red('Error:') + ` Failed to create tarball: ${err.message}`);
         process.exit(1);
     }
@@ -319,7 +331,10 @@ export async function handlePublish(args: string[]): Promise<void> {
     const maxSize: number = 50 * 1024 * 1024; // 50MB
     if (tarball.length > maxSize) {
         unlinkSync(tmpFile);
-        console.error(color.red('Error:') + ` Package is too large (${(tarball.length / 1024 / 1024).toFixed(1)}MB). Max size is 5MB.`);
+        console.error(
+            color.red('Error:') +
+                ` Package is too large (${(tarball.length / 1024 / 1024).toFixed(1)}MB). Max size is 5MB.`,
+        );
         process.exit(1);
     }
 
@@ -348,7 +363,7 @@ export async function handlePublish(args: string[]): Promise<void> {
         const res: Response = await fetch(`${PLATFORM_URL}/v1/registry/${scope}/${name}`, {
             method: 'PUT',
             headers,
-            body: tarball,
+            body: new Uint8Array(tarball),
         });
 
         if (res.ok) {
@@ -364,7 +379,11 @@ export async function handlePublish(args: string[]): Promise<void> {
         process.exit(1);
     } finally {
         // Clean up temp file
-        try { unlinkSync(tmpFile); } catch { /* ignore */ }
+        try {
+            unlinkSync(tmpFile);
+        } catch {
+            /* ignore */
+        }
     }
 }
 

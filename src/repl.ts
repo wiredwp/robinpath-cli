@@ -40,13 +40,7 @@ import {
     estimateTokens,
 } from './sessions';
 import type { Message } from './sessions';
-import {
-    executeShellCommand,
-    extractCommands,
-    stripCommandTags,
-    detectFileWrite,
-    showFileDiff,
-} from './shell';
+import { executeShellCommand, extractCommands, stripCommandTags, detectFileWrite, showFileDiff } from './shell';
 import {
     selectModelInteractive,
     selectSessionInteractive,
@@ -112,28 +106,35 @@ export async function welcomeWizard(): Promise<void> {
 
     let cursor = 0;
 
-    const picked: string | null = await createInteractivePicker({
-        renderFn: (out: (text: string) => void) => {
-            out('');
-            out(color.bold('  Welcome to RobinPath AI!'));
-            out(color.dim('  Your AI-powered scripting assistant'));
-            out('');
-            for (let i = 0; i < options.length; i++) {
-                const marker = i === cursor ? color.cyan('\u276f') : ' ';
-                const text = i === cursor ? color.cyan(color.bold(options[i].name)) : options[i].name;
-                out(`  ${marker} ${text}`);
-            }
-            out('');
-            out(color.dim('  \u2191\u2193 navigate  Enter select'));
-        },
-        onKeyFn: (key: string) => {
-            if (key === '\r' || key === '\n') return options[cursor].value;
-            if (key === '\x1b') return 'free';
-            if (key === '\x1b[A' || key === 'k') { cursor = Math.max(0, cursor - 1); return 'render'; }
-            if (key === '\x1b[B' || key === 'j') { cursor = Math.min(options.length - 1, cursor + 1); return 'render'; }
-            return undefined;
-        },
-    }) || 'free';
+    const picked: string | null =
+        (await createInteractivePicker({
+            renderFn: (out: (text: string) => void) => {
+                out('');
+                out(color.bold('  Welcome to RobinPath AI!'));
+                out(color.dim('  Your AI-powered scripting assistant'));
+                out('');
+                for (let i = 0; i < options.length; i++) {
+                    const marker = i === cursor ? color.cyan('\u276f') : ' ';
+                    const text = i === cursor ? color.cyan(color.bold(options[i].name)) : options[i].name;
+                    out(`  ${marker} ${text}`);
+                }
+                out('');
+                out(color.dim('  \u2191\u2193 navigate  Enter select'));
+            },
+            onKeyFn: (key: string) => {
+                if (key === '\r' || key === '\n') return options[cursor].value;
+                if (key === '\x1b') return 'free';
+                if (key === '\x1b[A' || key === 'k') {
+                    cursor = Math.max(0, cursor - 1);
+                    return 'render';
+                }
+                if (key === '\x1b[B' || key === 'j') {
+                    cursor = Math.min(options.length - 1, cursor + 1);
+                    return 'render';
+                }
+                return undefined;
+            },
+        })) || 'free';
 
     if (picked === 'free') {
         writeAiConfig({ model: 'robinpath-default' });
@@ -155,17 +156,24 @@ export async function welcomeWizard(): Promise<void> {
                 const c = ch.toString();
                 if (c === '\n' || c === '\r') {
                     process.stdin.removeListener('data', onData);
-                    try { process.stdin.setRawMode!(false); } catch {}
+                    try {
+                        process.stdin.setRawMode!(false);
+                    } catch {}
                     process.stdin.pause();
                     process.stdout.write('\n');
                     resolve(input);
                 } else if (c === '\u0003') {
                     process.stdin.removeListener('data', onData);
-                    try { process.stdin.setRawMode!(false); } catch {}
+                    try {
+                        process.stdin.setRawMode!(false);
+                    } catch {}
                     process.stdin.pause();
                     resolve('');
                 } else if (c === '\u007f' || c === '\b') {
-                    if (input.length > 0) { input = input.slice(0, -1); process.stdout.write('\b \b'); }
+                    if (input.length > 0) {
+                        input = input.slice(0, -1);
+                        process.stdout.write('\b \b');
+                    }
                 } else if (c.charCodeAt(0) >= 32) {
                     input += c;
                     process.stdout.write('*');
@@ -174,7 +182,10 @@ export async function welcomeWizard(): Promise<void> {
             process.stdin.on('data', onData);
         } else {
             const rl2 = createInterface({ input: process.stdin, output: process.stdout });
-            rl2.question('  Paste your API key: ', (answer: string) => { rl2.close(); resolve(answer.trim()); });
+            rl2.question('  Paste your API key: ', (answer: string) => {
+                rl2.close();
+                resolve(answer.trim());
+            });
         }
     });
 
@@ -228,21 +239,28 @@ export async function handleAiConfig(args: string[]): Promise<void> {
                         const c = ch.toString();
                         if (c === '\n' || c === '\r') {
                             process.stdin.removeListener('data', onData);
-                            try { process.stdin.setRawMode!(false); } catch {}
+                            try {
+                                process.stdin.setRawMode!(false);
+                            } catch {}
                             process.stdin.pause();
                             process.stdout.write('\n');
                             resolve(input);
-                        } else if (c === '\u0003') { // Ctrl+C
+                        } else if (c === '\u0003') {
+                            // Ctrl+C
                             process.stdin.removeListener('data', onData);
-                            try { process.stdin.setRawMode!(false); } catch {}
+                            try {
+                                process.stdin.setRawMode!(false);
+                            } catch {}
                             process.stdin.pause();
                             process.exit(0);
-                        } else if (c === '\u007f' || c === '\b') { // Backspace
+                        } else if (c === '\u007f' || c === '\b') {
+                            // Backspace
                             if (input.length > 0) {
                                 input = input.slice(0, -1);
                                 process.stdout.write('\b \b');
                             }
-                        } else if (c.charCodeAt(0) >= 32) { // Printable chars only
+                        } else if (c.charCodeAt(0) >= 32) {
+                            // Printable chars only
                             input += c;
                             process.stdout.write('*');
                         }
@@ -294,7 +312,9 @@ export async function handleAiConfig(args: string[]): Promise<void> {
             // No model arg — show interactive picker
             if (process.stdin.isTTY) {
                 const config2: AiConfig = readAiConfig();
-                const picked: string | null = await selectModelInteractive(config2.model || 'anthropic/claude-sonnet-4.6');
+                const picked: string | null = await selectModelInteractive(
+                    config2.model || 'anthropic/claude-sonnet-4.6',
+                );
                 if (picked) {
                     config2.model = picked;
                     writeAiConfig(config2);
@@ -328,11 +348,14 @@ export async function handleAiConfig(args: string[]): Promise<void> {
             log(color.dim('  Optional: set a key for premium models:'));
             log(color.dim(`  ${color.cyan('robinpath ai config set-key <api-key>')}`));
         } else {
-            log(`  Provider:  ${color.cyan(config.provider as string || 'openrouter')}`);
+            log(`  Provider:  ${color.cyan((config.provider as string) || 'openrouter')}`);
             log(`  Model:     ${color.cyan(config.model || 'anthropic/claude-sonnet-4.6')}`);
-            const masked: string = (config.apiKey as string).length > 8
-                ? (config.apiKey as string).slice(0, 5) + '\u2022'.repeat(Math.min((config.apiKey as string).length - 8, 20)) + (config.apiKey as string).slice(-3)
-                : '\u2022\u2022\u2022\u2022';
+            const masked: string =
+                (config.apiKey as string).length > 8
+                    ? (config.apiKey as string).slice(0, 5) +
+                      '\u2022'.repeat(Math.min((config.apiKey as string).length - 8, 20)) +
+                      (config.apiKey as string).slice(-3)
+                    : '\u2022\u2022\u2022\u2022';
             log(`  API Key:   ${color.dim(masked)}`);
         }
         log('');
@@ -379,8 +402,13 @@ export async function startAiREPL(
 
     const apiKey: string | null = (config.apiKey as string) || null;
     const provider: string = resolveProvider(apiKey);
-    const model: string = apiKey ? (config.model || 'anthropic/claude-sonnet-4.6') : 'robinpath-default';
-    const modelShort: string = model === 'robinpath-default' ? 'gemini-2.0-flash (free)' : (model.includes('/') ? model.split('/').pop()! : model);
+    const model: string = apiKey ? config.model || 'anthropic/claude-sonnet-4.6' : 'robinpath-default';
+    const modelShort: string =
+        model === 'robinpath-default'
+            ? 'gemini-2.0-flash (free)'
+            : model.includes('/')
+              ? model.split('/').pop()!
+              : model;
 
     // Build CLI context to send to brain
     const cliContext: Record<string, unknown> = {
@@ -442,9 +470,24 @@ export async function startAiREPL(
 
     log(color.dim('  \u256d' + '\u2500'.repeat(50) + '\u256e'));
     log(color.dim('  \u2502') + color.bold('  RobinPath AI') + ' '.repeat(36) + color.dim('\u2502'));
-    log(color.dim('  \u2502') + `  Model: ${color.cyan(modelShort)}` + ' '.repeat(Math.max(0, 41 - modelShort.length)) + color.dim('\u2502'));
-    log(color.dim('  \u2502') + `  Mode:  ${modeColor(modeStr)}` + ' '.repeat(Math.max(0, 41 - modeStr.length)) + color.dim('\u2502'));
-    log(color.dim('  \u2502') + `  Dir:   ${color.dim(cwdShort)}` + ' '.repeat(Math.max(0, 41 - cwdShort.length)) + color.dim('\u2502'));
+    log(
+        color.dim('  \u2502') +
+            `  Model: ${color.cyan(modelShort)}` +
+            ' '.repeat(Math.max(0, 41 - modelShort.length)) +
+            color.dim('\u2502'),
+    );
+    log(
+        color.dim('  \u2502') +
+            `  Mode:  ${modeColor(modeStr)}` +
+            ' '.repeat(Math.max(0, 41 - modeStr.length)) +
+            color.dim('\u2502'),
+    );
+    log(
+        color.dim('  \u2502') +
+            `  Dir:   ${color.dim(cwdShort)}` +
+            ' '.repeat(Math.max(0, 41 - cwdShort.length)) +
+            color.dim('\u2502'),
+    );
     log(color.dim('  \u2570' + '\u2500'.repeat(50) + '\u256f'));
     log('');
 
@@ -483,7 +526,9 @@ export async function startAiREPL(
             if (keyFiles.length > 0) scanCtx += `Key files: ${keyFiles.join(', ')}\n`;
             const rpJson: string = join(cwd, 'robinpath.json');
             if (existsSync(rpJson)) {
-                try { scanCtx += `\nrobinpath.json:\n${readFileSync(rpJson, 'utf-8')}\n`; } catch {}
+                try {
+                    scanCtx += `\nrobinpath.json:\n${readFileSync(rpJson, 'utf-8')}\n`;
+                } catch {}
             }
             conversationMessages.push({ role: 'user', content: scanCtx });
             conversationMessages.push({ role: 'assistant', content: 'Project context loaded.' });
@@ -499,14 +544,29 @@ export async function startAiREPL(
             const lines: string[] = readFileSync(histPath, 'utf-8').split('\n').filter(Boolean);
             history.push(...lines.slice(-500));
         }
-    } catch { /* ignore */ }
+    } catch {
+        /* ignore */
+    }
 
     // Slash command tab completion
     const slashCommands: string[] = [
-        '/help', '/model', '/auto', '/clear', '/compact',
-        '/save', '/sessions', '/resume', '/delete',
-        '/memory', '/remember', '/forget',
-        '/tools', '/modules', '/context', '/usage', '/scan',
+        '/help',
+        '/model',
+        '/auto',
+        '/clear',
+        '/compact',
+        '/save',
+        '/sessions',
+        '/resume',
+        '/delete',
+        '/memory',
+        '/remember',
+        '/forget',
+        '/tools',
+        '/modules',
+        '/context',
+        '/usage',
+        '/scan',
     ];
     function completer(line: string): [string[], string] {
         if (line.startsWith('/')) {
@@ -529,7 +589,9 @@ export async function startAiREPL(
         try {
             const histPath: string = join(getRobinPathHome(), 'ai-history');
             appendFileSync(histPath, line + '\n', 'utf-8');
-        } catch { /* ignore */ }
+        } catch {
+            /* ignore */
+        }
     }
 
     // If initial prompt was provided (rp ai "question"), simulate input
@@ -595,7 +657,7 @@ export async function startAiREPL(
 
         if (trimmed === '/model') {
             // Show numbered model list — no raw mode, uses readline (safe)
-            const hasKey: boolean = !!(readAiConfig().apiKey);
+            const hasKey: boolean = !!readAiConfig().apiKey;
             const models: ModelInfo[] = hasKey ? AI_MODELS : AI_MODELS.filter((m: ModelInfo) => !m.requiresKey);
             const currentModel: string = readAiConfig().model || model;
             log('');
@@ -687,7 +749,9 @@ export async function startAiREPL(
             log(`  Platform:           ${platform()}`);
             log(`  CLI version:        ${CLI_VERSION}`);
             log(`  Native modules:     ${nativeModules.length}`);
-            log(`  Installed modules:  ${installedNames.length}${installedNames.length > 0 ? ' (' + installedNames.map((n: string) => n.replace('@robinpath/', '')).join(', ') + ')' : ''}`);
+            log(
+                `  Installed modules:  ${installedNames.length}${installedNames.length > 0 ? ' (' + installedNames.map((n: string) => n.replace('@robinpath/', '')).join(', ') + ')' : ''}`,
+            );
             log(`  Conversation:       ${msgCount} message${msgCount !== 1 ? 's' : ''}`);
             log(`  Brain:              ${AI_BRAIN_URL}`);
             log('');
@@ -702,7 +766,11 @@ export async function startAiREPL(
             if (compacted) {
                 const afterCount: number = conversationMessages.length - 1;
                 const afterTokens: number = estimateTokens(conversationMessages);
-                log(color.green(`Compacted: ${beforeCount} messages (~${Math.round(beforeTokens / 1000)}k tokens) \u2192 ${afterCount} messages (~${Math.round(afterTokens / 1000)}k tokens)`));
+                log(
+                    color.green(
+                        `Compacted: ${beforeCount} messages (~${Math.round(beforeTokens / 1000)}k tokens) \u2192 ${afterCount} messages (~${Math.round(afterTokens / 1000)}k tokens)`,
+                    ),
+                );
             } else if (conversationMessages.length > 11) {
                 // Fallback: simple truncation if brain is unreachable
                 const system: Message = conversationMessages[0];
@@ -782,7 +850,12 @@ export async function startAiREPL(
                 for (const s of sessions.slice(0, 20)) {
                     const active: string = s.id === sessionId ? color.green(' \u25c0 current') : '';
                     const age: number = Math.round((Date.now() - new Date(s.updated).getTime()) / 60000);
-                    const ageStr: string = age < 60 ? `${age}m ago` : age < 1440 ? `${Math.round(age / 60)}h ago` : `${Math.round(age / 1440)}d ago`;
+                    const ageStr: string =
+                        age < 60
+                            ? `${age}m ago`
+                            : age < 1440
+                              ? `${Math.round(age / 60)}h ago`
+                              : `${Math.round(age / 1440)}d ago`;
                     log(`  ${color.cyan(s.id)}  ${s.name}  ${color.dim(`${s.messages} msgs, ${ageStr}`)}${active}`);
                 }
                 log('');
@@ -808,7 +881,12 @@ export async function startAiREPL(
                     const s = sessions[i];
                     const diff: number = Date.now() - new Date(s.updated || s.created).getTime();
                     const mins: number = Math.floor(diff / 60000);
-                    const ago: string = mins < 60 ? `${mins}m ago` : mins < 1440 ? `${Math.floor(mins / 60)}h ago` : `${Math.floor(mins / 1440)}d ago`;
+                    const ago: string =
+                        mins < 60
+                            ? `${mins}m ago`
+                            : mins < 1440
+                              ? `${Math.floor(mins / 60)}h ago`
+                              : `${Math.floor(mins / 1440)}d ago`;
                     log(`  ${color.cyan(String(i + 1))}. ${s.name}  ${color.dim(`${ago}, ${s.messages} msgs`)}`);
                 }
                 log('');
@@ -900,7 +978,9 @@ export async function startAiREPL(
                         } else if (entry.match(/\.(json|yaml|yml|toml|env|md|txt|csv|js|ts)$/i)) {
                             otherFiles.push({ name: entry, size: s.size });
                         }
-                    } catch { /* skip */ }
+                    } catch {
+                        /* skip */
+                    }
                 }
 
                 // Scan subdirectories one level deep for .rp files
@@ -912,7 +992,9 @@ export async function startAiREPL(
                                 rpFiles.push({ name: `${dir}/${sub}`, size: statSync(join(cwd, dir, sub)).size });
                             }
                         }
-                    } catch { /* skip */ }
+                    } catch {
+                        /* skip */
+                    }
                 }
 
                 spinner.stop();
@@ -929,7 +1011,9 @@ export async function startAiREPL(
                             try {
                                 const content = readFileSync(join(cwd, f.name), 'utf-8');
                                 scanContext += `  --- content ---\n${content}\n  --- end ---\n`;
-                            } catch { /* skip */ }
+                            } catch {
+                                /* skip */
+                            }
                         }
                     }
                 }
@@ -941,7 +1025,9 @@ export async function startAiREPL(
                 if (existsSync(rpJson)) {
                     try {
                         scanContext += `\nrobinpath.json:\n${readFileSync(rpJson, 'utf-8')}\n`;
-                    } catch { /* skip */ }
+                    } catch {
+                        /* skip */
+                    }
                 }
                 scanContext += `[End Project Scan]`;
 
@@ -1018,7 +1104,9 @@ export async function startAiREPL(
                 let insideCmd = false;
 
                 const brainResult: BrainStreamResult | null = await fetchBrainStream(
-                    loopCount === 0 ? trimmed : conversationMessages[conversationMessages.length - 1].content as string,
+                    loopCount === 0
+                        ? trimmed
+                        : (conversationMessages[conversationMessages.length - 1].content as string),
                     {
                         onToken: (delta: string) => {
                             spinner.stop();
@@ -1076,7 +1164,8 @@ export async function startAiREPL(
                                 }
 
                                 // Found a tag — flush text before it, then enter tag mode
-                                const firstTag: number = memIdx === -1 ? cmdIdx : cmdIdx === -1 ? memIdx : Math.min(memIdx, cmdIdx);
+                                const firstTag: number =
+                                    memIdx === -1 ? cmdIdx : cmdIdx === -1 ? memIdx : Math.min(memIdx, cmdIdx);
                                 if (firstTag > 0) {
                                     process.stdout.write(pending.slice(0, firstTag).replace(/\n{3,}/g, '\n\n'));
                                 }
@@ -1134,7 +1223,11 @@ export async function startAiREPL(
                 if (validation && !validation.valid && validation.errors?.length > 0) {
                     const errCount: number = validation.errors.length;
                     const retries: number = validation.retryCount || 0;
-                    log(color.yellow(`  Warning: generated code has ${errCount} syntax issue${errCount > 1 ? 's' : ''}${retries > 0 ? ` (after ${retries} auto-fix attempt${retries > 1 ? 's' : ''})` : ''}.`));
+                    log(
+                        color.yellow(
+                            `  Warning: generated code has ${errCount} syntax issue${errCount > 1 ? 's' : ''}${retries > 0 ? ` (after ${retries} auto-fix attempt${retries > 1 ? 's' : ''})` : ''}.`,
+                        ),
+                    );
                     for (const e of validation.errors.slice(0, 3)) {
                         log(color.dim(`    Line ${e.line}: ${e.error}`));
                     }
@@ -1146,13 +1239,17 @@ export async function startAiREPL(
                     conversationMessages.push({ role: 'assistant', content: cleaned });
                 }
 
-                logVerbose(`Brain: intent=${(brainResult.context as Record<string, any>)?.intent || '?'}, docs=${(brainResult.context as Record<string, any>)?.documentsUsed || 0}`);
+                logVerbose(
+                    `Brain: intent=${(brainResult.context as Record<string, any>)?.intent || '?'}, docs=${(brainResult.context as Record<string, any>)?.documentsUsed || 0}`,
+                );
 
                 // If no commands, we're done
                 if (commands.length === 0) {
                     // Auto-detect module install suggestions
                     if (cleaned) {
-                        const installMatch: RegExpMatchArray | null = cleaned.match(/robinpath add (@robinpath\/[\w-]+)/g);
+                        const installMatch: RegExpMatchArray | null = cleaned.match(
+                            /robinpath add (@robinpath\/[\w-]+)/g,
+                        );
                         if (installMatch) {
                             const manifest = readModulesManifest();
                             for (const match of installMatch) {
@@ -1181,9 +1278,13 @@ export async function startAiREPL(
                             const targetPath: string = join(process.cwd(), writeTarget);
                             if (existsSync(targetPath)) {
                                 const oldContent: string = readFileSync(targetPath, 'utf-8');
-                                log(color.dim(`  File exists: ${writeTarget} (${oldContent.split('\n').length} lines)`));
+                                log(
+                                    color.dim(`  File exists: ${writeTarget} (${oldContent.split('\n').length} lines)`),
+                                );
                             }
-                        } catch { /* skip — file might not be readable */ }
+                        } catch {
+                            /* skip — file might not be readable */
+                        }
                     }
 
                     // Permission check
@@ -1203,7 +1304,10 @@ export async function startAiREPL(
 
                     if (decision === 'edit') {
                         // Let user edit the command
-                        const editRl: ReadlineInterface = createInterface({ input: process.stdin, output: process.stdout });
+                        const editRl: ReadlineInterface = createInterface({
+                            input: process.stdin,
+                            output: process.stdout,
+                        });
                         cmd = await new Promise<string>((resolve) => {
                             editRl.question(color.cyan('  Edit: '), (answer: string) => {
                                 editRl.close();
@@ -1215,7 +1319,12 @@ export async function startAiREPL(
                         if (isDangerousCommand(cmd)) {
                             const recheck: ConfirmResult = await confirmCommand(cmd, false);
                             if (recheck === 'no') {
-                                cmdResults.push({ command: cmd, stdout: '', stderr: '(skipped by user)', exitCode: -1 });
+                                cmdResults.push({
+                                    command: cmd,
+                                    stdout: '',
+                                    stderr: '(skipped by user)',
+                                    exitCode: -1,
+                                });
                                 continue;
                             }
                         }
@@ -1250,7 +1359,7 @@ export async function startAiREPL(
                                 const targetPath: string = join(process.cwd(), diffTarget);
                                 if (existsSync(targetPath)) {
                                     const postContent: string = readFileSync(targetPath, 'utf-8');
-                                    showFileDiff(diffTarget, preContent, postContent);
+                                    showFileDiff(diffTarget, preContent ?? '', postContent);
                                 }
                             } catch {}
                         }
@@ -1259,7 +1368,11 @@ export async function startAiREPL(
                             log(color.dim(`    \u2514 done`));
                         }
                     } else {
-                        log(color.red(`    \u2514 exit ${result.exitCode}: ${(result.stderr || result.error || '').slice(0, 80)}`));
+                        log(
+                            color.red(
+                                `    \u2514 exit ${result.exitCode}: ${(result.stderr || result.error || '').slice(0, 80)}`,
+                            ),
+                        );
                     }
 
                     cmdResults.push({
@@ -1272,17 +1385,19 @@ export async function startAiREPL(
                 rl.resume();
 
                 // Feed command results back for next iteration
-                const resultSummary: string = cmdResults.map((r: CommandResult) => {
-                    let out = `$ ${r.command}\n`;
-                    if (r.exitCode === 0) {
-                        out += r.stdout || '(no output)';
-                    } else {
-                        out += `Exit code: ${r.exitCode}\n`;
-                        if (r.stderr) out += `stderr: ${r.stderr}\n`;
-                        if (r.stdout) out += `stdout: ${r.stdout}`;
-                    }
-                    return out;
-                }).join('\n\n');
+                const resultSummary: string = cmdResults
+                    .map((r: CommandResult) => {
+                        let out = `$ ${r.command}\n`;
+                        if (r.exitCode === 0) {
+                            out += r.stdout || '(no output)';
+                        } else {
+                            out += `Exit code: ${r.exitCode}\n`;
+                            if (r.stderr) out += `stderr: ${r.stderr}\n`;
+                            if (r.stdout) out += `stdout: ${r.stdout}`;
+                        }
+                        return out;
+                    })
+                    .join('\n\n');
 
                 conversationMessages.push({
                     role: 'user',
@@ -1342,7 +1457,12 @@ export async function handleAi(args: string[]): Promise<void> {
             log(`\nSaved Sessions (${sessions.length}):`);
             for (const s of sessions) {
                 const age: number = Math.round((Date.now() - new Date(s.updated).getTime()) / 60000);
-                const ageStr: string = age < 60 ? `${age}m ago` : age < 1440 ? `${Math.round(age / 60)}h ago` : `${Math.round(age / 1440)}d ago`;
+                const ageStr: string =
+                    age < 60
+                        ? `${age}m ago`
+                        : age < 1440
+                          ? `${Math.round(age / 60)}h ago`
+                          : `${Math.round(age / 1440)}d ago`;
                 log(`  ${s.id}  ${s.name}  (${s.messages} msgs, ${ageStr})`);
             }
             log(`\nResume with: robinpath ai --resume <id>`);
@@ -1463,7 +1583,9 @@ export async function handleSaveRun(
     prompt: string,
     { save, run, outFile }: { save: boolean; run: boolean; outFile: string | null },
 ): Promise<void> {
-    const codeMatch: RegExpMatchArray | null = content.match(/```(?:robinpath|robin|rp|js|javascript)?\s*\n([\s\S]*?)```/);
+    const codeMatch: RegExpMatchArray | null = content.match(
+        /```(?:robinpath|robin|rp|js|javascript)?\s*\n([\s\S]*?)```/,
+    );
     const codeBlock: string | null = codeMatch ? codeMatch[1].trim() : null;
 
     if (codeBlock) {

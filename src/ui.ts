@@ -44,7 +44,10 @@ export function createInteractivePicker({ renderFn, onKeyFn }: PickerOptions): P
         function render(): void {
             clearRendered();
             let count = 0;
-            const out = (text: string): void => { process.stdout.write(text + '\n'); count++; };
+            const out = (text: string): void => {
+                process.stdout.write(text + '\n');
+                count++;
+            };
             renderFn(out);
             renderedLines = count;
         }
@@ -53,7 +56,9 @@ export function createInteractivePicker({ renderFn, onKeyFn }: PickerOptions): P
             if (resolved) return;
             resolved = true;
             process.stdin.removeListener('data', onKey);
-            try { process.stdin.setRawMode(false); } catch {}
+            try {
+                process.stdin.setRawMode(false);
+            } catch {}
             process.stdin.pause();
             clearRendered();
             resolve(value);
@@ -62,10 +67,16 @@ export function createInteractivePicker({ renderFn, onKeyFn }: PickerOptions): P
         function onKey(buf: Buffer): void {
             const key = buf.toString();
             // Always handle Ctrl+C
-            if (key === '\x03') { done(null); return; }
+            if (key === '\x03') {
+                done(null);
+                return;
+            }
             const result = onKeyFn(key);
-            if (result === 'render') { render(); }
-            else if (result !== undefined) { done(result); }
+            if (result === 'render') {
+                render();
+            } else if (result !== undefined) {
+                done(result);
+            }
         }
 
         render();
@@ -81,9 +92,12 @@ export function createInteractivePicker({ renderFn, onKeyFn }: PickerOptions): P
 
 /** Interactive arrow-key model selector. Returns selected model ID or null if cancelled. */
 export function selectModelInteractive(currentModelId: string): Promise<string | null> {
-    const hasKey = !!(readAiConfig().apiKey);
-    const models: ModelInfo[] = hasKey ? AI_MODELS : AI_MODELS.filter(m => !m.requiresKey);
-    let cursor = Math.max(0, models.findIndex(m => m.id === currentModelId));
+    const hasKey = !!readAiConfig().apiKey;
+    const models: ModelInfo[] = hasKey ? AI_MODELS : AI_MODELS.filter((m) => !m.requiresKey);
+    let cursor = Math.max(
+        0,
+        models.findIndex((m) => m.id === currentModelId),
+    );
 
     return createInteractivePicker({
         renderFn: (out) => {
@@ -116,8 +130,14 @@ export function selectModelInteractive(currentModelId: string): Promise<string |
         onKeyFn: (key) => {
             if (key === '\x1b') return null;
             if (key === '\r' || key === '\n') return models[cursor].id;
-            if (key === '\x1b[A' || key === 'k') { cursor = Math.max(0, cursor - 1); return 'render'; }
-            if (key === '\x1b[B' || key === 'j') { cursor = Math.min(models.length - 1, cursor + 1); return 'render'; }
+            if (key === '\x1b[A' || key === 'k') {
+                cursor = Math.max(0, cursor - 1);
+                return 'render';
+            }
+            if (key === '\x1b[B' || key === 'j') {
+                cursor = Math.min(models.length - 1, cursor + 1);
+                return 'render';
+            }
         },
     });
 }
@@ -165,8 +185,14 @@ export function selectSessionInteractive(): Promise<string | null> {
         onKeyFn: (key) => {
             if (key === '\x1b') return null;
             if (key === '\r' || key === '\n') return sessions[cursor].id;
-            if (key === '\x1b[A' || key === 'k') { cursor = Math.max(0, cursor - 1); return 'render'; }
-            if (key === '\x1b[B' || key === 'j') { cursor = Math.min(sessions.length - 1, cursor + 1); return 'render'; }
+            if (key === '\x1b[A' || key === 'k') {
+                cursor = Math.max(0, cursor - 1);
+                return 'render';
+            }
+            if (key === '\x1b[B' || key === 'j') {
+                cursor = Math.min(sessions.length - 1, cursor + 1);
+                return 'render';
+            }
         },
     });
 }
@@ -176,20 +202,33 @@ export function selectSessionInteractive(): Promise<string | null> {
 // ============================================================================
 
 export const DANGEROUS_PATTERNS: RegExp[] = [
-    /\brm\s+/i, /\brmdir\s+/i, /\bdel\s+/i, /\brd\s+/i,
-    /\bkill\s+/i, /\bpkill\s+/i, /\btaskkill\s+/i,
-    /\bchmod\s+/i, /\bchown\s+/i,
+    /\brm\s+/i,
+    /\brmdir\s+/i,
+    /\bdel\s+/i,
+    /\brd\s+/i,
+    /\bkill\s+/i,
+    /\bpkill\s+/i,
+    /\btaskkill\s+/i,
+    /\bchmod\s+/i,
+    /\bchown\s+/i,
     /\bcurl\b.*-X\s*(DELETE|PUT|POST)/i,
-    /\bgit\s+push\b/i, /\bgit\s+reset\s+--hard/i, /\bgit\s+clean\b/i,
-    /\bgit\s+checkout\s+\.\s*$/i, /\bgit\s+restore\s+\.\s*$/i,
+    /\bgit\s+push\b/i,
+    /\bgit\s+reset\s+--hard/i,
+    /\bgit\s+clean\b/i,
+    /\bgit\s+checkout\s+\.\s*$/i,
+    /\bgit\s+restore\s+\.\s*$/i,
     /\bnpm\s+publish\b/i,
-    /\bsudo\s+/i, /\bsu\s+/i,
-    /\bdd\s+if=/i, /\bmkfs\b/i, /\bformat\s+[a-zA-Z]:/i,
-    /\bshutdown\b/i, /\breboot\b/i,
+    /\bsudo\s+/i,
+    /\bsu\s+/i,
+    /\bdd\s+if=/i,
+    /\bmkfs\b/i,
+    /\bformat\s+[a-zA-Z]:/i,
+    /\bshutdown\b/i,
+    /\breboot\b/i,
 ];
 
 export function isDangerousCommand(cmd: string): boolean {
-    return DANGEROUS_PATTERNS.some(p => p.test(cmd));
+    return DANGEROUS_PATTERNS.some((p) => p.test(cmd));
 }
 
 /** Single-keypress command confirmation. Returns 'yes'|'no'|'auto'|'edit'. */
@@ -235,7 +274,9 @@ export function confirmCommand(cmd: string, autoAccept: boolean): Promise<Confir
             resolved = true;
             const key = buf.toString().toLowerCase();
             process.stdin.removeListener('data', onKey);
-            try { process.stdin.setRawMode(false); } catch {}
+            try {
+                process.stdin.setRawMode(false);
+            } catch {}
             process.stdin.pause();
             process.stdout.write('\n');
 

@@ -3,23 +3,21 @@
  * Extracted from cli-entry.js and converted to TypeScript.
  */
 import { createInterface } from 'node:readline';
-import { readFileSync, existsSync, mkdirSync, writeFileSync, readdirSync, statSync, watch, appendFileSync } from 'node:fs';
+import {
+    readFileSync,
+    existsSync,
+    mkdirSync,
+    writeFileSync,
+    readdirSync,
+    statSync,
+    watch,
+    appendFileSync,
+} from 'node:fs';
 import { resolve, join, relative } from 'node:path';
 
-import {
-    CLI_VERSION,
-    FLAG_VERBOSE,
-    log,
-    logVerbose,
-    color,
-    getRobinPathHome,
-} from './utils';
+import { CLI_VERSION, FLAG_VERBOSE, log, logVerbose, color, getRobinPathHome } from './utils';
 
-import {
-    createRobinPath,
-    resolveScriptPath,
-    displayError,
-} from './commands-core';
+import { createRobinPath, resolveScriptPath, displayError } from './commands-core';
 
 import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErrorWithContext } from './runtime';
 
@@ -29,10 +27,10 @@ import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErr
 
 interface RobinPathThread {
     id: string;
-    executeScript(script: string): Promise<void>;
+    executeScript(script: string): Promise<unknown>;
     needsMoreInput(script: string): Promise<{ needsMore: boolean }>;
     getCurrentModule(): string | null;
-    getAvailableCommands(): string[];
+    getAvailableCommands(): string[] | Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,7 +79,7 @@ interface PrinterContext {
  */
 export async function handleCheck(args: string[]): Promise<void> {
     const jsonOutput: boolean = args.includes('--json');
-    const fileArg: string | undefined = args.find(a => !a.startsWith('-'));
+    const fileArg: string | undefined = args.find((a) => !a.startsWith('-'));
     if (!fileArg) {
         console.error(color.red('Error:') + ' check requires a file argument');
         console.error('Usage: robinpath check <file> [--json]');
@@ -120,13 +118,15 @@ export async function handleCheck(args: string[]): Promise<void> {
             // Extract line/column from error message if possible
             const lineMatch: RegExpMatchArray | null = err.message.match(/line (\d+)/i);
             const colMatch: RegExpMatchArray | null = err.message.match(/column (\d+)/i);
-            console.log(JSON.stringify({
-                ok: false,
-                file: fileArg,
-                error: err.message,
-                line: lineMatch ? parseInt(lineMatch[1]) : null,
-                column: colMatch ? parseInt(colMatch[1]) : null,
-            }));
+            console.log(
+                JSON.stringify({
+                    ok: false,
+                    file: fileArg,
+                    error: err.message,
+                    line: lineMatch ? parseInt(lineMatch[1]) : null,
+                    column: colMatch ? parseInt(colMatch[1]) : null,
+                }),
+            );
         } else {
             try {
                 const formatted: string = formatErrorWithContext({ message: err.message, code: script });
@@ -144,7 +144,7 @@ export async function handleCheck(args: string[]): Promise<void> {
  */
 export async function handleAST(args: string[]): Promise<void> {
     const compact: boolean = args.includes('--compact');
-    const fileArg: string | undefined = args.find(a => !a.startsWith('-'));
+    const fileArg: string | undefined = args.find((a) => !a.startsWith('-'));
     if (!fileArg) {
         console.error(color.red('Error:') + ' ast requires a file argument');
         console.error('Usage: robinpath ast <file> [--compact]');
@@ -162,7 +162,7 @@ export async function handleAST(args: string[]): Promise<void> {
     const startTime: number = FLAG_VERBOSE ? performance.now() : 0;
 
     try {
-        const ast: ASTNode[] = await rp.getAST(script);
+        const ast: any[] = await rp.getAST(script);
         if (FLAG_VERBOSE) {
             const elapsed: string = (performance.now() - startTime).toFixed(1);
             logVerbose(`Parsed in ${elapsed}ms, ${ast.length} top-level nodes`);
@@ -181,7 +181,7 @@ export async function handleFmt(args: string[]): Promise<void> {
     const writeInPlace: boolean = args.includes('--write') || args.includes('-w');
     const checkOnly: boolean = args.includes('--check');
     const diffMode: boolean = args.includes('--diff');
-    const fileArg: string | undefined = args.find(a => !a.startsWith('-'));
+    const fileArg: string | undefined = args.find((a) => !a.startsWith('-'));
 
     if (!fileArg) {
         console.error(color.red('Error:') + ' fmt requires a file or directory argument');
@@ -253,31 +253,37 @@ export function simpleDiff(filePath: string, original: string, formatted: string
     const fmtLines: string[] = formatted.split('\n');
     const lines: string[] = [`--- ${filePath}`, `+++ ${filePath} (formatted)`];
 
-    let i: number = 0, j: number = 0;
+    let i: number = 0,
+        j: number = 0;
     while (i < origLines.length || j < fmtLines.length) {
         if (i < origLines.length && j < fmtLines.length && origLines[i] === fmtLines[j]) {
-            i++; j++;
+            i++;
+            j++;
             continue;
         }
         // Find the changed region
-        const startI: number = i, startJ: number = j;
+        const startI: number = i,
+            startJ: number = j;
         // Simple: advance both until they match again or end
         let matchFound: boolean = false;
         for (let look: number = 1; look < 10 && !matchFound; look++) {
             // Check if original[i+look] matches formatted[j]
             if (i + look < origLines.length && j < fmtLines.length && origLines[i + look] === fmtLines[j]) {
-                matchFound = true; break;
+                matchFound = true;
+                break;
             }
             // Check if original[i] matches formatted[j+look]
             if (j + look < fmtLines.length && i < origLines.length && origLines[i] === fmtLines[j + look]) {
-                matchFound = true; break;
+                matchFound = true;
+                break;
             }
         }
         if (!matchFound) {
             // Emit one line from each
             if (i < origLines.length) lines.push(color.red(`- ${origLines[i]}`));
             if (j < fmtLines.length) lines.push(color.green(`+ ${fmtLines[j]}`));
-            i++; j++;
+            i++;
+            j++;
         } else {
             // Emit removed lines until match
             while (i < origLines.length && (j >= fmtLines.length || origLines[i] !== fmtLines[j])) {
@@ -300,7 +306,7 @@ export function simpleDiff(filePath: string, original: string, formatted: string
  */
 export async function formatScript(script: string): Promise<string> {
     const parser = new Parser(script);
-    const statements: ASTNode[] = await parser.parse();
+    const statements: any[] = await parser.parse();
 
     // Create a dummy LineIndex (no original script = forces normalization)
     const dummyLineIndex: LineIndexImpl = new LineIndexImpl('');
@@ -312,11 +318,11 @@ export async function formatScript(script: string): Promise<string> {
     };
 
     // Strip flavor/preservation flags so Printer uses canonical forms
-    const normalized: ASTNode[] = statements.map(s => stripFlavorFlags(s));
+    const normalized: ASTNode[] = statements.map((s) => stripFlavorFlags(s));
 
     const parts: string[] = [];
     for (let i: number = 0; i < normalized.length; i++) {
-        const code: string = Printer.printNode(normalized[i], ctx);
+        const code: string = Printer.printNode(normalized[i] as any, ctx);
         if (i > 0 && code.trim()) {
             // For normalized output, add blank line between blocks and other statements
             const prevType: string = normalized[i - 1].type;
@@ -341,7 +347,7 @@ export async function formatScript(script: string): Promise<string> {
  */
 export function stripFlavorFlags(node: unknown): ASTNode {
     if (!node || typeof node !== 'object') return node as ASTNode;
-    if (Array.isArray(node)) return node.map(n => stripFlavorFlags(n)) as unknown as ASTNode;
+    if (Array.isArray(node)) return node.map((n) => stripFlavorFlags(n)) as unknown as ASTNode;
 
     const clone: ASTNode = { ...(node as ASTNode) };
 
@@ -355,13 +361,13 @@ export function stripFlavorFlags(node: unknown): ASTNode {
     // If block: remove hasThen (for elseif branches)
     if (clone.type === 'ifBlock') {
         delete clone.hasThen;
-        if (clone.thenBranch) clone.thenBranch = clone.thenBranch.map(s => stripFlavorFlags(s));
-        if (clone.elseBranch) clone.elseBranch = clone.elseBranch.map(s => stripFlavorFlags(s));
+        if (clone.thenBranch) clone.thenBranch = clone.thenBranch.map((s) => stripFlavorFlags(s));
+        if (clone.elseBranch) clone.elseBranch = clone.elseBranch.map((s) => stripFlavorFlags(s));
         if (clone.elseifBranches) {
-            clone.elseifBranches = clone.elseifBranches.map(b => ({
+            clone.elseifBranches = clone.elseifBranches.map((b) => ({
                 ...b,
                 hasThen: undefined,
-                body: b.body ? b.body.map(s => stripFlavorFlags(s)) : b.body,
+                body: b.body ? b.body.map((s) => stripFlavorFlags(s)) : b.body,
             }));
         }
     }
@@ -382,7 +388,7 @@ export function stripFlavorFlags(node: unknown): ASTNode {
 
     // Recurse into body arrays
     if (clone.body && Array.isArray(clone.body)) {
-        clone.body = clone.body.map(s => stripFlavorFlags(s));
+        clone.body = clone.body.map((s) => stripFlavorFlags(s));
     }
     if (clone.command && typeof clone.command === 'object') {
         clone.command = stripFlavorFlags(clone.command);
@@ -437,7 +443,7 @@ export function collectRPFilesRecursive(dir: string): string[] {
  */
 export async function handleTest(args: string[]): Promise<void> {
     const jsonOutput: boolean = args.includes('--json');
-    const targetArg: string | undefined = args.find(a => !a.startsWith('-'));
+    const targetArg: string | undefined = args.find((a) => !a.startsWith('-'));
     const searchPath: string = targetArg || '.';
 
     // Collect test files
@@ -596,7 +602,10 @@ export function loadHistory(): string[] {
     try {
         if (existsSync(historyPath)) {
             const content: string = readFileSync(historyPath, 'utf-8');
-            return content.split('\n').filter(line => line.trim()).reverse();
+            return content
+                .split('\n')
+                .filter((line) => line.trim())
+                .reverse();
         }
     } catch {
         // Ignore errors reading history
@@ -619,7 +628,7 @@ export function appendHistory(line: string): void {
         // Trim history file if it exceeds 1000 lines
         try {
             const content: string = readFileSync(historyPath, 'utf-8');
-            const lines: string[] = content.split('\n').filter(l => l.trim());
+            const lines: string[] = content.split('\n').filter((l) => l.trim());
             if (lines.length > 1000) {
                 const trimmed: string[] = lines.slice(lines.length - 1000);
                 writeFileSync(historyPath, trimmed.join('\n') + '\n', 'utf-8');
@@ -711,7 +720,7 @@ export async function startREPL(): Promise<void> {
         // ".." command — show available commands
         if (accumulatedLines.length === 0 && trimmed === '..') {
             const thread: RobinPathThread | null = rp.getCurrentThread();
-            const commands: string[] = thread ? thread.getAvailableCommands() : rp.getAvailableCommands();
+            const commands: string[] = (thread ? thread.getAvailableCommands() : rp.getAvailableCommands()) as string[];
             log(JSON.stringify(commands, null, 2));
             rl.prompt();
             return;
@@ -783,9 +792,7 @@ export async function startREPL(): Promise<void> {
         }
 
         // Determine the full script to check/execute
-        const scriptToCheck: string = accumulatedLines.length > 0
-            ? accumulatedLines.join('\n')
-            : line;
+        const scriptToCheck: string = accumulatedLines.length > 0 ? accumulatedLines.join('\n') : line;
 
         try {
             const thread: RobinPathThread | null = rp.getCurrentThread();
@@ -806,9 +813,7 @@ export async function startREPL(): Promise<void> {
             }
 
             // Block is complete — execute
-            const finalScript: string = accumulatedLines.length > 0
-                ? accumulatedLines.join('\n')
-                : line;
+            const finalScript: string = accumulatedLines.length > 0 ? accumulatedLines.join('\n') : line;
             accumulatedLines = [];
 
             // Save to history and session

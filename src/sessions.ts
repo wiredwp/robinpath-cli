@@ -54,8 +54,16 @@ export function listSessions(): SessionInfo[] {
         .map((f: string): SessionInfo | null => {
             try {
                 const data = JSON.parse(readFileSync(join(AI_SESSIONS_DIR, f), 'utf-8'));
-                return { id: data.id, name: data.name, created: data.created, updated: data.updated, messages: data.messages?.length || 0 };
-            } catch { return null; }
+                return {
+                    id: data.id,
+                    name: data.name,
+                    created: data.created,
+                    updated: data.updated,
+                    messages: data.messages?.length || 0,
+                };
+            } catch {
+                return null;
+            }
         })
         .filter((x): x is SessionInfo => x !== null)
         .sort((a, b) => (b.updated || b.created).localeCompare(a.updated || a.created));
@@ -79,12 +87,19 @@ export function saveSession(sessionId: string, name: string, messages: Message[]
 export function loadSession(sessionId: string): Session | null {
     const p = getSessionPath(sessionId);
     if (!existsSync(p)) return null;
-    try { return JSON.parse(readFileSync(p, 'utf-8')); } catch { return null; }
+    try {
+        return JSON.parse(readFileSync(p, 'utf-8'));
+    } catch {
+        return null;
+    }
 }
 
 export function deleteSession(sessionId: string): boolean {
     const p = getSessionPath(sessionId);
-    if (existsSync(p)) { unlinkSync(p); return true; }
+    if (existsSync(p)) {
+        unlinkSync(p);
+        return true;
+    }
     return false;
 }
 
@@ -99,7 +114,9 @@ export function loadMemory(): Memory {
         if (existsSync(AI_MEMORY_PATH)) {
             return JSON.parse(readFileSync(AI_MEMORY_PATH, 'utf-8'));
         }
-    } catch { /* ignore */ }
+    } catch {
+        /* ignore */
+    }
     return { facts: [], updatedAt: null };
 }
 
@@ -109,7 +126,9 @@ export function saveMemory(memory: Memory): void {
         if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
         memory.updatedAt = new Date().toISOString();
         writeFileSync(AI_MEMORY_PATH, JSON.stringify(memory, null, 2), 'utf-8');
-    } catch { /* ignore */ }
+    } catch {
+        /* ignore */
+    }
 }
 
 export function addMemoryFact(fact: string): boolean {
@@ -137,8 +156,11 @@ export function removeMemoryFact(index: number): string | null {
 export function buildMemoryContext(): string {
     const memory = loadMemory();
     if (memory.facts.length === 0) return '';
-    return '\n\n## User Memory (persistent across sessions)\n' +
-        memory.facts.map((f: string) => `- ${f}`).join('\n') + '\n';
+    return (
+        '\n\n## User Memory (persistent across sessions)\n' +
+        memory.facts.map((f: string) => `- ${f}`).join('\n') +
+        '\n'
+    );
 }
 
 /**
@@ -148,11 +170,14 @@ export function buildMemoryContext(): string {
  */
 export function extractMemoryTags(response: string): { cleaned: string; facts: string[] } {
     const facts: string[] = [];
-    const cleaned = response.replace(/<memory>([\s\S]*?)<\/memory>/gi, (_: string, fact: string) => {
-        const trimmed = fact.trim();
-        if (trimmed.length > 3 && trimmed.length < 300) facts.push(trimmed);
-        return ''; // strip from displayed output
-    }).replace(/\n{3,}/g, '\n\n').trim(); // clean up extra newlines left behind
+    const cleaned = response
+        .replace(/<memory>([\s\S]*?)<\/memory>/gi, (_: string, fact: string) => {
+            const trimmed = fact.trim();
+            if (trimmed.length > 3 && trimmed.length < 300) facts.push(trimmed);
+            return ''; // strip from displayed output
+        })
+        .replace(/\n{3,}/g, '\n\n')
+        .trim(); // clean up extra newlines left behind
     return { cleaned, facts };
 }
 
