@@ -147,14 +147,23 @@ export async function fetchBrainStream(
         let metadata: { sources?: unknown[]; context?: Record<string, unknown> } | null = null;
         let doneData: { validation?: unknown; usage?: unknown } | null = null;
 
-        // Parse SSE stream
+        // Parse SSE stream with per-read timeout
         const reader = (response.body as ReadableStream<Uint8Array>).getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        const READ_TIMEOUT = 30000; // 30s per chunk — if no data for 30s, stream is dead
 
         while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+            // Race between read and timeout
+            const readPromise = reader.read();
+            const timeoutPromise = new Promise<{done: true; value: undefined}>((resolve) =>
+                setTimeout(() => resolve({done: true, value: undefined}), READ_TIMEOUT),
+            );
+            const { done, value } = await Promise.race([readPromise, timeoutPromise]);
+            if (done) {
+                try { reader.cancel(); } catch {}
+                break;
+            }
 
             buffer += decoder.decode(value, { stream: true });
 
