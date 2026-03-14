@@ -53,7 +53,7 @@ const COMMANDS: Record<string, string> = {
 };
 
 // ── Input Area ──
-function InputArea({onSubmit, placeholder}: {onSubmit: (v: string) => void; placeholder: string}) {
+function InputArea({onSubmit, placeholder, statusText}: {onSubmit: (v: string) => void; placeholder: string; statusText?: string}) {
     const [value, setValue] = useState('');
     const {exit} = useApp();
 
@@ -120,8 +120,9 @@ function InputArea({onSubmit, placeholder}: {onSubmit: (v: string) => void; plac
                 <Text dimColor>{'─'.repeat(Math.max(process.stdout.columns || 80, 40))}</Text>
             </Box>
 
-            <Box paddingX={2}>
-                <Text dimColor>enter send · \ newline · / commands · @/ files</Text>
+            <Box paddingX={2} justifyContent="space-between">
+                <Text dimColor>/ for commands</Text>
+                <Text dimColor>{statusText || ''}</Text>
             </Box>
         </Box>
     );
@@ -227,8 +228,6 @@ function ChatApp({engine}: {engine: ReplEngine}) {
         engine.updateStatus();
     }, [engine]);
 
-    const isFirst = messages.length === 0;
-
     // Trust prompt
     if (!trusted) {
         return (
@@ -250,11 +249,39 @@ function ChatApp({engine}: {engine: ReplEngine}) {
         );
     }
 
+    const modelName = engine.model.includes('/') ? engine.model.split('/').pop() : engine.model;
+    const cwdShort = process.cwd().replace(homedir(), '~');
+    const isFirst = messages.length === 0;
+
     return (
         <Box flexDirection="column" paddingY={1}>
-            <Box marginBottom={1} paddingX={1}>
-                <Text><Text color="cyan" bold>◆</Text> <Text bold>RobinPath</Text> <Text dimColor>v{CLI_VERSION}</Text></Text>
-            </Box>
+            {/* Welcome banner — only shows before first message */}
+            {isFirst && !loading ? (
+                <Box borderStyle="round" borderColor="gray" marginBottom={1} paddingX={2} paddingY={1}>
+                    <Box flexDirection="column" width="50%">
+                        <Text> </Text>
+                        <Text bold>        Welcome to RobinPath!</Text>
+                        <Text> </Text>
+                        <Text>        <Text color="cyan" bold>◆</Text> <Text dimColor>{modelName}</Text></Text>
+                        <Text>        <Text dimColor>{cwdShort}</Text></Text>
+                        <Text> </Text>
+                    </Box>
+                    <Box flexDirection="column" width="50%">
+                        <Text bold>Tips</Text>
+                        <Text dimColor>Type <Text color="cyan">/</Text> to see all commands</Text>
+                        <Text dimColor>Use <Text color="cyan">@/file</Text> to include files</Text>
+                        <Text dimColor>Use <Text color="cyan">\</Text> at end for multiline</Text>
+                        <Text dimColor>Type <Text color="cyan">exit</Text> to quit</Text>
+                    </Box>
+                </Box>
+            ) : null}
+
+            {/* Header after first message — compact */}
+            {!isFirst || loading ? (
+                <Box marginBottom={1} paddingX={1}>
+                    <Text><Text color="cyan" bold>◆</Text> <Text bold>RobinPath</Text> <Text dimColor>v{CLI_VERSION}</Text></Text>
+                </Box>
+            ) : null}
 
             <Static items={messages}>
                 {msg => (
@@ -285,10 +312,9 @@ function ChatApp({engine}: {engine: ReplEngine}) {
                 <InputArea
                     onSubmit={handleSubmit}
                     placeholder="Message RobinPath..."
+                    statusText={status}
                 />
             )}
-
-            {status ? <Box marginTop={1} paddingX={1}><Text dimColor>{status}</Text></Box> : null}
         </Box>
     );
 }
