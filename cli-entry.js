@@ -14,13 +14,15 @@ import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErr
 import { nativeModules } from './modules/index.js';
 
 // Injected by esbuild at build time via --define, fallback for dev mode
-const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.51.0';
+const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.52.0';
 
 // ============================================================================
 // Global flags
 // ============================================================================
 let FLAG_QUIET = false;
 let FLAG_VERBOSE = false;
+let FLAG_AUTO_ACCEPT = false;
+let FLAG_DEV_MODE = false;
 
 function log(...args) {
     if (!FLAG_QUIET) console.log(...args);
@@ -6206,6 +6208,124 @@ function writeAiConfig(config) {
     }
 }
 
+/** First-run welcome wizard — helps user set up API key and model. */
+async function welcomeWizard() {
+    const options = [
+        { name: 'Start with free tier (no key needed)', value: 'free' },
+        { name: 'I have an API key (OpenRouter, OpenAI, Anthropic)', value: 'key' },
+    ];
+
+    let cursor = 0;
+
+    const picked = await new Promise((resolve) => {
+        function render() {
+            process.stdout.write('\x1b[2J\x1b[H');
+            log('');
+            log(color.bold('  Welcome to RobinPath AI!'));
+            log(color.dim('  Your AI-powered scripting assistant'));
+            log('');
+            for (let i = 0; i < options.length; i++) {
+                const marker = i === cursor ? color.cyan('\u276f') : ' ';
+                const text = i === cursor ? color.cyan(color.bold(options[i].name)) : options[i].name;
+                log(`  ${marker} ${text}`);
+            }
+            log('');
+            log(color.dim('  \u2191\u2193 navigate  Enter select'));
+        }
+
+        render();
+
+        if (process.stdin.isTTY) process.stdin.setRawMode(true);
+        process.stdin.resume();
+
+        const onKey = (buf) => {
+            const key = buf.toString();
+            if (key === '\r' || key === '\n') { cleanup(); resolve(options[cursor].value); return; }
+            if (key === '\x1b' || key === '\x03') { cleanup(); resolve('free'); return; }
+            if (key === '\x1b[A' || key === 'k') { cursor = Math.max(0, cursor - 1); render(); return; }
+            if (key === '\x1b[B' || key === 'j') { cursor = Math.min(options.length - 1, cursor + 1); render(); return; }
+        };
+
+        function cleanup() {
+            process.stdin.removeListener('data', onKey);
+            if (process.stdin.isTTY) process.stdin.setRawMode(false);
+            process.stdin.pause();
+            process.stdout.write('\x1b[2J\x1b[H');
+        }
+
+        process.stdin.on('data', onKey);
+    });
+
+    if (picked === 'free') {
+        writeAiConfig({ model: 'robinpath-default' });
+        log(color.green('  \u2713 Free tier activated — using Gemini 2.0 Flash'));
+        log(color.dim(`  Upgrade anytime: ${color.cyan('robinpath ai config set-key <api-key>')}`));
+        log('');
+        return;
+    }
+
+    // Key setup flow
+    log('');
+    const key = await new Promise((resolve) => {
+        const rl2 = createInterface({ input: process.stdin, output: process.stdout });
+        if (process.stdin.isTTY) {
+            process.stdout.write(color.cyan('  Paste your API key: '));
+            process.stdin.setRawMode(true);
+            let input = '';
+            const onData = (ch) => {
+                const c = ch.toString();
+                if (c === '\n' || c === '\r') {
+                    process.stdin.setRawMode(false);
+                    process.stdin.removeListener('data', onData);
+                    process.stdout.write('\n');
+                    rl2.close();
+                    resolve(input);
+                } else if (c === '\u0003') {
+                    process.stdin.setRawMode(false);
+                    rl2.close();
+                    resolve('');
+                } else if (c === '\u007f' || c === '\b') {
+                    if (input.length > 0) { input = input.slice(0, -1); process.stdout.write('\b \b'); }
+                } else {
+                    input += c;
+                    process.stdout.write('*');
+                }
+            };
+            process.stdin.on('data', onData);
+        } else {
+            rl2.question('  Paste your API key: ', (answer) => { rl2.close(); resolve(answer.trim()); });
+        }
+    });
+
+    if (!key || !key.trim()) {
+        writeAiConfig({ model: 'robinpath-default' });
+        log(color.dim('  No key provided — using free tier.'));
+        return;
+    }
+
+    const k = key.trim();
+    const config = { apiKey: k };
+    if (k.startsWith('sk-or-')) config.provider = 'openrouter';
+    else if (k.startsWith('sk-ant-')) config.provider = 'anthropic';
+    else if (k.startsWith('sk-')) config.provider = 'openai';
+    else config.provider = 'openrouter';
+    config.model = 'anthropic/claude-sonnet-4.6';
+    writeAiConfig(config);
+
+    log(color.green('  \u2713 API key saved'));
+    log(`  Provider: ${color.cyan(config.provider)} (auto-detected)`);
+    log('');
+
+    // Show model picker
+    const picked2 = await selectModelInteractive(config.model);
+    if (picked2) {
+        config.model = picked2;
+        writeAiConfig(config);
+    }
+    log(color.green(`  \u2713 Model: ${color.cyan(config.model)}`));
+    log('');
+}
+
 async function handleAiConfig(args) {
     const sub = args[0];
 
@@ -6262,21 +6382,46 @@ async function handleAiConfig(args) {
         else if (k.startsWith('sk-ant-')) config.provider = 'anthropic';
         else if (k.startsWith('sk-')) config.provider = 'openai';
         else if (!config.provider) config.provider = 'openrouter';
-        if (!config.model) config.model = 'anthropic/claude-sonnet-4-20250514';
+        if (!config.model) config.model = 'anthropic/claude-sonnet-4.6';
         writeAiConfig(config);
         log(color.green('API key saved.'));
         log(`Provider: ${color.cyan(config.provider)} (auto-detected)`);
-        log(`Model: ${color.cyan(config.model)}`);
+        log('');
+        // Show interactive model picker after saving key
+        if (process.stdin.isTTY) {
+            const picked = await selectModelInteractive(config.model);
+            if (picked) {
+                config.model = picked;
+                writeAiConfig(config);
+                log(color.green('Model set:') + ` ${color.cyan(picked)}`);
+            } else {
+                log(`Model: ${color.cyan(config.model)} (default)`);
+            }
+        } else {
+            log(`Model: ${color.cyan(config.model)}`);
+        }
         log(`\nStart chatting with: ${color.cyan('robinpath ai')}`);
     } else if (sub === 'set-model') {
         const model = args[1];
         if (!model) {
+            // No model arg — show interactive picker
+            if (process.stdin.isTTY) {
+                const config2 = readAiConfig();
+                const picked = await selectModelInteractive(config2.model);
+                if (picked) {
+                    config2.model = picked;
+                    writeAiConfig(config2);
+                    log(color.green('Model set:') + ` ${color.cyan(picked)}`);
+                } else {
+                    log('Model selection cancelled.');
+                }
+                return;
+            }
             console.error(color.red('Error:') + ' Usage: robinpath ai config set-model <model-id>');
             console.error('\nExamples:');
-            console.error('  anthropic/claude-sonnet-4-20250514');
-            console.error('  openai/gpt-4o');
-            console.error('  google/gemini-2.5-pro');
-            console.error('  deepseek/deepseek-chat');
+            console.error('  anthropic/claude-sonnet-4.6');
+            console.error('  openai/gpt-5.2');
+            console.error('  google/gemini-3-flash-preview');
             process.exit(2);
         }
         const config = readAiConfig();
@@ -6297,7 +6442,7 @@ async function handleAiConfig(args) {
             log(color.dim(`  ${color.cyan('robinpath ai config set-key <api-key>')}`));
         } else {
             log(`  Provider:  ${color.cyan(config.provider || 'openrouter')}`);
-            log(`  Model:     ${color.cyan(config.model || 'anthropic/claude-sonnet-4-20250514')}`);
+            log(`  Model:     ${color.cyan(config.model || 'anthropic/claude-sonnet-4.6')}`);
             const masked = config.apiKey.length > 8
                 ? config.apiKey.slice(0, 5) + '\u2022'.repeat(Math.min(config.apiKey.length - 8, 20)) + config.apiKey.slice(-3)
                 : '\u2022\u2022\u2022\u2022';
@@ -6320,6 +6465,187 @@ async function handleAiConfig(args) {
         console.error('  robinpath ai config remove                Remove configuration');
         process.exit(2);
     }
+}
+
+// ── Available AI models (synced with Platform) ──
+const AI_MODELS = [
+    { group: 'Free', id: 'robinpath-default', name: 'Gemini 2.0 Flash', desc: 'free, no key needed', requiresKey: false },
+    { group: 'Anthropic', id: 'anthropic/claude-sonnet-4.6', name: 'Claude Sonnet 4.6', desc: 'fast + smart', requiresKey: true },
+    { group: 'Anthropic', id: 'anthropic/claude-opus-4.6', name: 'Claude Opus 4.6', desc: 'most capable', requiresKey: true },
+    { group: 'Anthropic', id: 'anthropic/claude-haiku-4.5', name: 'Claude Haiku 4.5', desc: 'fastest + cheapest', requiresKey: true },
+    { group: 'OpenAI', id: 'openai/gpt-5.2', name: 'GPT-5.2', desc: 'instant', requiresKey: true },
+    { group: 'OpenAI', id: 'openai/gpt-5.2-pro', name: 'GPT-5.2 Pro', desc: 'reasoning', requiresKey: true },
+    { group: 'OpenAI', id: 'openai/gpt-5-mini', name: 'GPT-5 mini', desc: 'budget-friendly', requiresKey: true },
+    { group: 'Google', id: 'google/gemini-3-flash-preview', name: 'Gemini 3 Flash', desc: '1M context', requiresKey: true },
+    { group: 'Google', id: 'google/gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro', desc: '65K output', requiresKey: true },
+];
+
+/** Interactive arrow-key model selector. Returns selected model ID or null if cancelled. */
+function selectModelInteractive(currentModelId) {
+    return new Promise((resolve) => {
+        const hasKey = !!(readAiConfig().apiKey);
+        const models = hasKey ? AI_MODELS : AI_MODELS.filter(m => !m.requiresKey);
+        let cursor = Math.max(0, models.findIndex(m => m.id === currentModelId));
+
+        // Build display lines with group headers
+        function buildLines() {
+            const lines = [];
+            let lastGroup = '';
+            let itemIdx = 0;
+            for (const m of models) {
+                if (m.group !== lastGroup) {
+                    lines.push({ type: 'header', text: m.group });
+                    lastGroup = m.group;
+                }
+                const selected = itemIdx === cursor;
+                const marker = selected ? color.cyan('❯') : ' ';
+                const name = selected ? color.cyan(color.bold(m.name)) : m.name;
+                const id = color.dim(m.id);
+                const desc = color.dim(`— ${m.desc}`);
+                const current = m.id === currentModelId ? color.green(' ✓') : '';
+                lines.push({ type: 'item', text: `  ${marker} ${name} ${desc}${current}`, idx: itemIdx });
+                lines.push({ type: 'sub', text: `      ${id}` });
+                itemIdx++;
+            }
+            return lines;
+        }
+
+        function render() {
+            const lines = buildLines();
+            // Clear previous render
+            process.stdout.write('\x1b[2J\x1b[H'); // clear screen, cursor to top
+            log('');
+            log(color.bold('  Select AI Model'));
+            if (!hasKey) {
+                log(color.dim('  Set an API key to unlock premium models:'));
+                log(color.dim(`  ${color.cyan('robinpath ai config set-key <key>')}`));
+            }
+            log(color.dim('  ↑↓ navigate  Enter select  Esc cancel'));
+            log('');
+            for (const l of lines) {
+                if (l.type === 'header') {
+                    log(color.dim(`  ── ${l.text} ──`));
+                } else {
+                    log(l.text);
+                }
+            }
+            log('');
+        }
+
+        render();
+
+        if (process.stdin.isTTY) process.stdin.setRawMode(true);
+        process.stdin.resume();
+
+        const onKey = (buf) => {
+            const key = buf.toString();
+            // Escape
+            if (key === '\x1b' || key === '\x03') {
+                cleanup();
+                resolve(null);
+                return;
+            }
+            // Enter
+            if (key === '\r' || key === '\n') {
+                cleanup();
+                resolve(models[cursor].id);
+                return;
+            }
+            // Arrow up
+            if (key === '\x1b[A' || key === 'k') {
+                cursor = Math.max(0, cursor - 1);
+                render();
+                return;
+            }
+            // Arrow down
+            if (key === '\x1b[B' || key === 'j') {
+                cursor = Math.min(models.length - 1, cursor + 1);
+                render();
+                return;
+            }
+        };
+
+        function cleanup() {
+            process.stdin.removeListener('data', onKey);
+            if (process.stdin.isTTY) process.stdin.setRawMode(false);
+            process.stdin.pause();
+            // Clear the picker screen and restore
+            process.stdout.write('\x1b[2J\x1b[H');
+        }
+
+        process.stdin.on('data', onKey);
+    });
+}
+
+/** Interactive arrow-key session picker. Returns session ID or null. */
+function selectSessionInteractive() {
+    return new Promise((resolve) => {
+        const sessions = listSessions();
+        if (sessions.length === 0) {
+            log(color.dim('  No saved sessions.'));
+            resolve(null);
+            return;
+        }
+
+        let cursor = 0;
+
+        function timeAgo(dateStr) {
+            const diff = Date.now() - new Date(dateStr).getTime();
+            const mins = Math.floor(diff / 60000);
+            if (mins < 60) return `${mins}m ago`;
+            const hrs = Math.floor(mins / 60);
+            if (hrs < 24) return `${hrs}h ago`;
+            const days = Math.floor(hrs / 24);
+            return `${days}d ago`;
+        }
+
+        function render() {
+            process.stdout.write('\x1b[2J\x1b[H');
+            log('');
+            log(color.bold('  Select Session'));
+            log(color.dim('  \u2191\u2193 navigate  Enter select  Esc cancel'));
+            log('');
+            for (let i = 0; i < sessions.length; i++) {
+                const s = sessions[i];
+                const marker = i === cursor ? color.cyan('\u276f') : ' ';
+                const name = i === cursor ? color.cyan(color.bold(s.name)) : s.name;
+                const meta = color.dim(`${timeAgo(s.updated || s.created)}, ${s.messages} msgs`);
+                log(`  ${marker} ${name}  ${meta}`);
+                log(color.dim(`      id: ${s.id}`));
+            }
+            log('');
+        }
+
+        render();
+
+        if (process.stdin.isTTY) process.stdin.setRawMode(true);
+        process.stdin.resume();
+
+        const onKey = (buf) => {
+            const key = buf.toString();
+            if (key === '\x1b' || key === '\x03') {
+                cleanup(); resolve(null); return;
+            }
+            if (key === '\r' || key === '\n') {
+                cleanup(); resolve(sessions[cursor].id); return;
+            }
+            if (key === '\x1b[A' || key === 'k') {
+                cursor = Math.max(0, cursor - 1); render(); return;
+            }
+            if (key === '\x1b[B' || key === 'j') {
+                cursor = Math.min(sessions.length - 1, cursor + 1); render(); return;
+            }
+        };
+
+        function cleanup() {
+            process.stdin.removeListener('data', onKey);
+            if (process.stdin.isTTY) process.stdin.setRawMode(false);
+            process.stdin.pause();
+            process.stdout.write('\x1b[2J\x1b[H');
+        }
+
+        process.stdin.on('data', onKey);
+    });
 }
 
 // Shell command execution — like Claude Code, AI generates shell commands and CLI executes them
@@ -6377,6 +6703,81 @@ function extractCommands(text) {
 // Strip <cmd> tags from displayed text (they're invisible to user)
 function stripCommandTags(text) {
     return text.replace(/<cmd>[\s\S]*?<\/cmd>/g, '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+// ── Command permission system ──
+const DANGEROUS_PATTERNS = [
+    /\brm\s+/i, /\brmdir\s+/i, /\bdel\s+/i, /\brd\s+/i,
+    /\bkill\s+/i, /\bpkill\s+/i, /\btaskkill\s+/i,
+    /\bchmod\s+/i, /\bchown\s+/i,
+    /(?<![>])>[^>]/, // redirect overwrite (but not >>)
+    /\bcurl\b.*-X\s*(DELETE|PUT|POST)/i,
+    /\bgit\s+push\b/i, /\bgit\s+reset\s+--hard/i, /\bgit\s+clean\b/i,
+    /\bgit\s+checkout\s+\.\s*$/i, /\bgit\s+restore\s+\.\s*$/i,
+    /\bnpm\s+publish\b/i,
+    /\bsudo\s+/i, /\bsu\s+/i,
+    /\bdd\s+/i, /\bmkfs\b/i, /\bformat\s+/i,
+    /\bshutdown\b/i, /\breboot\b/i,
+];
+
+function isDangerousCommand(cmd) {
+    return DANGEROUS_PATTERNS.some(p => p.test(cmd));
+}
+
+/** Single-keypress command confirmation. Returns 'yes'|'no'|'auto'|'edit'. */
+function confirmCommand(cmd, autoAccept) {
+    // Auto-accept safe commands
+    if (autoAccept && !isDangerousCommand(cmd)) {
+        const preview = cmd.length > 80 ? cmd.slice(0, 77) + '...' : cmd;
+        log(color.dim(`  ▶ ${preview}`));
+        return Promise.resolve('yes');
+    }
+
+    return new Promise((resolve) => {
+        const dangerous = isDangerousCommand(cmd);
+        const preview = cmd.length > 120 ? cmd.slice(0, 117) + '...' : cmd;
+
+        log('');
+        if (dangerous) {
+            log(color.red('  ⚠ DANGEROUS'));
+        }
+        log(`  ${color.yellow('⚡')} ${color.bold(preview)}`);
+        const opts = dangerous
+            ? `     ${color.green('[y]')} Run  ${color.red('[n]')} Skip  ${color.cyan('[e]')} Edit`
+            : `     ${color.green('[y]')} Run  ${color.red('[n]')} Skip  ${color.cyan('[a]')} Always  ${color.cyan('[e]')} Edit`;
+        process.stdout.write(opts);
+
+        if (!process.stdin.isTTY) {
+            // Non-interactive — auto-accept safe, reject dangerous
+            log('');
+            resolve(dangerous ? 'no' : 'yes');
+            return;
+        }
+
+        process.stdin.setRawMode(true);
+        process.stdin.resume();
+
+        const onKey = (buf) => {
+            const key = buf.toString().toLowerCase();
+            process.stdin.removeListener('data', onKey);
+            if (process.stdin.isTTY) process.stdin.setRawMode(false);
+            process.stdin.pause();
+            process.stdout.write('\n');
+
+            if (key === 'y' || key === '\r' || key === '\n') {
+                resolve('yes');
+            } else if (key === 'a' && !dangerous) {
+                resolve('auto');
+            } else if (key === 'e') {
+                resolve('edit');
+            } else {
+                // n, Esc, Ctrl+C, or any other key → skip
+                resolve('no');
+            }
+        };
+
+        process.stdin.on('data', onKey);
+    });
 }
 
 function buildRobinPathSystemPrompt() {
@@ -7029,8 +7430,11 @@ function formatFileSize(bytes) {
 
 // (OpenRouter direct calls removed — Brain handles all LLM calls server-side)
 
-async function startAiREPL(initialPrompt, resumeSessionId) {
+async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
     const config = readAiConfig();
+    let autoAccept = opts.autoAccept || false;
+    const devMode = opts.devMode || false;
+    if (devMode) FLAG_VERBOSE = true;
 
     // Resolve provider from API key prefix (if key is set)
     const resolveProvider = (key) => {
@@ -7043,7 +7447,7 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
 
     const apiKey = config.apiKey || null;
     const provider = resolveProvider(apiKey);
-    const model = apiKey ? (config.model || 'anthropic/claude-sonnet-4-20250514') : 'robinpath-default';
+    const model = apiKey ? (config.model || 'anthropic/claude-sonnet-4.6') : 'robinpath-default';
     const modelShort = model === 'robinpath-default' ? 'gemini-2.0-flash (free)' : (model.includes('/') ? model.split('/').pop() : model);
 
     // Build CLI context to send to brain
@@ -7098,9 +7502,12 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
 
     // Welcome banner
     log('');
+    const modeStr = devMode ? 'dev (auto+verbose)' : autoAccept ? 'auto' : 'confirm';
+    const modeColor = devMode ? color.yellow : autoAccept ? color.yellow : color.green;
     log(color.dim('  \u256d' + '\u2500'.repeat(50) + '\u256e'));
     log(color.dim('  \u2502') + color.bold('  RobinPath AI') + ' '.repeat(36) + color.dim('\u2502'));
     log(color.dim('  \u2502') + `  Model: ${color.cyan(modelShort)}` + ' '.repeat(Math.max(0, 41 - modelShort.length)) + color.dim('\u2502'));
+    log(color.dim('  \u2502') + `  Mode:  ${modeColor(modeStr)}` + ' '.repeat(Math.max(0, 41 - modeStr.length)) + color.dim('\u2502'));
     log(color.dim('  \u2502') + `  Type ${color.dim('exit')} to quit, ${color.dim('/help')} for commands` + ' '.repeat(12) + color.dim('\u2502'));
     log(color.dim('  \u2570' + '\u2500'.repeat(50) + '\u256f'));
     log('');
@@ -7163,9 +7570,12 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
             log('  /memory        Show persistent memory');
             log('  /remember <x>  Save a fact across sessions');
             log('  /forget <n>    Remove a memory by number');
+            log(color.dim('  ── Permissions ──'));
+            log('  /auto          Toggle auto-accept mode');
+            log('  /auto on|off   Enable/disable auto-accept');
             log(color.dim('  ── Info ──'));
-            log('  /model         Show current model');
-            log('  /model <id>    Switch model');
+            log('  /model         Switch model (interactive picker)');
+            log('  /model <id>    Switch model by ID');
             log('  /tools         List available tools');
             log('  /modules       Show installed modules');
             log('  /context       Show what the AI knows about your setup');
@@ -7186,7 +7596,18 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
         }
 
         if (trimmed === '/model') {
-            log(`Current model: ${color.cyan(model)}`);
+            // Interactive model picker
+            rl.pause();
+            const picked = await selectModelInteractive(readAiConfig().model || model);
+            if (picked) {
+                config.model = picked;
+                writeAiConfig(config);
+                log(color.green('Model changed:') + ` ${color.cyan(picked)}`);
+                log(color.dim('(takes effect on next message)'));
+            } else {
+                log(`Current model: ${color.cyan(readAiConfig().model || model)}`);
+            }
+            rl.resume();
             rl.prompt();
             return;
         }
@@ -7359,8 +7780,18 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
             return;
         }
 
-        if (trimmed.startsWith('/resume ')) {
-            const targetId = trimmed.slice(8).trim();
+        if (trimmed === '/resume' || trimmed.startsWith('/resume ')) {
+            let targetId = trimmed.slice(8).trim();
+            if (!targetId) {
+                // Interactive session picker
+                rl.pause();
+                targetId = await selectSessionInteractive();
+                rl.resume();
+                if (!targetId) {
+                    rl.prompt();
+                    return;
+                }
+            }
             const session = loadSession(targetId);
             if (!session) {
                 log(color.red(`Session '${targetId}' not found.`));
@@ -7503,6 +7934,24 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
             } catch (err) {
                 spinner.stop();
                 log(color.red(`  Scan error: ${err.message}`));
+            }
+            rl.prompt();
+            return;
+        }
+
+        if (trimmed === '/auto' || trimmed.startsWith('/auto ')) {
+            const arg = trimmed.slice(5).trim().toLowerCase();
+            if (arg === 'on') {
+                autoAccept = true;
+            } else if (arg === 'off') {
+                autoAccept = false;
+            } else {
+                autoAccept = !autoAccept;
+            }
+            const status = autoAccept ? color.green('ON') : color.yellow('OFF');
+            log(`  Auto-accept: ${status}`);
+            if (autoAccept) {
+                log(color.dim('  Commands run automatically (dangerous commands still confirm)'));
             }
             rl.prompt();
             return;
@@ -7667,11 +8116,56 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
                     break;
                 }
 
-                // Execute each shell command
+                // Execute each shell command with permission check
                 const cmdResults = [];
-                for (const cmd of commands) {
+                rl.pause();
+                for (let ci = 0; ci < commands.length; ci++) {
+                    let cmd = commands[ci];
+
+                    // Permission check
+                    const decision = await confirmCommand(cmd, autoAccept);
+
+                    if (decision === 'no') {
+                        const preview = cmd.length > 80 ? cmd.slice(0, 77) + '...' : cmd;
+                        log(color.dim(`  \u23ed Skipped: ${preview}`));
+                        cmdResults.push({ command: cmd, stdout: '', stderr: '(skipped by user)', exitCode: -1 });
+                        continue;
+                    }
+
+                    if (decision === 'auto') {
+                        autoAccept = true;
+                        log(color.green('  \u2713 Auto-accept enabled for this session'));
+                    }
+
+                    if (decision === 'edit') {
+                        // Let user edit the command
+                        const editRl = createInterface({ input: process.stdin, output: process.stdout });
+                        cmd = await new Promise(resolve => {
+                            editRl.question(color.cyan('  Edit: '), (answer) => {
+                                editRl.close();
+                                resolve(answer.trim() || cmd);
+                            });
+                            editRl.write(cmd);
+                        });
+                        // Re-confirm if edited command is dangerous
+                        if (isDangerousCommand(cmd)) {
+                            const recheck = await confirmCommand(cmd, false);
+                            if (recheck === 'no') {
+                                cmdResults.push({ command: cmd, stdout: '', stderr: '(skipped by user)', exitCode: -1 });
+                                continue;
+                            }
+                        }
+                    }
+
+                    if (decision !== 'yes' && decision !== 'auto' && decision !== 'edit') {
+                        // Shouldn't reach here, but safety fallback
+                        continue;
+                    }
+
                     const cmdPreview = cmd.length > 80 ? cmd.slice(0, 77) + '...' : cmd;
-                    log(color.dim(`  \u25b6 ${cmdPreview}`));
+                    if (!autoAccept || isDangerousCommand(cmd)) {
+                        log(color.dim(`  \u25b6 ${cmdPreview}`));
+                    }
 
                     const result = executeShellCommand(cmd);
 
@@ -7694,6 +8188,7 @@ async function startAiREPL(initialPrompt, resumeSessionId) {
                         exitCode: result.exitCode,
                     });
                 }
+                rl.resume();
 
                 // Feed command results back for next iteration
                 const resultSummary = cmdResults.map(r => {
@@ -7778,13 +8273,13 @@ async function handleAi(args) {
             log('Usage: robinpath ai --resume <session-id>');
             return;
         }
-        await startAiREPL(null, resumeId);
+        await startAiREPL(null, resumeId, { autoAccept: FLAG_AUTO_ACCEPT, devMode: FLAG_DEV_MODE });
         return;
     }
 
     // robinpath ai "prompt" (one-shot mode)
     const prompt = args.join(' ').trim();
-    await startAiREPL(prompt || null);
+    await startAiREPL(prompt || null, null, { autoAccept: FLAG_AUTO_ACCEPT, devMode: FLAG_DEV_MODE });
 }
 
 /**
@@ -8022,6 +8517,8 @@ FLAGS:
   -o, --output <file>  Save AI output to specific file (use with -p)
   -e, --eval <code>    Execute inline script
   -w, --watch          Re-run script on file changes
+  --auto               Start with auto-accept (skip command confirmations)
+  --dev                Dev mode: auto-accept + verbose output
   -q, --quiet          Suppress non-error output
   --verbose            Show timing and debug info
   -v, --version        Show version
@@ -8681,24 +9178,16 @@ SETUP:
 CONFIG SUBCOMMANDS:
   set-key           Set your OpenRouter API key (interactive secure input)
   set-key <key>     Set your OpenRouter API key (inline — less secure)
-  set-model <id>    Set the AI model (default: anthropic/claude-sonnet-4-20250514)
+  set-model         Interactive model picker (or set-model <id>)
   show              Show current AI configuration
   remove            Remove AI configuration
 
 AI SESSION COMMANDS:
   /help             Show help inside AI session
   /clear            Clear conversation history
-  /model            Show or switch model
-  /tools            List available AI tools
+  /model            Interactive model switcher (or /model <id>)
+  /tools            List available shell tools
   exit              Exit AI mode
-
-AI TOOLS:
-  The AI can use these tools during conversation:
-  - read_file       Read file contents
-  - write_file      Create or overwrite files
-  - edit_file       Modify specific parts of files
-  - run_script      Execute RobinPath code
-  - list_files      Explore project structure
 
 HEADLESS MODE (-p):
   The -p flag returns just the AI response with no UI, colors, or
@@ -8707,15 +9196,19 @@ HEADLESS MODE (-p):
   - App integration: spawn robinpath with -p flag, read stdout
   - Piping:         robinpath -p "explain this" | less
 
-POPULAR MODELS:
-  anthropic/claude-sonnet-4-20250514       (default, recommended)
-  openai/gpt-4o
-  google/gemini-2.5-pro
-  deepseek/deepseek-chat              (budget-friendly)
+AVAILABLE MODELS:
+  robinpath-default                     (free, no key needed)
+  anthropic/claude-sonnet-4.6           (recommended)
+  anthropic/claude-opus-4.6             (most capable)
+  anthropic/claude-haiku-4.5            (fastest)
+  openai/gpt-5.2                        (instant)
+  openai/gpt-5.2-pro                    (reasoning)
+  google/gemini-3-flash-preview         (1M context)
+  google/gemini-3.1-pro-preview         (65K output)
 
 EXAMPLES:
   robinpath ai config set-key sk-or-v1-abc123
-  robinpath ai config set-model openai/gpt-4o
+  robinpath ai config set-model
   robinpath                                        Start AI session
   robinpath -p "how do I read a file?"             Quick answer
   robinpath -p "write a slack bot" > bot.rp        Generate to file
@@ -9018,6 +9511,12 @@ async function main() {
     // Parse global flags first
     FLAG_QUIET = args.includes('--quiet') || args.includes('-q');
     FLAG_VERBOSE = args.includes('--verbose');
+    FLAG_AUTO_ACCEPT = args.includes('--auto');
+    FLAG_DEV_MODE = args.includes('--dev');
+    if (FLAG_DEV_MODE) {
+        FLAG_AUTO_ACCEPT = true;
+        FLAG_VERBOSE = true;
+    }
 
     // Detect invoked name (robinpath or rp)
     const invokedAs = basename(process.execPath, '.exe').toLowerCase();
@@ -9034,8 +9533,9 @@ async function main() {
         return;
     }
 
-    // Handle commands
-    const command = args[0];
+    // Handle commands (skip flags to find the actual command)
+    const globalFlags = new Set(['--quiet', '-q', '--verbose', '--auto', '--dev']);
+    const command = args.find(a => !globalFlags.has(a));
 
     // help <command>
     if (command === 'help') {
@@ -9262,7 +9762,7 @@ async function main() {
         fileArg = args[dashDashIdx + 1];
     } else {
         // Filter out known flags before finding file arg
-        const flagsToSkip = new Set(['-q', '--quiet', '--verbose', '-p', '--prompt']);
+        const flagsToSkip = new Set(['-q', '--quiet', '--verbose', '-p', '--prompt', '--auto', '--dev']);
         fileArg = args.find(a => !a.startsWith('-') && !flagsToSkip.has(a));
     }
 
@@ -9305,8 +9805,14 @@ async function main() {
     // Check for updates (non-blocking)
     checkForUpdates();
 
+    // Welcome wizard on first run
+    const existingConfig = readAiConfig();
+    if (Object.keys(existingConfig).length === 0 && process.stdin.isTTY) {
+        await welcomeWizard();
+    }
+
     // Default: AI interactive mode (stdin is a terminal)
-    await startAiREPL(null);
+    await startAiREPL(null, null, { autoAccept: FLAG_AUTO_ACCEPT, devMode: FLAG_DEV_MODE });
 }
 
 main().catch(err => {
