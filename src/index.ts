@@ -45,6 +45,7 @@ import {
 import { handleSnippet } from './commands-snippets';
 import { handleLogin, handleLogout, handleWhoami, handlePublish, handleSync } from './commands-cloud';
 import { handleCheck, handleAST, handleFmt, handleTest, handleWatch, startREPL } from './commands-devtools';
+import { expandFileRefs } from './file-refs';
 
 // ============================================================================
 // AI command handlers (kept here since they tie together many modules)
@@ -105,7 +106,14 @@ interface HeadlessOpts {
 async function handleHeadlessPrompt(prompt: string, opts: HeadlessOpts = {}): Promise<void> {
     const { save = false, run = false, outFile = null } = opts;
 
-    const enriched = await buildEnrichedPrompt(prompt);
+    // Expand @/ file references before sending
+    const { expanded: expandedPrompt, refs: fileRefs } = expandFileRefs(prompt);
+    if (fileRefs.length > 0) {
+        const totalFiles = fileRefs.reduce((n, r) => n + r.files.length, 0);
+        console.error(`  ${totalFiles} file(s) attached`);
+    }
+
+    const enriched = await buildEnrichedPrompt(expandedPrompt);
 
     if (enriched.missingModules.length > 0) {
         console.error('');

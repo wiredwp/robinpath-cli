@@ -55,6 +55,7 @@ import {
 import type { ConfirmResult } from './ui';
 import { fetchBrainStream, fetchBrainContext, buildEnrichedPrompt } from './brain';
 import type { BrainStreamResult } from './brain';
+import { expandFileRefs, listReferenceableFiles } from './file-refs';
 
 import { getNativeModules } from './runtime';
 
@@ -591,6 +592,13 @@ export async function startAiREPL(
             const hits = slashCommandNames.filter((c: string) => c.startsWith(line));
             return [hits.length ? hits : slashCommandNames, line];
         }
+        // @/ file reference completion
+        const atMatch = line.match(/@\/([\w.\-\/]*)$/);
+        if (atMatch) {
+            const prefix = '@/' + (atMatch[1] || '');
+            const files = listReferenceableFiles(undefined, prefix);
+            return [files.length ? files : [], prefix];
+        }
         return [[], line];
     }
 
@@ -1114,11 +1122,18 @@ export async function startAiREPL(
         const activeKey: string | null = (readAiConfig().apiKey as string) || apiKey;
         const activeProvider: string = resolveProvider(activeKey);
 
+        // Expand @/ file references
+        const { expanded: expandedPrompt, refs: fileRefs } = expandFileRefs(trimmed);
+        if (fileRefs.length > 0) {
+            const totalFiles = fileRefs.reduce((n, r) => n + r.files.length, 0);
+            log(color.dim(`  ${totalFiles} file(s) attached`));
+        }
+
         let spinner = createSpinner('Thinking...');
 
         try {
-            // Add user message to history
-            conversationMessages.push({ role: 'user', content: trimmed });
+            // Add user message to history (with file contents expanded)
+            conversationMessages.push({ role: 'user', content: expandedPrompt });
 
             // Auto-compact if conversation is getting long
             const didCompact: boolean = await autoCompact(conversationMessages);
@@ -1135,7 +1150,7 @@ export async function startAiREPL(
 
                 const brainResult: BrainStreamResult | null = await fetchBrainStream(
                     loopCount === 0
-                        ? trimmed
+                        ? expandedPrompt
                         : (conversationMessages[conversationMessages.length - 1].content as string),
                     {
                         onToken: (delta: string) => {
