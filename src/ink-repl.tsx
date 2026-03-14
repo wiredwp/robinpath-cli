@@ -178,6 +178,47 @@ function TrustPrompt({cwd, onAccept, onReject}: {cwd: string; onAccept: () => vo
     );
 }
 
+// ── Model Selector ──
+function ModelSelector({models, currentId, onSelect, onCancel}: {
+    models: {id: string; name: string; desc: string; group: string}[];
+    currentId: string;
+    onSelect: (id: string) => void;
+    onCancel: () => void;
+}) {
+    const [cursor, setCursor] = useState(() => Math.max(0, models.findIndex(m => m.id === currentId)));
+
+    useInput((ch, key) => {
+        if (key.upArrow) setCursor(c => Math.max(0, c - 1));
+        if (key.downArrow) setCursor(c => Math.min(models.length - 1, c + 1));
+        if (key.return) onSelect(models[cursor].id);
+        if (key.escape) onCancel();
+    });
+
+    let lastGroup = '';
+    return (
+        <Box flexDirection="column" paddingX={2} marginY={1}>
+            {models.map((m, i) => {
+                const showGroup = m.group !== lastGroup;
+                lastGroup = m.group;
+                const isCurrent = m.id === currentId;
+                const isSelected = i === cursor;
+                return (
+                    <Box key={m.id} flexDirection="column">
+                        {showGroup && <Text dimColor>{`── ${m.group} ──`}</Text>}
+                        <Text>
+                            {isSelected ? <Text color="cyan" bold>{'❯ '}</Text> : <Text>{'  '}</Text>}
+                            <Text bold={isSelected}>{m.name.padEnd(22)}</Text>
+                            <Text dimColor>{m.desc}</Text>
+                            {isCurrent ? <Text color="green">{' ✓'}</Text> : null}
+                        </Text>
+                    </Box>
+                );
+            })}
+            <Text dimColor>{'\n  ↑↓ select · enter confirm · esc cancel'}</Text>
+        </Box>
+    );
+}
+
 // ── Main App ──
 function ChatApp({engine}: {engine: ReplEngine}) {
     const [trusted, setTrusted] = useState(() => {
@@ -195,10 +236,11 @@ function ChatApp({engine}: {engine: ReplEngine}) {
     const [streaming, setStreaming] = useState('');
     const [loading, setLoading] = useState(false);
     const [status, setStatus] = useState('');
+    const [showModelPicker, setShowModelPicker] = useState(false);
 
     useEffect(() => {
         engine.ui = {
-            setStreaming, setLoading, setStatus,
+            setStreaming, setLoading, setStatus, setShowModelPicker,
             addMessage: (text: string, dim?: boolean) => setMessages(p => [...p, {id: ++nextId, text, dim}]),
         };
         engine.updateStatus();
@@ -292,7 +334,24 @@ function ChatApp({engine}: {engine: ReplEngine}) {
                 )}
             </Static>
 
-            {loading ? (
+            {showModelPicker ? (
+                <ModelSelector
+                    models={(() => {
+                        const hasKey = !!readAiConfig().apiKey;
+                        return hasKey ? AI_MODELS : AI_MODELS.filter(m => !m.requiresKey);
+                    })()}
+                    currentId={readAiConfig().model || engine.model}
+                    onSelect={(id) => {
+                        engine.config.model = id;
+                        engine.model = id;
+                        writeAiConfig(engine.config);
+                        setMessages(p => [...p, {id: ++nextId, text: `✓ Model: ${id.includes('/') ? id.split('/').pop() : id}`, dim: true}]);
+                        setShowModelPicker(false);
+                        engine.updateStatus();
+                    }}
+                    onCancel={() => setShowModelPicker(false)}
+                />
+            ) : loading ? (
                 <Box flexDirection="column" paddingX={1}>
                     {streaming ? (
                         <Box flexDirection="column">
@@ -398,26 +457,9 @@ class ReplEngine {
             this.autoAccept = !this.autoAccept;
             return `Auto-accept: ${this.autoAccept ? 'ON — commands run without asking' : 'OFF — confirm each command'}`;
         }
-        if (text === '/model') {
-            const hasKey = !!readAiConfig().apiKey;
-            const models = hasKey ? AI_MODELS : AI_MODELS.filter(m => !m.requiresKey);
-            const cur = readAiConfig().model || this.model;
-            return models.map((m, i) => {
-                const mark = m.id === cur ? ' ✓' : '';
-                return `${String(i + 1).padStart(2)}. ${m.name.padEnd(22)} ${m.desc}${mark}`;
-            }).join('\n') + '\n\nType /model <number> to switch.';
-        }
-        if (text.match(/^\/model \d+$/)) {
-            const hasKey = !!readAiConfig().apiKey;
-            const models = hasKey ? AI_MODELS : AI_MODELS.filter(m => !m.requiresKey);
-            const idx = parseInt(text.split(' ')[1], 10) - 1;
-            if (idx >= 0 && idx < models.length) {
-                this.config.model = models[idx].id;
-                this.model = models[idx].id;
-                writeAiConfig(this.config);
-                return `✓ Model: ${models[idx].name}`;
-            }
-            return 'Invalid number. Type /model to see the list.';
+        if (text === '/model' || text.startsWith('/model ')) {
+            this.ui?.setShowModelPicker(true);
+            return '';
         }
         if (text === '/usage') {
             const c = this.usage.cost > 0 ? `$${this.usage.cost.toFixed(4)}` : '$0.00 (free)';
