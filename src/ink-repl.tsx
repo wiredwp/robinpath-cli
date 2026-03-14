@@ -319,6 +319,10 @@ function ChatApp({engine}: {engine: ReplEngine}) {
                     <Box key={msg.id} paddingX={1} marginBottom={msg.text.startsWith('❯') ? 0 : 1} flexDirection="column">
                         {msg.text.startsWith('❯') ? (
                             <Text><Text color="cyan" bold>❯</Text><Text bold>{msg.text.slice(1)}</Text></Text>
+                        ) : msg.text.startsWith('✓') ? (
+                            <Text dimColor><Text color="green">✓</Text>{msg.text.slice(1)}</Text>
+                        ) : msg.text.startsWith('✗') ? (
+                            <Text><Text color="red">✗</Text>{msg.text.slice(1)}</Text>
                         ) : msg.dim ? (
                             <Text dimColor wrap="wrap">{msg.text}</Text>
                         ) : (
@@ -593,26 +597,24 @@ class ReplEngine {
             // Execute commands and collect results
             const cmdResults: {command: string; stdout: string; stderr: string; exitCode: number}[] = [];
             for (const cmd of commands) {
-                const preview = cmd.split('\n')[0].slice(0, 80);
-                ui?.addMessage(`$ ${preview}${cmd.includes('\n') ? ' ...' : ''}`, true);
+                const firstLine = cmd.split('\n')[0].slice(0, 60);
                 const r = await executeShellCommand(cmd);
                 cmdResults.push({command: cmd, stdout: r.stdout || '', stderr: r.stderr || '', exitCode: r.exitCode});
 
-                // Display result (truncated for UI, full for AI)
-                if (r.exitCode === 0 && r.stdout?.trim()) {
-                    const lines = r.stdout.trim().split('\n');
-                    if (lines.length <= 15) {
-                        ui?.addMessage(lines.join('\n'), true);
+                // Clean, compact command display
+                if (r.exitCode === 0) {
+                    const output = (r.stdout || '').trim();
+                    if (output) {
+                        const lines = output.split('\n');
+                        const short = lines.length <= 3 ? output : lines.slice(0, 3).join('\n') + `\n(${lines.length - 3} more lines)`;
+                        ui?.addMessage(`✓ ${firstLine}\n${short}`, true);
                     } else {
-                        ui?.addMessage(
-                            `${lines.slice(0, 5).join('\n')}\n... (${lines.length - 10} lines hidden)\n${lines.slice(-5).join('\n')}`,
-                            true,
-                        );
+                        ui?.addMessage(`✓ ${firstLine}`, true);
                     }
-                } else if (r.exitCode !== 0) {
-                    ui?.addMessage(`exit ${r.exitCode}: ${(r.stderr || '').slice(0, 200)}`, true);
                 } else {
-                    ui?.addMessage('done', true);
+                    // Show error cleanly — just first line of stderr
+                    const errLine = (r.stderr || '').trim().split('\n')[0].slice(0, 80);
+                    ui?.addMessage(`✗ ${firstLine}\n  ${errLine}`, true);
                 }
             }
 
