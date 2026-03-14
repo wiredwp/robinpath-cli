@@ -567,10 +567,81 @@ async function main(): Promise<void> {
         }
     }
 
-    // Check API key
+    // Post-login: check if OpenRouter API key is set
     const existingConfig = readAiConfig();
-    if (Object.keys(existingConfig).length === 0 && process.stdin.isTTY) {
-        await welcomeWizard();
+    if (!existingConfig.apiKey && process.stdin.isTTY) {
+        console.log('');
+        console.log(color.green('  ✓ Logged in successfully!'));
+        console.log('');
+        console.log('  To explore the AI assistant and agent coding,');
+        console.log('  connect your OpenRouter API key:');
+        console.log('');
+        console.log(color.bold('  Step 1:') + ' Go to ' + color.cyan('https://openrouter.ai/keys'));
+        console.log(color.bold('  Step 2:') + ' Click "Create Key" and copy it');
+        console.log(color.bold('  Step 3:') + ' Run this command:');
+        console.log('');
+        console.log('    ' + color.cyan(color.bold('robinpath ai config set-key sk-or-...')));
+        console.log('');
+
+        // Ask: Ready or Later
+        const ready: string = await new Promise((resolve) => {
+            if (!process.stdin.isTTY) { resolve('later'); return; }
+            let selected = 0;
+            const options = ["Yes, I'm ready", 'Maybe later'];
+
+            function render() {
+                process.stdout.write('\x1b[2K\r');
+                for (let i = 0; i < options.length; i++) {
+                    if (i > 0) process.stdout.write('\n\x1b[2K');
+                    const marker = i === selected ? color.cyan('  ❯ ') : '    ';
+                    const text = i === selected ? color.bold(options[i]) : options[i];
+                    process.stdout.write(`${marker}${text}`);
+                }
+                if (options.length > 1) process.stdout.write(`\x1b[${options.length - 1}A`);
+                process.stdout.write('\r');
+            }
+
+            render();
+            process.stdin.setRawMode(true);
+            process.stdin.resume();
+
+            const onKey = (buf: Buffer): void => {
+                const key = buf.toString();
+                if (key === '\x1b[A') { selected = 0; render(); return; }
+                if (key === '\x1b[B') { selected = 1; render(); return; }
+                if (key === '\r' || key === '\n') {
+                    process.stdin.removeListener('data', onKey);
+                    try { process.stdin.setRawMode(false); } catch {}
+                    process.stdin.pause();
+                    process.stdout.write('\n'.repeat(options.length));
+                    resolve(selected === 0 ? 'ready' : 'later');
+                    return;
+                }
+                if (key === '\x1b' || key === '\x03') {
+                    process.stdin.removeListener('data', onKey);
+                    try { process.stdin.setRawMode(false); } catch {}
+                    process.stdin.pause();
+                    process.stdout.write('\n'.repeat(options.length));
+                    resolve('later');
+                    return;
+                }
+            };
+            process.stdin.on('data', onKey);
+        });
+
+        console.log('');
+        if (ready === 'ready') {
+            console.log('  Copy and paste this command in your terminal:');
+            console.log('');
+            console.log('    ' + color.cyan(color.bold('robinpath ai config set-key')) + color.dim(' <paste-your-key-here>'));
+            console.log('');
+            console.log(color.dim('  After setting the key, run ') + color.cyan('robinpath') + color.dim(' to start the AI assistant.'));
+        } else {
+            console.log(color.dim('  No problem! When you\'re ready, run:'));
+            console.log('    ' + color.cyan('robinpath ai config set-key') + color.dim(' <your-openrouter-key>'));
+        }
+        console.log('');
+        return;
     }
 
     await startInkOrFallback(null, null, { autoAccept: FLAG_AUTO_ACCEPT, devMode: FLAG_DEV_MODE });
