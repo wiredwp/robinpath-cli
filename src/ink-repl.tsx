@@ -2,13 +2,13 @@
  * Ink-based AI REPL
  *
  * Layout: Static messages (grow up) + dynamic area (streaming OR input, never both)
- * Bordered input box only renders when AI is NOT streaming — prevents garbled output.
+ * Input area only renders when AI is NOT streaming — prevents garbled output.
  */
 import React, {useState, useCallback, useEffect, useMemo} from 'react';
 import {render, Box, Text, Static, useInput, useApp} from 'ink';
 import InkSpinner from 'ink-spinner';
 import {getShellConfig, getAvailableShells, setShellOverride, getRobinPathHome, CLI_VERSION, setFlags, logVerbose} from './utils';
-import {readAiConfig, writeAiConfig, AI_BRAIN_URL} from './config';
+import {readAiConfig, writeAiConfig} from './config';
 import type {AiConfig} from './config';
 import {AI_MODELS, createUsageTracker, estimateCost} from './models';
 import type {UsageTracker} from './models';
@@ -26,57 +26,57 @@ import {readModulesManifest} from './commands-core';
 import {getNativeModules} from './runtime';
 import {homedir, platform} from 'node:os';
 import {randomUUID} from 'node:crypto';
-import {readFileSync, existsSync, readdirSync, statSync} from 'node:fs';
+import {existsSync, readdirSync, statSync} from 'node:fs';
 import {join} from 'node:path';
 
 // ── Types ──
 interface ChatMsg { id: number; text: string; dim?: boolean }
 let nextId = 0;
 
-// ── Slash commands with descriptions ──
+// ── All slash commands ──
 const COMMANDS: Record<string, string> = {
     '/model': 'Switch AI model',
-    '/auto': 'Toggle auto-accept',
+    '/auto': 'Toggle auto-accept (commands)',
     '/clear': 'Clear conversation',
+    '/compact': 'Trim to last 10 messages',
     '/save': 'Save session',
-    '/sessions': 'List sessions',
-    '/memory': 'Show memory',
+    '/sessions': 'List saved sessions',
+    '/resume': 'Resume a session',
+    '/delete': 'Delete a session',
+    '/memory': 'Show persistent memory',
     '/remember': 'Save a fact',
+    '/forget': 'Remove a memory',
     '/usage': 'Token usage & cost',
     '/shell': 'Switch shell',
-    '/help': 'Show commands',
+    '/help': 'All commands',
 };
 
-// ── Input Box Component ──
+// ── Input Area ──
 function InputArea({onSubmit, placeholder}: {onSubmit: (v: string) => void; placeholder: string}) {
     const [value, setValue] = useState('');
-    const [showHints, setShowHints] = useState(false);
     const {exit} = useApp();
 
-    // Match slash commands for hints
     const matchingCommands = useMemo(() => {
         if (!value.startsWith('/')) return [];
         if (value === '/') return Object.entries(COMMANDS);
         return Object.entries(COMMANDS).filter(([cmd]) => cmd.startsWith(value));
     }, [value]);
 
+    const showHints = value.startsWith('/') && matchingCommands.length > 0;
+
     useInput((ch, key) => {
         if (key.return) {
             if (value.endsWith('\\')) {setValue(p => p.slice(0, -1) + '\n'); return;}
             const text = value.trim();
-            if (text) {onSubmit(text); setValue(''); setShowHints(false);}
+            if (text) {onSubmit(text); setValue('');}
             return;
         }
         if (ch === '\n') {setValue(p => p + '\n'); return;}
-        if (key.escape) {setValue(''); setShowHints(false); return;}
-        if (ch === '\x03') {if (!value) exit(); else {setValue(''); setShowHints(false);} return;}
+        if (key.escape) {setValue(''); return;}
+        if (ch === '\x03') {if (!value) exit(); else setValue(''); return;}
         if (key.backspace || key.delete) {setValue(p => p.slice(0, -1)); return;}
         if (key.tab) {
-            // Auto-complete first matching command
-            if (matchingCommands.length === 1) {
-                setValue(matchingCommands[0][0] + ' ');
-                setShowHints(false);
-            }
+            if (matchingCommands.length === 1) setValue(matchingCommands[0][0]);
             return;
         }
         if (ch === '\x15') {setValue(''); return;}
@@ -84,54 +84,48 @@ function InputArea({onSubmit, placeholder}: {onSubmit: (v: string) => void; plac
         if (ch && !key.ctrl && !key.meta) setValue(p => p + ch);
     });
 
-    // Show hints when typing /
-    useEffect(() => {
-        setShowHints(value.startsWith('/') && matchingCommands.length > 0);
-    }, [value, matchingCommands.length]);
-
     const lines = value.split('\n');
     const empty = value === '';
+    const w = Math.min(process.stdout.columns - 4 || 76, 76);
 
     return (
         <Box flexDirection="column" marginTop={1}>
-            {/* Slash command hints */}
             {showHints && (
                 <Box flexDirection="column" marginX={2} marginBottom={1}>
-                    {matchingCommands.slice(0, 6).map(([cmd, desc]) => (
+                    {matchingCommands.slice(0, 8).map(([cmd, desc]) => (
                         <Text key={cmd}>
-                            <Text color="cyan">{cmd.padEnd(12)}</Text>
+                            <Text color="cyan">{cmd.padEnd(14)}</Text>
                             <Text dimColor>{desc}</Text>
                         </Text>
                     ))}
                 </Box>
             )}
 
-            {/* Input area — top/bottom lines only, no side borders */}
             <Box flexDirection="column" marginX={1}>
-                <Text dimColor>{'─'.repeat(Math.min(process.stdout.columns - 4, 76))}</Text>
-                <Box paddingX={1}>
+                <Text dimColor>{'─'.repeat(w)}</Text>
+                <Box paddingX={1} flexDirection="column">
                     {empty ? (
                         <Text dimColor>{'> '}{placeholder}</Text>
                     ) : (
-                        <Text>
-                            <Text color="cyan">{'> '}</Text>
-                            {lines.map((line, i) => (
-                                <Text key={i}>{i > 0 ? '\n  ' : ''}{line}{i === lines.length - 1 ? <Text color="cyan">▎</Text> : null}</Text>
-                            ))}
-                        </Text>
+                        lines.map((line, i) => (
+                            <Text key={i}>
+                                {i === 0 ? <Text color="cyan">{'> '}</Text> : <Text dimColor>{'  '}</Text>}
+                                {line}
+                                {i === lines.length - 1 ? <Text color="cyan">▎</Text> : null}
+                            </Text>
+                        ))
                     )}
                 </Box>
-                <Text dimColor>{'─'.repeat(Math.min(process.stdout.columns - 4, 76))}</Text>
+                <Text dimColor>{'─'.repeat(w)}</Text>
             </Box>
 
-            {/* Hints */}
             <Box marginX={2}>
                 <Text dimColor>
                     <Text color="gray">enter</Text>{' send  '}
                     <Text color="gray">\</Text>{' newline  '}
-                    <Text color="gray">esc</Text>{' clear  '}
                     <Text color="gray">/</Text>{' commands  '}
-                    <Text color="gray">tab</Text>{' complete'}
+                    <Text color="gray">tab</Text>{' complete  '}
+                    <Text color="gray">@/</Text>{' files'}
                 </Text>
             </Box>
         </Box>
@@ -139,55 +133,66 @@ function InputArea({onSubmit, placeholder}: {onSubmit: (v: string) => void; plac
 }
 
 // ── Main App ──
-function ChatApp({onMessage, statusText}: {onMessage: (text: string) => Promise<string>; statusText: string}) {
+function ChatApp({engine}: {engine: ReplEngine}) {
     const [messages, setMessages] = useState<ChatMsg[]>([]);
     const [streaming, setStreaming] = useState('');
     const [loading, setLoading] = useState(false);
+    const [status, setStatus] = useState('');
 
     useEffect(() => {
-        (global as any).__rpUI = {
-            setStreaming, setLoading,
+        engine.ui = {
+            setStreaming, setLoading, setStatus,
             addMessage: (text: string, dim?: boolean) => setMessages(p => [...p, {id: ++nextId, text, dim}]),
         };
+        engine.updateStatus();
     }, []);
 
     const handleSubmit = useCallback(async (text: string) => {
-        if (text === 'exit' || text === 'quit') {
-            (global as any).__rpExit?.();
+        if (text === 'exit' || text === 'quit') {engine.exit(); return;}
+        // Slash commands — show result inline without user message echo
+        if (text.startsWith('/')) {
+            const result = await engine.handleSlashCommand(text);
+            if (result) setMessages(p => [...p, {id: ++nextId, text: result, dim: true}]);
+            engine.updateStatus();
             return;
         }
+        // AI message
         setMessages(p => [...p, {id: ++nextId, text: `❯ ${text}`}]);
         setLoading(true);
         setStreaming('');
         try {
-            const response = await onMessage(text);
+            const response = await engine.handleAIMessage(text);
             if (response) setMessages(p => [...p, {id: ++nextId, text: response}]);
         } catch (err: any) {
             setMessages(p => [...p, {id: ++nextId, text: `Error: ${err.message}`, dim: true}]);
         }
         setLoading(false);
         setStreaming('');
-    }, [onMessage]);
+        engine.updateStatus();
+    }, [engine]);
 
     const isFirst = messages.length === 0;
 
     return (
         <Box flexDirection="column" padding={1}>
-            {/* Header */}
             <Box marginBottom={1}>
                 <Text><Text color="cyan" bold>◆</Text> <Text bold>RobinPath</Text> <Text dimColor>v{CLI_VERSION}</Text></Text>
             </Box>
 
-            {/* Completed messages — Static never re-renders old items */}
             <Static items={messages}>
                 {msg => (
                     <Box key={msg.id} paddingX={1} marginBottom={msg.text.startsWith('❯') ? 0 : 1}>
-                        {msg.dim ? <Text dimColor wrap="wrap">{msg.text}</Text> : <Text wrap="wrap">{msg.text}</Text>}
+                        {msg.text.startsWith('❯') ? (
+                            <Text><Text color="cyan" bold>❯</Text><Text bold>{msg.text.slice(1)}</Text></Text>
+                        ) : msg.dim ? (
+                            <Text dimColor wrap="wrap">{msg.text}</Text>
+                        ) : (
+                            <Text wrap="wrap">{msg.text}</Text>
+                        )}
                     </Box>
                 )}
             </Static>
 
-            {/* Dynamic area: streaming response OR input (never both) */}
             {loading ? (
                 <Box flexDirection="column" paddingX={1}>
                     {streaming ? (
@@ -203,93 +208,98 @@ function ChatApp({onMessage, statusText}: {onMessage: (text: string) => Promise<
                 />
             )}
 
-            {/* Status bar */}
-            <Box marginTop={1} paddingX={1}>
-                <Text dimColor>{statusText}</Text>
-            </Box>
+            {status ? <Box marginTop={1} paddingX={1}><Text dimColor>{status}</Text></Box> : null}
         </Box>
     );
 }
 
-// ── Engine ──
-interface InkReplOptions {autoAccept?: boolean; devMode?: boolean}
+// ── REPL Engine ──
+class ReplEngine {
+    config: AiConfig;
+    autoAccept: boolean;
+    apiKey: string | null;
+    model: string;
+    sessionId: string;
+    sessionName: string;
+    usage: UsageTracker;
+    conversationMessages: Message[];
+    cliContext: Record<string, unknown>;
+    ui: any = null;
 
-export async function startInkREPL(
-    initialPrompt: string | null,
-    resumeSessionId: string | null,
-    opts: InkReplOptions = {},
-): Promise<void> {
-    const config: AiConfig = readAiConfig();
-    let autoAccept = opts.autoAccept || false;
-    const devMode = opts.devMode || false;
-    if (devMode) setFlags({verbose: true});
+    constructor(resumeSessionId: string | null, opts: {autoAccept?: boolean; devMode?: boolean}) {
+        this.config = readAiConfig();
+        this.autoAccept = opts.autoAccept || false;
+        if (opts.devMode) setFlags({verbose: true});
 
-    const resolveProvider = (key: string | null | undefined): string => {
+        this.apiKey = (this.config.apiKey as string) || null;
+        this.model = this.apiKey ? this.config.model || 'anthropic/claude-sonnet-4.6' : 'robinpath-default';
+        this.sessionId = resumeSessionId || randomUUID().slice(0, 8);
+        this.sessionName = `session-${new Date().toISOString().slice(0, 10)}`;
+        this.usage = createUsageTracker();
+        this.conversationMessages = [];
+        this.cliContext = {
+            platform: platform(), shell: getShellConfig().name,
+            cwd: process.cwd(), cliVersion: CLI_VERSION,
+            nativeModules: getNativeModules().map((m: any) => m.name),
+            installedModules: Object.keys(readModulesManifest()),
+        };
+
+        const mem = buildMemoryContext();
+        if (mem.trim()) {
+            this.conversationMessages.push({role: 'user', content: `[Context] ${mem.trim()}`});
+            this.conversationMessages.push({role: 'assistant', content: 'Preferences loaded.'});
+        }
+
+        if (resumeSessionId) {
+            const session = loadSession(resumeSessionId);
+            if (session) {
+                this.sessionName = session.name;
+                for (const msg of session.messages) this.conversationMessages.push(msg);
+                if (session.usage) Object.assign(this.usage, session.usage);
+            }
+        }
+    }
+
+    resolveProvider(key: string | null | undefined): string {
         if (!key) return 'gemini';
         if (key.startsWith('sk-or-')) return 'openrouter';
         if (key.startsWith('sk-ant-')) return 'anthropic';
         if (key.startsWith('sk-')) return 'openai';
-        return (config.provider as string) || 'gemini';
-    };
-
-    const apiKey = (config.apiKey as string) || null;
-    const model = apiKey ? config.model || 'anthropic/claude-sonnet-4.6' : 'robinpath-default';
-    const modelShort = (m: string) => m === 'robinpath-default' ? 'gemini-free' : m.includes('/') ? m.split('/').pop()! : m;
-
-    const cliContext: Record<string, unknown> = {
-        platform: platform(), shell: getShellConfig().name,
-        cwd: process.cwd(), cliVersion: CLI_VERSION,
-        nativeModules: getNativeModules().map((m: any) => m.name),
-        installedModules: Object.keys(readModulesManifest()),
-    };
-
-    let sessionId = resumeSessionId || randomUUID().slice(0, 8);
-    let sessionName = `session-${new Date().toISOString().slice(0, 10)}`;
-    const usage: UsageTracker = createUsageTracker();
-    const conversationMessages: Message[] = [];
-
-    const mem = buildMemoryContext();
-    if (mem.trim()) {
-        conversationMessages.push({role: 'user', content: `[Context] ${mem.trim()}`});
-        conversationMessages.push({role: 'assistant', content: 'Preferences loaded.'});
+        return (this.config.provider as string) || 'gemini';
     }
 
-    if (resumeSessionId) {
-        const session = loadSession(resumeSessionId);
-        if (session) {
-            sessionName = session.name;
-            for (const msg of session.messages) conversationMessages.push(msg);
-            if (session.usage) Object.assign(usage, session.usage);
-        }
+    updateStatus() {
+        const m = this.model.includes('/') ? this.model.split('/').pop() : this.model;
+        const cost = this.usage.cost > 0 ? ` · $${this.usage.cost.toFixed(4)}` : '';
+        const tokens = this.usage.totalTokens > 0 ? ` · ${this.usage.totalTokens.toLocaleString()} tok` : '';
+        this.ui?.setStatus(`${m} · ${getShellConfig().name} · ${this.autoAccept ? 'auto' : 'confirm'}${tokens}${cost}`);
     }
 
-    function getStatusText(): string {
-        const m = modelShort(readAiConfig().model || model);
-        const cost = usage.cost > 0 ? ` · $${usage.cost.toFixed(4)}` : '';
-        const tokens = usage.totalTokens > 0 ? ` · ${usage.totalTokens.toLocaleString()} tok` : '';
-        return `${m} · ${getShellConfig().name} · ${autoAccept ? 'auto' : 'confirm'}${tokens}${cost}`;
+    exit() {
+        if (this.conversationMessages.length > 1) saveSession(this.sessionId, this.sessionName, this.conversationMessages, this.usage);
+        process.exit(0);
     }
 
-    async function handleMessage(text: string): Promise<string> {
-        const ui = (global as any).__rpUI;
-
-        // ── Slash commands ──
+    // ── Slash commands — return display text, not a chat message ──
+    async handleSlashCommand(text: string): Promise<string> {
         if (text === '/' || text === '/help') {
-            return Object.entries(COMMANDS).map(([cmd, desc]) => `${cmd.padEnd(12)} ${desc}`).join('\n');
+            return Object.entries(COMMANDS).map(([cmd, desc]) => `${cmd.padEnd(14)} ${desc}`).join('\n');
         }
-        if (text === '/clear') {conversationMessages.length = 0; return 'Conversation cleared.';}
-        if (text === '/usage') {
-            const c = usage.cost > 0 ? `$${usage.cost.toFixed(4)}` : '$0.00 (free)';
-            return `${usage.totalTokens.toLocaleString()} tokens · ${usage.requests} requests · ${c}`;
+        if (text === '/clear') {this.conversationMessages.length = 0; return '✓ Conversation cleared.';}
+        if (text === '/compact') {
+            if (this.conversationMessages.length > 12) {
+                this.conversationMessages.splice(1, this.conversationMessages.length - 11);
+            }
+            return `✓ Trimmed to ${this.conversationMessages.length} messages.`;
         }
         if (text === '/auto') {
-            autoAccept = !autoAccept;
-            return `Auto-accept: ${autoAccept ? 'ON' : 'OFF'}`;
+            this.autoAccept = !this.autoAccept;
+            return `Auto-accept: ${this.autoAccept ? 'ON — commands run without asking' : 'OFF — confirm each command'}`;
         }
         if (text === '/model') {
             const hasKey = !!readAiConfig().apiKey;
             const models = hasKey ? AI_MODELS : AI_MODELS.filter(m => !m.requiresKey);
-            const cur = readAiConfig().model || model;
+            const cur = readAiConfig().model || this.model;
             return models.map((m, i) => {
                 const mark = m.id === cur ? ' ✓' : '';
                 return `${String(i + 1).padStart(2)}. ${m.name.padEnd(22)} ${m.desc}${mark}`;
@@ -300,27 +310,61 @@ export async function startInkREPL(
             const models = hasKey ? AI_MODELS : AI_MODELS.filter(m => !m.requiresKey);
             const idx = parseInt(text.split(' ')[1], 10) - 1;
             if (idx >= 0 && idx < models.length) {
-                config.model = models[idx].id;
-                writeAiConfig(config);
-                return `Model changed to ${models[idx].name}`;
+                this.config.model = models[idx].id;
+                this.model = models[idx].id;
+                writeAiConfig(this.config);
+                return `✓ Model: ${models[idx].name}`;
             }
-            return 'Invalid number.';
+            return 'Invalid number. Type /model to see the list.';
+        }
+        if (text === '/usage') {
+            const c = this.usage.cost > 0 ? `$${this.usage.cost.toFixed(4)}` : '$0.00 (free)';
+            return `${this.usage.totalTokens.toLocaleString()} tokens · ${this.usage.requests} requests · ${c}`;
         }
         if (text === '/memory') {
             const m = loadMemory();
-            return m.facts.length ? m.facts.map((f: string, i: number) => `${i + 1}. ${f}`).join('\n') : 'No memories saved.';
+            return m.facts.length ? m.facts.map((f: string, i: number) => `${i + 1}. ${f}`).join('\n') : 'No memories saved yet.\nUse /remember <fact> to save something.';
         }
-        if (text.startsWith('/remember ')) {addMemoryFact(text.slice(10).trim()); return 'Remembered.';}
-        if (text.startsWith('/forget ')) {removeMemoryFact(parseInt(text.slice(8).trim(), 10) - 1); return 'Forgotten.';}
+        if (text.startsWith('/remember ')) {
+            const fact = text.slice(10).trim();
+            if (!fact) return 'Usage: /remember <fact>';
+            addMemoryFact(fact);
+            return `✓ Remembered: "${fact}"`;
+        }
+        if (text.startsWith('/forget ')) {
+            const idx = parseInt(text.slice(8).trim(), 10) - 1;
+            const removed = removeMemoryFact(idx);
+            return removed ? `✓ Forgot: "${removed}"` : 'Invalid number. Type /memory to see the list.';
+        }
         if (text === '/save' || text.startsWith('/save ')) {
-            if (text.length > 5) sessionName = text.slice(5).trim();
-            saveSession(sessionId, sessionName, conversationMessages, usage);
-            return `Session saved: ${sessionName}`;
+            if (text.length > 5) this.sessionName = text.slice(5).trim();
+            saveSession(this.sessionId, this.sessionName, this.conversationMessages, this.usage);
+            return `✓ Saved: ${this.sessionName} (${this.sessionId})`;
         }
         if (text === '/sessions') {
             const sessions = listSessions();
             if (sessions.length === 0) return 'No saved sessions.';
-            return sessions.map(s => `${s.id}  ${s.name}  (${s.messages} msgs)`).join('\n');
+            return sessions.map(s => {
+                const age = Math.round((Date.now() - new Date(s.updated || s.created).getTime()) / 60000);
+                const ago = age < 60 ? `${age}m` : age < 1440 ? `${Math.floor(age/60)}h` : `${Math.floor(age/1440)}d`;
+                return `${s.id}  ${s.name.padEnd(20)} ${s.messages} msgs · ${ago} ago`;
+            }).join('\n') + '\n\nType /resume <id> to resume.';
+        }
+        if (text.startsWith('/resume ')) {
+            const targetId = text.slice(8).trim();
+            const session = loadSession(targetId);
+            if (!session) return `Session '${targetId}' not found.`;
+            this.sessionId = session.id;
+            this.sessionName = session.name;
+            this.conversationMessages.length = 0;
+            for (const msg of session.messages) this.conversationMessages.push(msg);
+            if (session.usage) Object.assign(this.usage, session.usage);
+            return `✓ Resumed: ${session.name} (${session.messages.length} msgs)`;
+        }
+        if (text.startsWith('/delete ')) {
+            const targetId = text.slice(8).trim();
+            const deleted = deleteSession(targetId);
+            return deleted ? `✓ Deleted session ${targetId}` : `Session '${targetId}' not found.`;
         }
         if (text === '/shell') {
             return getAvailableShells().map(s => {
@@ -330,19 +374,22 @@ export async function startInkREPL(
         }
         if (text.startsWith('/shell ')) {
             setShellOverride(text.slice(7).trim());
-            cliContext.shell = getShellConfig().name;
-            return `Shell: ${getShellConfig().name}`;
+            this.cliContext.shell = getShellConfig().name;
+            return `✓ Shell: ${getShellConfig().name}`;
         }
-        if (text.startsWith('/')) return `Unknown command: ${text}. Type / for help.`;
+        return `Unknown command: ${text}\nType / to see available commands.`;
+    }
 
-        // ── AI message ──
+    // ── AI message ──
+    async handleAIMessage(text: string): Promise<string> {
+        const ui = this.ui;
         const {expanded} = expandFileRefs(text);
-        conversationMessages.push({role: 'user', content: expanded});
-        await autoCompact(conversationMessages);
+        this.conversationMessages.push({role: 'user', content: expanded});
+        await autoCompact(this.conversationMessages);
 
-        const activeModel = readAiConfig().model || model;
-        const activeKey = (readAiConfig().apiKey as string) || apiKey;
-        const activeProvider = resolveProvider(activeKey);
+        const activeModel = readAiConfig().model || this.model;
+        const activeKey = (readAiConfig().apiKey as string) || this.apiKey;
+        const activeProvider = this.resolveProvider(activeKey);
 
         let finalResponse = '';
 
@@ -350,7 +397,7 @@ export async function startInkREPL(
             let fullText = '';
 
             const result: BrainStreamResult | null = await fetchBrainStream(
-                loop === 0 ? expanded : conversationMessages[conversationMessages.length - 1].content as string,
+                loop === 0 ? expanded : this.conversationMessages[this.conversationMessages.length - 1].content as string,
                 {
                     onToken: (delta: string) => {
                         if (delta === '\x1b[RETRY]') {fullText = ''; ui?.setStreaming(''); return;}
@@ -361,8 +408,9 @@ export async function startInkREPL(
                             .replace(/\n{3,}/g, '\n\n').trim();
                         ui?.setStreaming(clean);
                     },
-                    conversationHistory: conversationMessages.slice(0, -1),
-                    provider: activeProvider, model: activeModel, apiKey: activeKey, cliContext,
+                    conversationHistory: this.conversationMessages.slice(0, -1),
+                    provider: activeProvider, model: activeModel, apiKey: activeKey,
+                    cliContext: this.cliContext,
                 },
             );
 
@@ -373,21 +421,20 @@ export async function startInkREPL(
             if (result.usage) {
                 const pt = result.usage.prompt_tokens || 0;
                 const ct = result.usage.completion_tokens || 0;
-                usage.promptTokens += pt; usage.completionTokens += ct;
-                usage.totalTokens += pt + ct; usage.requests++;
-                usage.cost += estimateCost(activeModel, pt, ct);
+                this.usage.promptTokens += pt; this.usage.completionTokens += ct;
+                this.usage.totalTokens += pt + ct; this.usage.requests++;
+                this.usage.cost += estimateCost(activeModel, pt, ct);
             }
 
             const {cleaned} = extractMemoryTags(stripCommandTags(result.code));
             const commands = extractCommands(result.code);
 
-            if (cleaned) conversationMessages.push({role: 'assistant', content: cleaned});
+            if (cleaned) this.conversationMessages.push({role: 'assistant', content: cleaned});
 
             if (commands.length === 0) {finalResponse = cleaned || fullText; break;}
 
             if (cleaned) ui?.addMessage(cleaned);
 
-            // Execute commands
             for (const cmd of commands) {
                 const preview = cmd.split('\n')[0].slice(0, 80);
                 ui?.addMessage(`$ ${preview}${cmd.includes('\n') ? ' ...' : ''}`, true);
@@ -400,38 +447,42 @@ export async function startInkREPL(
             }
 
             const summary = commands.map(cmd => `$ ${cmd}\n(executed)`).join('\n');
-            conversationMessages.push({role: 'user', content: `[Results]\n${summary}`});
+            this.conversationMessages.push({role: 'user', content: `[Results]\n${summary}`});
             ui?.setStreaming('');
             finalResponse = '';
         }
 
-        saveSession(sessionId, sessionName, conversationMessages, usage);
+        saveSession(this.sessionId, this.sessionName, this.conversationMessages, this.usage);
         return finalResponse;
     }
+}
 
-    // ── Render ──
-    const {waitUntilExit} = render(
-        <ChatApp onMessage={handleMessage} statusText={getStatusText()} />,
-    );
+// ── Entry ──
+interface InkReplOptions {autoAccept?: boolean; devMode?: boolean}
 
-    (global as any).__rpExit = () => {
-        if (conversationMessages.length > 1) saveSession(sessionId, sessionName, conversationMessages, usage);
-        process.exit(0);
-    };
+export async function startInkREPL(
+    initialPrompt: string | null,
+    resumeSessionId: string | null,
+    opts: InkReplOptions = {},
+): Promise<void> {
+    const engine = new ReplEngine(resumeSessionId, opts);
+    const {waitUntilExit} = render(<ChatApp engine={engine} />);
+
+    (global as any).__rpExit = () => engine.exit();
 
     if (initialPrompt) {
         await new Promise(r => setTimeout(r, 200));
-        const ui = (global as any).__rpUI;
-        ui?.addMessage(`❯ ${initialPrompt}`);
-        ui?.setLoading(true);
+        engine.ui?.addMessage(`❯ ${initialPrompt}`);
+        engine.ui?.setLoading(true);
         try {
-            const response = await handleMessage(initialPrompt);
-            if (response) ui?.addMessage(response);
+            const response = await engine.handleAIMessage(initialPrompt);
+            if (response) engine.ui?.addMessage(response);
         } finally {
-            ui?.setLoading(false);
+            engine.ui?.setLoading(false);
+            engine.updateStatus();
         }
     }
 
     await waitUntilExit();
-    saveSession(sessionId, sessionName, conversationMessages, usage);
+    engine.exit();
 }
