@@ -195,6 +195,15 @@ export async function fetchBrainStream(
                         doneData = parsed;
                     } else if (eventType === 'error') {
                         logVerbose('Brain stream error:', parsed.message);
+                        // Brain error — return what we have with error info
+                        return {
+                            code: fullText,
+                            sources: metadata?.sources || [],
+                            context: metadata?.context || {},
+                            validation: null,
+                            usage: doneData?.usage || null,
+                            error: parsed.message || 'AI model error',
+                        } as any;
                     }
                 } catch {
                     // Skip malformed JSON
