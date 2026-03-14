@@ -5,7 +5,8 @@
  * All logic is preserved verbatim; only TypeScript types and module
  * imports/exports have been added.
  */
-import { createInterface, Interface as ReadlineInterface } from 'node:readline';
+import { createInterface } from 'node:readline';
+import { collectInput, collectLine } from './input';
 import { readFileSync, existsSync, readdirSync, statSync, appendFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, platform } from 'node:os';
@@ -593,15 +594,6 @@ export async function startAiREPL(
         return [[], line];
     }
 
-    const rl: ReadlineInterface = createInterface({
-        input: process.stdin,
-        output: process.stdout,
-        prompt: color.cyan('\u276f '),
-        history,
-        historySize: 500,
-        completer,
-    } as any);
-
     function saveHistory(line: string): void {
         try {
             const histPath: string = join(getRobinPathHome(), 'ai-history');
@@ -611,20 +603,27 @@ export async function startAiREPL(
         }
     }
 
-    // If initial prompt was provided (rp ai "question"), simulate input
-    if (initialPrompt) {
-        setTimeout(() => rl.write(initialPrompt + '\n'), 50);
-    } else if (!resumeSessionId) {
-        log(color.dim('  Type a message, /help for commands, Tab to complete'));
-    }
+    let pendingInput: string | null = initialPrompt || null;
+    let isFirstPrompt = !resumeSessionId && !initialPrompt;
 
-    rl.prompt();
-
-    rl.on('line', async (line: string) => {
-        const trimmed: string = line.trim();
-        if (!trimmed) {
-            rl.prompt();
-            return;
+    while (true) {
+        let trimmed: string;
+        if (pendingInput !== null) {
+            trimmed = pendingInput.trim();
+            pendingInput = null;
+            if (trimmed) log(color.cyan('\u276f ') + trimmed);
+        } else {
+            const input = await collectInput({
+                prompt: color.cyan('\u276f '),
+                continuation: color.dim('\u00b7 '),
+                history,
+                completer,
+                hint: isFirstPrompt ? 'Type a message, /help for commands, Tab to complete' : '',
+            });
+            isFirstPrompt = false;
+            if (input === null) { exitWithSave(); break; }
+            trimmed = input.trim();
+            if (!trimmed) continue;
         }
 
         // Show command hints when user types just "/"
@@ -636,8 +635,7 @@ export async function startAiREPL(
                 }
             }
             log('');
-            rl.prompt();
-            return;
+            continue;
         }
 
         if (trimmed === 'exit' || trimmed === 'quit' || trimmed === '.exit') {
@@ -677,15 +675,13 @@ export async function startAiREPL(
             log(color.dim('  \u2500\u2500'));
             log('  exit           Exit AI mode');
             log('');
-            rl.prompt();
-            return;
+            continue;
         }
 
         if (trimmed === '/clear') {
             conversationMessages.length = 1; // Keep system prompt
             log(color.green('Conversation cleared.'));
-            rl.prompt();
-            return;
+            continue;
         }
 
         if (trimmed === '/model') {
@@ -706,9 +702,7 @@ export async function startAiREPL(
                 log(`  ${num}. ${m.name} ${color.dim(`\u2014 ${m.desc}`)}${cur}`);
             }
             log('');
-            const answer: string = await new Promise((resolve) => {
-                rl.question(color.dim('  Enter number (or press Enter to cancel): '), resolve);
-            });
+            const answer: string = await collectLine(color.dim('  Enter number (or Enter to cancel): '));
             const idx: number = parseInt(answer, 10) - 1;
             if (idx >= 0 && idx < models.length) {
                 config.model = models[idx].id;
@@ -718,8 +712,7 @@ export async function startAiREPL(
             } else {
                 log(`Current model: ${color.cyan(currentModel)}`);
             }
-            rl.prompt();
-            return;
+            continue;
         }
 
         if (trimmed.startsWith('/model ')) {
@@ -728,8 +721,7 @@ export async function startAiREPL(
             writeAiConfig(config);
             log(color.green('Model changed:') + ` ${color.cyan(newModel)}`);
             log(color.dim('(takes effect on next message)'));
-            rl.prompt();
-            return;
+            continue;
         }
 
         if (trimmed === '/tools') {
@@ -746,8 +738,7 @@ export async function startAiREPL(
             log(`  ${color.cyan('mkdir / rm / mv / cp')}  File operations`);
             log(`  ${color.cyan('robinpath <file.rp>')}    Run .rp scripts`);
             log('');
-            rl.prompt();
-            return;
+            continue;
         }
 
         if (trimmed === '/modules') {
@@ -767,8 +758,7 @@ export async function startAiREPL(
                 log('  Install with: ' + color.cyan('robinpath add @robinpath/<name>'));
             }
             log('');
-            rl.prompt();
-            return;
+            continue;
         }
 
         if (trimmed === '/context') {
@@ -788,8 +778,7 @@ export async function startAiREPL(
             log(`  Conversation:       ${msgCount} message${msgCount !== 1 ? 's' : ''}`);
             log(`  Brain:              ${AI_BRAIN_URL}`);
             log('');
-            rl.prompt();
-            return;
+            continue;
         }
 
         if (trimmed === '/compact') {
@@ -814,8 +803,7 @@ export async function startAiREPL(
             } else {
                 log(color.dim('Conversation is already short \u2014 nothing to compact.'));
             }
-            rl.prompt();
-            return;
+            continue;
         }
 
         // --- Memory commands ---
@@ -831,8 +819,7 @@ export async function startAiREPL(
                 log(color.dim(`  ${memory.facts.length} facts \u2014 loaded into every conversation`));
             }
             log('');
-            rl.prompt();
-            return;
+            continue;
         }
 
         if (trimmed.startsWith('/remember ')) {
@@ -846,8 +833,7 @@ export async function startAiREPL(
                     log(color.dim('Already remembered.'));
                 }
             }
-            rl.prompt();
-            return;
+            continue;
         }
 
         if (trimmed.startsWith('/forget ')) {
@@ -858,8 +844,7 @@ export async function startAiREPL(
             } else {
                 log(color.red('Invalid memory number. Use /memory to see the list.'));
             }
-            rl.prompt();
-            return;
+            continue;
         }
 
         // --- Session commands ---
@@ -869,8 +854,7 @@ export async function startAiREPL(
             saveSession(sessionId, sessionName, conversationMessages, usage);
             log(color.green(`Session saved: ${color.bold(sessionName)} (${sessionId})`));
             log(color.dim(`  ${conversationMessages.length - 1} messages, ${usage.totalTokens} tokens`));
-            rl.prompt();
-            return;
+            continue;
         }
 
         if (trimmed === '/sessions') {
@@ -895,8 +879,7 @@ export async function startAiREPL(
                 log(color.dim('  Resume with: /resume <id>'));
             }
             log('');
-            rl.prompt();
-            return;
+            continue;
         }
 
         if (trimmed === '/resume' || trimmed.startsWith('/resume ')) {
@@ -906,8 +889,7 @@ export async function startAiREPL(
                 const sessions = listSessions();
                 if (sessions.length === 0) {
                     log(color.dim('  No saved sessions.'));
-                    rl.prompt();
-                    return;
+                    continue;
                 }
                 log('');
                 for (let i = 0; i < sessions.length; i++) {
@@ -923,15 +905,12 @@ export async function startAiREPL(
                     log(`  ${color.cyan(String(i + 1))}. ${s.name}  ${color.dim(`${ago}, ${s.messages} msgs`)}`);
                 }
                 log('');
-                const answer: string = await new Promise((resolve) => {
-                    rl.question(color.dim('  Enter number (or press Enter to cancel): '), resolve);
-                });
+                const answer: string = await collectLine(color.dim('  Enter number (or Enter to cancel): '));
                 const idx: number = parseInt(answer, 10) - 1;
                 if (idx >= 0 && idx < sessions.length) {
                     targetId = sessions[idx].id;
                 } else {
-                    rl.prompt();
-                    return;
+                    continue;
                 }
             }
             const session = loadSession(targetId);
@@ -954,8 +933,7 @@ export async function startAiREPL(
                 log(color.green(`Resumed: ${color.bold(sessionName)}`));
                 log(color.dim(`  ${session.messages.length} messages restored`));
             }
-            rl.prompt();
-            return;
+            continue;
         }
 
         if (trimmed.startsWith('/delete ')) {
@@ -965,8 +943,7 @@ export async function startAiREPL(
             } else {
                 log(color.red(`Session '${targetId}' not found.`));
             }
-            rl.prompt();
-            return;
+            continue;
         }
 
         // --- Usage tracking ---
@@ -984,8 +961,7 @@ export async function startAiREPL(
                 log(`  Est. cost:         ${color.green('$0.00 (free tier)')}`);
             }
             log('');
-            rl.prompt();
-            return;
+            continue;
         }
 
         // --- Scan project files ---
@@ -1089,8 +1065,7 @@ export async function startAiREPL(
                 spinner.stop();
                 log(color.red(`  Scan error: ${err.message}`));
             }
-            rl.prompt();
-            return;
+            continue;
         }
 
         if (trimmed === '/auto' || trimmed.startsWith('/auto ')) {
@@ -1107,8 +1082,7 @@ export async function startAiREPL(
             if (autoAccept) {
                 log(color.dim('  Commands run automatically (dangerous commands still confirm)'));
             }
-            rl.prompt();
-            return;
+            continue;
         }
 
         if (trimmed === '/shell' || trimmed.startsWith('/shell ')) {
@@ -1131,8 +1105,7 @@ export async function startAiREPL(
                 log('');
                 log(color.dim('  Switch: /shell <name>'));
             }
-            rl.prompt();
-            return;
+            continue;
         }
 
         saveHistory(trimmed);
@@ -1324,7 +1297,6 @@ export async function startAiREPL(
 
                 // Execute each shell command with permission check
                 const cmdResults: CommandResult[] = [];
-                rl.pause();
                 for (let ci = 0; ci < commands.length; ci++) {
                     let cmd: string = commands[ci];
 
@@ -1361,17 +1333,9 @@ export async function startAiREPL(
 
                     if (decision === 'edit') {
                         // Let user edit the command
-                        const editRl: ReadlineInterface = createInterface({
-                            input: process.stdin,
-                            output: process.stdout,
-                        });
-                        cmd = await new Promise<string>((resolve) => {
-                            editRl.question(color.cyan('  Edit: '), (answer: string) => {
-                                editRl.close();
-                                resolve(answer.trim() || cmd);
-                            });
-                            editRl.write(cmd);
-                        });
+                        log(color.dim(`  Current: ${cmd}`));
+                        const edited = await collectLine(color.cyan('  Edit: '));
+                        cmd = edited.trim() || cmd;
                         // Re-confirm if edited command is dangerous
                         if (isDangerousCommand(cmd)) {
                             const recheck: ConfirmResult = await confirmCommand(cmd, false);
@@ -1439,8 +1403,6 @@ export async function startAiREPL(
                         exitCode: result.exitCode,
                     });
                 }
-                rl.resume();
-
                 // Feed command results back for next iteration
                 const resultSummary: string = cmdResults
                     .map((r: CommandResult) => {
@@ -1470,8 +1432,7 @@ export async function startAiREPL(
         }
 
         log('');
-        rl.prompt();
-    });
+    }
 
     function exitWithSave(): void {
         // Auto-save session if there are messages beyond system prompt
@@ -1482,11 +1443,6 @@ export async function startAiREPL(
         log(color.dim('Goodbye!'));
         process.exit(0);
     }
-
-    rl.on('close', () => {
-        log('');
-        exitWithSave();
-    });
 
     process.on('SIGINT', () => {
         log('');
