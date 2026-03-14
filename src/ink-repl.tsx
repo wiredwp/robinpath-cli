@@ -1,26 +1,28 @@
 /**
- * Ink-based AI REPL — renders React terminal UI.
- * Replaces the old raw-mode collectInput() loop.
+ * Ink-based AI REPL — uses React for input, stdout for output.
+ *
+ * Pattern: render Ink for input → unmount → process with stdout → re-render.
+ * This avoids the Ink/stdout conflict that causes garbled rendering.
  */
-import React from 'react';
-import { render } from 'ink';
-import { App } from './ui/App';
-import { color, log, getShellConfig, getRobinPathHome, CLI_VERSION, setFlags } from './utils';
-import { readAiConfig, AI_BRAIN_URL } from './config';
+import React, { useState } from 'react';
+import { render, Box, Text, useInput, useApp } from 'ink';
+import { color, log, getShellConfig, getAvailableShells, setShellOverride, getRobinPathHome, CLI_VERSION, setFlags, createSpinner, logVerbose } from './utils';
+import { readAiConfig, writeAiConfig, AI_BRAIN_URL } from './config';
 import type { AiConfig } from './config';
-import { AI_MODELS } from './models';
-import { createUsageTracker, estimateCost } from './models';
-import type { UsageTracker } from './models';
+import { AI_MODELS, createUsageTracker, estimateCost } from './models';
+import type { UsageTracker, ModelInfo } from './models';
 import {
     saveSession, loadSession, listSessions, buildMemoryContext,
-    extractMemoryTags, addMemoryFact, autoCompact,
+    extractMemoryTags, addMemoryFact, removeMemoryFact, loadMemory,
+    autoCompact, estimateTokens, saveSession as saveSess, deleteSession,
 } from './sessions';
 import type { Message } from './sessions';
 import { expandFileRefs } from './file-refs';
 import { fetchBrainStream } from './brain';
 import type { BrainStreamResult } from './brain';
 import { executeShellCommand, extractCommands, stripCommandTags, detectFileWrite, showFileDiff } from './shell';
-import { isDangerousCommand } from './ui';
+import { isDangerousCommand, confirmCommand } from './ui';
+import type { ConfirmResult } from './ui';
 import { readModulesManifest } from './commands-core';
 import { getNativeModules } from './runtime';
 import { homedir, platform } from 'node:os';
@@ -28,10 +30,81 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, existsSync, readdirSync, statSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-interface InkReplOptions {
-    autoAccept?: boolean;
-    devMode?: boolean;
+// ── Ink Input Component ──
+function InputPrompt({ placeholder, onSubmit, onExit }: {
+    placeholder: string;
+    onSubmit: (v: string) => void;
+    onExit: () => void;
+}) {
+    const [value, setValue] = useState('');
+    const { exit } = useApp();
+
+    useInput((input, key) => {
+        if (key.return) {
+            if (value.endsWith('\\')) { setValue(p => p.slice(0, -1) + '\n'); return; }
+            const text = value.trim();
+            if (text) { exit(); onSubmit(text); }
+            return;
+        }
+        if (input === '\n') { setValue(p => p + '\n'); return; }
+        if (key.escape) { setValue(''); return; }
+        if (input === '\x03') { if (!value) { exit(); onExit(); } else setValue(''); return; }
+        if (key.backspace || key.delete) { setValue(p => p.slice(0, -1)); return; }
+        if (key.tab) return;
+        if (input === '\x15') { setValue(''); return; }
+        if (input === '\x17') { setValue(p => p.replace(/\S+\s*$/, '')); return; }
+        if (input && !key.ctrl && !key.meta) setValue(p => p + input);
+    });
+
+    const lines = value.split('\n');
+    const empty = value === '';
+
+    return (
+        <Box flexDirection="column">
+            <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1} marginX={1}>
+                {empty ? (
+                    <Text dimColor>{placeholder}</Text>
+                ) : (
+                    lines.map((line, i) => (
+                        <Text key={i}>{line}{i === lines.length - 1 ? <Text color="cyan">█</Text> : null}</Text>
+                    ))
+                )}
+            </Box>
+            <Box marginX={2}>
+                <Text dimColor>enter send · \ newline · esc clear · / commands</Text>
+            </Box>
+        </Box>
+    );
 }
+
+/** Show Ink input and wait for submission. Returns text or null (exit). */
+function collectInkInput(placeholder: string): Promise<string | null> {
+    if (!process.stdin.isTTY) {
+        return Promise.resolve(null);
+    }
+    return new Promise<string | null>((resolve) => {
+        let resolved = false;
+        const { waitUntilExit } = render(
+            <InputPrompt
+                placeholder={placeholder}
+                onSubmit={(v) => { if (!resolved) { resolved = true; resolve(v); } }}
+                onExit={() => { if (!resolved) { resolved = true; resolve(null); } }}
+            />,
+        );
+        waitUntilExit().then(() => { if (!resolved) { resolved = true; resolve(null); } });
+    });
+}
+
+// ── ASCII Logo ──
+function printBanner(modelShort: string, modeStr: string, cwdShort: string, shellName: string) {
+    log('');
+    log(`  ${color.cyan('◆')} ${color.bold('RobinPath')} ${color.dim('v' + CLI_VERSION)}`);
+    log(color.dim(`  ${modelShort} · ${shellName} · ${modeStr}`));
+    log('');
+}
+
+// ── Main REPL ──
+interface InkReplOptions { autoAccept?: boolean; devMode?: boolean; }
 
 export async function startInkREPL(
     initialPrompt: string | null,
@@ -59,10 +132,8 @@ export async function startInkREPL(
         : model.includes('/') ? model.split('/').pop()! : model;
 
     const cliContext: Record<string, unknown> = {
-        platform: platform(),
-        shell: getShellConfig().name,
-        cwd: process.cwd(),
-        cliVersion: CLI_VERSION,
+        platform: platform(), shell: getShellConfig().name,
+        cwd: process.cwd(), cliVersion: CLI_VERSION,
         nativeModules: getNativeModules().map((m: any) => m.name),
         installedModules: Object.keys(readModulesManifest()),
     };
@@ -71,15 +142,14 @@ export async function startInkREPL(
     let sessionName = `session-${new Date().toISOString().slice(0, 10)}`;
     const usage: UsageTracker = createUsageTracker();
     const conversationMessages: Message[] = [];
+    const history: string[] = [];
 
-    // Memory context
     const memContext = buildMemoryContext();
     if (memContext.trim()) {
         conversationMessages.push({ role: 'user', content: `[Context] ${memContext.trim()}` });
         conversationMessages.push({ role: 'assistant', content: 'Got it, I have your preferences loaded.' });
     }
 
-    // Resume session
     if (resumeSessionId) {
         const session = loadSession(resumeSessionId);
         if (session) {
@@ -91,183 +161,281 @@ export async function startInkREPL(
                 usage.totalTokens = session.usage.totalTokens || 0;
                 usage.requests = session.usage.requests || 0;
             }
+            log(color.green(`  Resumed: ${sessionName} (${session.messages.length} msgs)`));
         }
     }
 
-    // Auto-scan project
-    let projectInfo = '';
+    const modeStr = devMode ? 'dev' : autoAccept ? 'auto' : 'confirm';
+    const cwdShort = process.cwd().replace(homedir(), '~');
+    printBanner(modelShort, modeStr, cwdShort, getShellConfig().name);
+
+    // Auto-scan
     try {
-        const cwd = process.cwd();
-        const entries = readdirSync(cwd).filter(e => !e.startsWith('.'));
+        const entries = readdirSync(process.cwd()).filter(e => !e.startsWith('.'));
         let rpCount = 0, dirCount = 0;
-        for (const entry of entries.slice(0, 100)) {
+        for (const e of entries.slice(0, 100)) {
             try {
-                const s = statSync(join(cwd, entry));
-                if (s.isDirectory() && !['node_modules', '__pycache__', 'dist', 'build'].includes(entry)) dirCount++;
-                else if (entry.endsWith('.rp') || entry.endsWith('.robin')) rpCount++;
+                const s = statSync(join(process.cwd(), e));
+                if (s.isDirectory() && !['node_modules','__pycache__','dist','build'].includes(e)) dirCount++;
+                else if (e.endsWith('.rp') || e.endsWith('.robin')) rpCount++;
             } catch {}
         }
-        if (rpCount > 0 || dirCount > 0) {
-            projectInfo = `${rpCount} .rp file(s), ${dirCount} dir(s)`;
-        }
+        if (rpCount > 0 || dirCount > 0) log(color.dim(`  ${rpCount} .rp file(s), ${dirCount} dir(s)`));
     } catch {}
 
-    const modeStr = devMode ? 'dev (auto+verbose)' : autoAccept ? 'auto' : 'confirm';
-    const cwdDisplay = process.cwd().replace(homedir(), '~');
-    const cwdShort = cwdDisplay.length > 40 ? '...' + cwdDisplay.slice(-37) : cwdDisplay;
+    let isFirst = !resumeSessionId && !initialPrompt;
 
-    // The message handler — called when user submits text from the InputBox
-    async function handleMessage(text: string): Promise<string | null> {
-        const ui = (global as any).__rpUI;
+    // ── REPL Loop ──
+    while (true) {
+        let trimmed: string;
 
-        // Slash commands
-        if (text === '/help') {
-            return 'Commands: /model, /shell, /auto, /clear, /save, /sessions, /resume, /memory, /usage, /scan, /help, exit';
+        if (initialPrompt) {
+            trimmed = initialPrompt.trim();
+            initialPrompt = null;
+            log(color.cyan('  ❯ ') + trimmed);
+        } else {
+            const input = await collectInkInput(
+                isFirst ? 'What do you want to automate?' : 'Ask anything...'
+            );
+            isFirst = false;
+            if (input === null) { exitWithSave(); break; }
+            trimmed = input.trim();
+            if (!trimmed) continue;
+            // Echo the input
+            log(color.cyan('  ❯ ') + color.bold(trimmed));
         }
-        if (text === 'exit' || text === 'quit') {
-            if (conversationMessages.length > 1) {
-                saveSession(sessionId, sessionName, conversationMessages, usage);
+
+        // ── Slash commands (handled with stdout, no Ink) ──
+        if (trimmed === '/') {
+            log('');
+            for (const [cmd, desc] of Object.entries(SLASH_CMDS)) {
+                log(`  ${color.cyan(cmd.padEnd(14))} ${color.dim(desc)}`);
             }
-            process.exit(0);
+            log('');
+            continue;
         }
-        if (text === '/model') {
+        if (trimmed === 'exit' || trimmed === 'quit') { exitWithSave(); break; }
+        if (trimmed === '/help') {
+            log('');
+            for (const [cmd, desc] of Object.entries(SLASH_CMDS)) {
+                log(`  ${color.cyan(cmd.padEnd(14))} ${color.dim(desc)}`);
+            }
+            log('');
+            continue;
+        }
+        if (trimmed === '/clear') { conversationMessages.length = 0; log(color.green('  Cleared.')); continue; }
+        if (trimmed === '/usage') {
+            const cost = usage.cost > 0 ? `$${usage.cost.toFixed(4)}` : '$0.00 (free)';
+            log(`  ${usage.totalTokens.toLocaleString()} tokens · ${usage.requests} requests · ${cost}`);
+            continue;
+        }
+        if (trimmed === '/model') {
             const hasKey = !!readAiConfig().apiKey;
             const models = hasKey ? AI_MODELS : AI_MODELS.filter(m => !m.requiresKey);
-            return models.map((m, i) => `${i + 1}. ${m.name} — ${m.desc}`).join('\n');
+            const cur = readAiConfig().model || model;
+            log('');
+            let lastGroup = '';
+            for (let i = 0; i < models.length; i++) {
+                const m = models[i];
+                if (m.group !== lastGroup) { log(color.dim(`  ── ${m.group} ──`)); lastGroup = m.group; }
+                const mark = m.id === cur ? color.green(' ✓') : '';
+                log(`  ${color.cyan(String(i+1))}. ${m.name} ${color.dim('— ' + m.desc)}${mark}`);
+            }
+            log('');
+            // Use collectInkInput for model selection
+            const answer = await collectInkInput('Enter number...');
+            if (answer) {
+                const idx = parseInt(answer, 10) - 1;
+                if (idx >= 0 && idx < models.length) {
+                    config.model = models[idx].id;
+                    writeAiConfig(config);
+                    log(color.green(`  Model: ${models[idx].id}`));
+                }
+            }
+            continue;
         }
-        if (text === '/usage') {
-            const cost = usage.cost > 0 ? `$${usage.cost.toFixed(4)}` : '$0.00 (free)';
-            return `Tokens: ${usage.totalTokens.toLocaleString()} | Requests: ${usage.requests} | Cost: ${cost}`;
+        if (trimmed === '/auto' || trimmed.startsWith('/auto ')) {
+            const arg = trimmed.slice(5).trim().toLowerCase();
+            if (arg === 'on') autoAccept = true;
+            else if (arg === 'off') autoAccept = false;
+            else autoAccept = !autoAccept;
+            log(`  Auto-accept: ${autoAccept ? color.green('ON') : color.yellow('OFF')}`);
+            continue;
         }
-        if (text === '/clear') {
-            conversationMessages.length = 0;
-            return 'Conversation cleared.';
+        if (trimmed === '/memory') {
+            const mem = loadMemory();
+            if (mem.facts.length === 0) log(color.dim('  No memories.'));
+            else mem.facts.forEach((f: string, i: number) => log(`  ${i+1}. ${f}`));
+            continue;
         }
-        if (text.startsWith('/')) {
-            return `Unknown command: ${text}. Type /help for commands.`;
+        if (trimmed.startsWith('/remember ')) { addMemoryFact(trimmed.slice(10).trim()); log(color.green('  Remembered.')); continue; }
+        if (trimmed.startsWith('/forget ')) {
+            removeMemoryFact(parseInt(trimmed.slice(8).trim(), 10) - 1);
+            log(color.green('  Forgot.')); continue;
         }
+        if (trimmed === '/save' || trimmed.startsWith('/save ')) {
+            if (trimmed.length > 5) sessionName = trimmed.slice(5).trim();
+            saveSession(sessionId, sessionName, conversationMessages, usage);
+            log(color.green(`  Saved: ${sessionName}`)); continue;
+        }
+        if (trimmed === '/sessions') {
+            const sessions = listSessions();
+            if (sessions.length === 0) log(color.dim('  No sessions.'));
+            else sessions.forEach(s => log(`  ${color.cyan(s.id)} ${s.name} ${color.dim(`${s.messages} msgs`)}`));
+            continue;
+        }
+        if (trimmed === '/shell') {
+            const shells = getAvailableShells();
+            shells.forEach(s => {
+                const mark = s.current ? color.green(' ✓') : s.available ? '' : color.dim(' (not found)');
+                log(`  ${s.available ? color.cyan(s.name) : color.dim(s.name)}${mark}`);
+            });
+            continue;
+        }
+        if (trimmed.startsWith('/shell ')) {
+            setShellOverride(trimmed.slice(7).trim());
+            cliContext.shell = getShellConfig().name;
+            log(`  Shell: ${color.cyan(getShellConfig().name)}`);
+            continue;
+        }
+        if (trimmed.startsWith('/')) { log(color.dim(`  Unknown: ${trimmed}. Type / for commands.`)); continue; }
 
-        // Expand @/ file references
-        const { expanded } = expandFileRefs(text);
-
-        // Add to conversation
+        // ── AI message ──
+        const { expanded } = expandFileRefs(trimmed);
         conversationMessages.push({ role: 'user', content: expanded });
-
-        // Auto-compact
         await autoCompact(conversationMessages);
 
-        // Stream from brain
         const activeModel = readAiConfig().model || model;
         const activeKey = (readAiConfig().apiKey as string) || apiKey;
         const activeProvider = resolveProvider(activeKey);
 
-        let fullResponse = '';
+        let spinner = createSpinner('Thinking');
 
-        for (let loopCount = 0; loopCount < 15; loopCount++) {
-            if (ui?.setSpinnerLabel) ui.setSpinnerLabel(loopCount === 0 ? 'Thinking...' : 'Processing...');
+        try {
+            for (let loop = 0; loop < 15; loop++) {
+                let pending = '';
+                let insideMemory = false;
+                let insideCmd = false;
 
-            const brainResult: BrainStreamResult | null = await fetchBrainStream(
-                loopCount === 0 ? expanded : (conversationMessages[conversationMessages.length - 1].content as string),
-                {
-                    onToken: (delta: string) => {
-                        if (delta === '\x1b[RETRY]') {
-                            fullResponse = '';
-                            if (ui?.setStreamText) ui.setStreamText('');
-                            return;
-                        }
-                        // Strip tags from display
-                        fullResponse += delta;
-                        // Simple tag stripping for display
-                        const clean = fullResponse
-                            .replace(/<memory>[\s\S]*?<\/memory>/g, '')
-                            .replace(/<cmd>[\s\S]*?<\/cmd>/g, '')
-                            .replace(/\n{3,}/g, '\n\n');
-                        if (ui?.setStreamText) ui.setStreamText(clean);
+                const result: BrainStreamResult | null = await fetchBrainStream(
+                    loop === 0 ? expanded : conversationMessages[conversationMessages.length - 1].content as string,
+                    {
+                        onToken: (delta: string) => {
+                            spinner.stop();
+                            if (delta === '\x1b[RETRY]') { pending = ''; insideMemory = false; insideCmd = false; spinner = createSpinner('Retrying'); return; }
+                            pending += delta;
+                            // Flush visible text, hide <memory> and <cmd> tags
+                            while (true) {
+                                if (insideMemory) {
+                                    const ci = pending.indexOf('</memory>');
+                                    if (ci === -1) break;
+                                    const fact = pending.slice(0, ci).trim();
+                                    if (fact.length > 3 && fact.length < 300) addMemoryFact(fact);
+                                    pending = pending.slice(ci + 9);
+                                    insideMemory = false;
+                                    continue;
+                                }
+                                if (insideCmd) {
+                                    const ci = pending.indexOf('</cmd>');
+                                    if (ci === -1) break;
+                                    pending = pending.slice(ci + 6);
+                                    insideCmd = false;
+                                    continue;
+                                }
+                                const mi = pending.indexOf('<memory>');
+                                const ci = pending.indexOf('<cmd>');
+                                if (mi === -1 && ci === -1) {
+                                    const lt = pending.lastIndexOf('<');
+                                    if (lt !== -1 && lt > pending.length - 9) {
+                                        if (lt > 0) { process.stdout.write(pending.slice(0, lt).replace(/\n{3,}/g, '\n\n')); pending = pending.slice(lt); }
+                                    } else {
+                                        process.stdout.write(pending.replace(/\n{3,}/g, '\n\n'));
+                                        pending = '';
+                                    }
+                                    break;
+                                }
+                                const first = mi === -1 ? ci : ci === -1 ? mi : Math.min(mi, ci);
+                                if (first > 0) process.stdout.write(pending.slice(0, first).replace(/\n{3,}/g, '\n\n'));
+                                if (first === mi) { pending = pending.slice(first + 8); insideMemory = true; }
+                                else { pending = pending.slice(first + 5); insideCmd = true; }
+                            }
+                        },
+                        conversationHistory: conversationMessages.slice(0, -1),
+                        provider: activeProvider, model: activeModel, apiKey: activeKey, cliContext,
                     },
-                    conversationHistory: conversationMessages.slice(0, -1),
-                    provider: activeProvider,
-                    model: activeModel,
-                    apiKey: activeKey,
-                    cliContext,
-                },
-            );
+                );
 
-            if (!brainResult || !brainResult.code) {
-                return fullResponse || 'Brain returned no response. Check your connection or API key.';
+                if (pending && !insideMemory && !insideCmd) process.stdout.write(pending);
+
+                if (!result || !result.code) { spinner.stop(); log(color.red('\n  No response.')); break; }
+
+                if (result.usage) {
+                    const pt = result.usage.prompt_tokens || 0;
+                    const ct = result.usage.completion_tokens || 0;
+                    usage.promptTokens += pt; usage.completionTokens += ct;
+                    usage.totalTokens += pt + ct; usage.requests++;
+                    usage.cost += estimateCost(activeModel, pt, ct);
+                }
+
+                const commands = extractCommands(result.code);
+                const { cleaned } = extractMemoryTags(stripCommandTags(result.code));
+                process.stdout.write('\n');
+                if (cleaned) conversationMessages.push({ role: 'assistant', content: cleaned });
+                if (commands.length === 0) break;
+
+                // Execute commands
+                const cmdResults: any[] = [];
+                for (const cmd of commands) {
+                    const decision: ConfirmResult = await confirmCommand(cmd, autoAccept);
+                    if (decision === 'no') { cmdResults.push({ command: cmd, stdout: '', stderr: '(skipped)', exitCode: -1 }); continue; }
+                    if (decision === 'auto') { autoAccept = true; log(color.green('  Auto-accept ON')); }
+                    const r = await executeShellCommand(cmd);
+                    if (r.exitCode !== 0) log(color.red(`  exit ${r.exitCode}: ${(r.stderr || '').slice(0, 80)}`));
+                    cmdResults.push({ command: cmd, stdout: r.stdout || '', stderr: r.stderr || '', exitCode: r.exitCode });
+                }
+
+                const summary = cmdResults.map((r: any) => {
+                    let o = `$ ${r.command}\n`;
+                    if (r.exitCode === 0) o += r.stdout || '(no output)';
+                    else { o += `Exit: ${r.exitCode}\n`; if (r.stderr) o += r.stderr; }
+                    return o;
+                }).join('\n\n');
+                conversationMessages.push({ role: 'user', content: `[Command results]\n${summary}` });
+                spinner = createSpinner('Processing');
             }
-
-            // Track usage
-            if (brainResult.usage) {
-                const pt = brainResult.usage.prompt_tokens || 0;
-                const ct = brainResult.usage.completion_tokens || 0;
-                usage.promptTokens += pt;
-                usage.completionTokens += ct;
-                usage.totalTokens += pt + ct;
-                usage.requests++;
-                usage.cost += estimateCost(activeModel, pt, ct);
-                // Update status bar
-                if (ui?.setTokens) ui.setTokens(usage.totalTokens);
-                if (ui?.setCost) ui.setCost(usage.cost);
-            }
-
-            const commands = extractCommands(brainResult.code);
-            const { cleaned } = extractMemoryTags(stripCommandTags(brainResult.code));
-
-            if (cleaned) {
-                conversationMessages.push({ role: 'assistant', content: cleaned });
-                fullResponse = cleaned;
-            }
-
-            // No commands — done
-            if (commands.length === 0) break;
-
-            // Execute commands
-            const cmdResults: { command: string; stdout: string; stderr: string; exitCode: number }[] = [];
-            for (const cmd of commands) {
-                // Auto-accept or confirm (simplified for Ink — always auto in first pass)
-                const result = await executeShellCommand(cmd);
-                cmdResults.push({
-                    command: cmd,
-                    stdout: result.stdout || '',
-                    stderr: result.stderr || '',
-                    exitCode: result.exitCode,
-                });
-            }
-
-            const summary = cmdResults.map(r => {
-                let out = `$ ${r.command}\n`;
-                if (r.exitCode === 0) out += r.stdout || '(no output)';
-                else { out += `Exit code: ${r.exitCode}\n`; if (r.stderr) out += `stderr: ${r.stderr}`; }
-                return out;
-            }).join('\n\n');
-
-            conversationMessages.push({ role: 'user', content: `[Command results]\n${summary}` });
-            fullResponse = '';
-            if (ui?.setStreamText) ui.setStreamText('');
+        } catch (err: any) {
+            spinner.stop();
+            log(color.red(`  Error: ${err.message}`));
         }
 
-        // Save session
-        saveSession(sessionId, sessionName, conversationMessages, usage);
-
-        return null; // Response already added via streaming
+        log('');
+        // Show cost after each message
+        if (usage.cost > 0) log(color.dim(`  $${usage.cost.toFixed(4)} · ${usage.totalTokens.toLocaleString()} tokens`));
     }
 
-    // Render the Ink app
-    const { waitUntilExit } = render(
-        <App
-            version={CLI_VERSION}
-            model={modelShort}
-            mode={modeStr}
-            dir={cwdShort}
-            shell={getShellConfig().name}
-            onSubmit={handleMessage}
-        />,
-    );
-
-    await waitUntilExit();
-
-    // Auto-save on exit
-    if (conversationMessages.length > 1) {
-        saveSession(sessionId, sessionName, conversationMessages, usage);
+    function exitWithSave() {
+        if (conversationMessages.length > 1) {
+            saveSession(sessionId, sessionName, conversationMessages, usage);
+            log(color.dim(`  Session saved: ${sessionId}`));
+        }
+        log(color.dim('  Goodbye!'));
+        process.exit(0);
     }
+
+    process.on('SIGINT', () => { log(''); exitWithSave(); });
 }
+
+const SLASH_CMDS: Record<string, string> = {
+    '/help': 'Show commands',
+    '/model': 'Switch AI model',
+    '/shell': 'Switch shell',
+    '/auto': 'Toggle auto-accept',
+    '/clear': 'Clear conversation',
+    '/save': 'Save session',
+    '/sessions': 'List sessions',
+    '/memory': 'Show memory',
+    '/remember': 'Save a fact',
+    '/forget': 'Remove a memory',
+    '/usage': 'Token usage & cost',
+    'exit': 'Quit',
+};
