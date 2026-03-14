@@ -5,7 +5,7 @@
  * Input area only renders when AI is NOT streaming — prevents garbled output.
  */
 import React, {useState, useCallback, useEffect, useMemo} from 'react';
-import {render, Box, Text, Static, useInput, useApp} from 'ink';
+import {render, Box, Text, useInput, useApp} from 'ink';
 import InkSpinner from 'ink-spinner';
 import {Markdown} from './ui/Markdown';
 import {getShellConfig, getAvailableShells, setShellOverride, getRobinPathHome, CLI_VERSION, setFlags, logVerbose} from './utils';
@@ -300,6 +300,7 @@ function ChatApp({engine}: {engine: ReplEngine}) {
         engine.ui = {
             setStreaming, setLoading, setStatus, setShowModelPicker,
             addMessage: (text: string, dim?: boolean) => setMessages(p => [...p, {id: ++nextId, text, dim}]),
+            clearMessages: () => setMessages([]),
         };
         engine.updateStatus();
     }, []);
@@ -309,7 +310,7 @@ function ChatApp({engine}: {engine: ReplEngine}) {
         // Slash commands — show result inline without user message echo
         if (text.startsWith('/')) {
             const result = await engine.handleSlashCommand(text);
-            if (result) setMessages(p => [...p, {id: ++nextId, text: result, dim: true}]);
+            if (result && result.trim()) setMessages(p => [...p, {id: ++nextId, text: result, dim: true}]);
             engine.updateStatus();
             return;
         }
@@ -372,35 +373,34 @@ function ChatApp({engine}: {engine: ReplEngine}) {
                 </Box>
             ) : null}
 
-            <Static items={messages}>
-                {msg => (
-                    <Box key={msg.id} paddingX={1} marginBottom={msg.text.startsWith('❯') ? 0 : 1} flexDirection="column">
-                        {msg.text.startsWith('❯') ? (
-                            <Text><Text color="cyan" bold>❯</Text><Text bold>{msg.text.slice(1)}</Text></Text>
-                        ) : msg.text.includes('⎿') && msg.text.includes('Write') ? (
-                            <Box flexDirection="column">
-                                <Text dimColor>{msg.text.split('\n')[0]}</Text>
-                                {msg.text.split('\n').slice(1).map((line, li) => (
-                                    <Text key={li} backgroundColor={line.includes('+') ? 'green' : undefined} color={line.includes('+') ? 'white' : undefined} dimColor={!line.includes('+')}>
-                                        {line}
-                                    </Text>
-                                ))}
-                            </Box>
-                        ) : msg.text.includes('⎿') && msg.text.includes('✗') ? (
-                            <Box flexDirection="column">
-                                <Text dimColor>{msg.text.split('\n')[0]}</Text>
-                                <Text backgroundColor="red" color="white">{msg.text.split('\n').slice(1).join('\n')}</Text>
-                            </Box>
-                        ) : msg.text.includes('⎿') ? (
-                            <Text dimColor wrap="wrap">{msg.text}</Text>
-                        ) : msg.dim ? (
-                            <Text dimColor wrap="wrap">{msg.text}</Text>
-                        ) : (
-                            <Markdown>{msg.text}</Markdown>
-                        )}
-                    </Box>
-                )}
-            </Static>
+            {/* Messages — regular Box so /clear actually clears the screen */}
+            {messages.map(msg => (
+                <Box key={msg.id} paddingX={1} marginBottom={msg.text.startsWith('❯') ? 0 : 1} flexDirection="column">
+                    {msg.text.startsWith('❯') ? (
+                        <Text><Text color="cyan" bold>❯</Text><Text bold>{msg.text.slice(1)}</Text></Text>
+                    ) : msg.text.includes('⎿') && msg.text.includes('Write') ? (
+                        <Box flexDirection="column">
+                            <Text dimColor>{msg.text.split('\n')[0]}</Text>
+                            {msg.text.split('\n').slice(1).map((line, li) => (
+                                <Text key={li} backgroundColor={line.includes('+') ? 'green' : undefined} color={line.includes('+') ? 'white' : undefined} dimColor={!line.includes('+')}>
+                                    {line}
+                                </Text>
+                            ))}
+                        </Box>
+                    ) : msg.text.includes('⎿') && msg.text.includes('✗') ? (
+                        <Box flexDirection="column">
+                            <Text dimColor>{msg.text.split('\n')[0]}</Text>
+                            <Text backgroundColor="red" color="white">{msg.text.split('\n').slice(1).join('\n')}</Text>
+                        </Box>
+                    ) : msg.text.includes('⎿') ? (
+                        <Text dimColor wrap="wrap">{msg.text}</Text>
+                    ) : msg.dim ? (
+                        <Text dimColor wrap="wrap">{msg.text}</Text>
+                    ) : (
+                        <Markdown>{msg.text}</Markdown>
+                    )}
+                </Box>
+            ))}
 
             {showModelPicker ? (
                 <ModelSelector
@@ -508,7 +508,7 @@ class ReplEngine {
         if (text === '/' || text === '/help') {
             return Object.entries(COMMANDS).map(([cmd, desc]) => `${cmd.padEnd(14)} ${desc}`).join('\n');
         }
-        if (text === '/clear') {this.conversationMessages.length = 0; return '✓ Conversation cleared.';}
+        if (text === '/clear') {this.conversationMessages.length = 0; this.ui?.clearMessages(); return '';}
         if (text === '/compact') {
             if (this.conversationMessages.length > 12) {
                 this.conversationMessages.splice(1, this.conversationMessages.length - 11);
