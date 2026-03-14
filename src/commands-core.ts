@@ -494,9 +494,8 @@ export async function loadInstalledModules(rp: any): Promise<void> {
             if (FLAG_VERBOSE) logVerbose(`Loaded module: ${packageName}@${info.version}`);
         } catch (err: unknown) {
             // Never fatal — warn and continue
-            console.error(
-                color.yellow('Warning:') + ` Failed to load module ${packageName}: ${(err as Error).message}`,
-            );
+            // Only show in verbose mode — don't clutter normal output
+            logVerbose(`Failed to load module ${packageName}: ${(err as Error).message}`);
         }
     }
 }

@@ -363,6 +363,8 @@ function ChatApp({engine}: {engine: ReplEngine}) {
             const elapsed = Date.now() - startTime;
             const timeStr = elapsed < 1000 ? `${elapsed}ms` : elapsed < 60000 ? `${(elapsed/1000).toFixed(1)}s` : `${Math.floor(elapsed/60000)}m ${Math.round((elapsed%60000)/1000)}s`;
             setResponseTime(timeStr);
+            // Terminal bell for long responses (>10s) — notifies user if they switched windows
+            if (elapsed > 10000) process.stdout.write('\x07');
             engine.updateStatus();
         }
     }, [engine]);

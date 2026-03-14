@@ -72,16 +72,62 @@ function renderInlineMarkdown(line: string): React.ReactNode[] {
     return parts;
 }
 
+function renderTable(tableLines: string[]): React.ReactNode {
+    const rows = tableLines
+        .filter(l => !l.match(/^\s*\|[-:\s|]+\|\s*$/)) // skip separator row
+        .map(l => l.split('|').slice(1, -1).map(cell => cell.trim()));
+
+    if (rows.length === 0) return null;
+
+    // Calculate column widths
+    const colCount = rows[0].length;
+    const widths = Array(colCount).fill(0);
+    for (const row of rows) {
+        for (let c = 0; c < Math.min(row.length, colCount); c++) {
+            widths[c] = Math.max(widths[c], row[c].length);
+        }
+    }
+
+    return (
+        <Box flexDirection="column" marginY={1}>
+            {rows.map((row, ri) => (
+                <Text key={ri} bold={ri === 0} dimColor={ri === 0}>
+                    {'  '}
+                    {row.map((cell, ci) => cell.padEnd(widths[ci] || 0) + '  ').join('')}
+                </Text>
+            ))}
+        </Box>
+    );
+}
+
 function TextBlock({content}: {content: string}) {
     const lines = content.split('\n');
 
-    return (
-        <Box flexDirection="column">
-            {lines.map((line, i) => {
+    // Detect and render tables
+    const rendered: React.ReactNode[] = [];
+    let i = 0;
+    while (i < lines.length) {
+        // Check for table (line starts with |)
+        if (lines[i].trim().startsWith('|') && lines[i].trim().endsWith('|')) {
+            const tableStart = i;
+            while (i < lines.length && lines[i].trim().startsWith('|')) i++;
+            if (i - tableStart >= 2) {
+                rendered.push(<React.Fragment key={tableStart}>{renderTable(lines.slice(tableStart, i))}</React.Fragment>);
+                continue;
+            }
+            i = tableStart; // not a table, fall through
+        }
+        rendered.push(<React.Fragment key={i}>{renderTextLine(lines[i], i)}</React.Fragment>);
+        i++;
+    }
+
+    return <Box flexDirection="column">{rendered}</Box>;
+
+    function renderTextLine(line: string, idx: number): React.ReactNode {
                 const trimmed = line.trimStart();
 
                 // Empty line
-                if (!trimmed) return <Text key={i}> </Text>;
+                if (!trimmed) return <Text key={idx}> </Text>;
 
                 // Header: ## text
                 if (trimmed.startsWith('## ')) {
@@ -113,10 +159,8 @@ function TextBlock({content}: {content: string}) {
                 }
 
                 // Regular text with inline formatting
-                return <Text key={i} wrap="wrap">{renderInlineMarkdown(line)}</Text>;
-            })}
-        </Box>
-    );
+                return <Text key={idx} wrap="wrap">{renderInlineMarkdown(line)}</Text>;
+    }
 }
 
 function CodeBlock({content, lang}: {content: string; lang?: string}) {
