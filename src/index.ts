@@ -580,7 +580,7 @@ async function main(): Promise<void> {
         console.log(color.bold('  Step 2:') + ' Click "Create Key" and copy it');
         console.log(color.bold('  Step 3:') + ' Run this command:');
         console.log('');
-        console.log('    ' + color.cyan(color.bold('robinpath ai config set-key sk-or-...')));
+        console.log('    ' + color.cyan(color.bold('robinpath ai config set-key ...')));
         console.log('');
 
         // Ask: Ready or Later
