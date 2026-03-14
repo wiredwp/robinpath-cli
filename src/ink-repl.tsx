@@ -106,15 +106,22 @@ function InputArea({onSubmit, placeholder}: {onSubmit: (v: string) => void; plac
                 </Box>
             )}
 
-            {/* Bordered input */}
-            <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1} marginX={1}>
-                {empty ? (
-                    <Text dimColor>{placeholder}</Text>
-                ) : (
-                    lines.map((line, i) => (
-                        <Text key={i}>{line}{i === lines.length - 1 ? <Text color="cyan">█</Text> : null}</Text>
-                    ))
-                )}
+            {/* Input area — top/bottom lines only, no side borders */}
+            <Box flexDirection="column" marginX={1}>
+                <Text dimColor>{'─'.repeat(Math.min(process.stdout.columns - 4, 76))}</Text>
+                <Box paddingX={1}>
+                    {empty ? (
+                        <Text dimColor>{'> '}{placeholder}</Text>
+                    ) : (
+                        <Text>
+                            <Text color="cyan">{'> '}</Text>
+                            {lines.map((line, i) => (
+                                <Text key={i}>{i > 0 ? '\n  ' : ''}{line}{i === lines.length - 1 ? <Text color="cyan">▎</Text> : null}</Text>
+                            ))}
+                        </Text>
+                    )}
+                </Box>
+                <Text dimColor>{'─'.repeat(Math.min(process.stdout.columns - 4, 76))}</Text>
             </Box>
 
             {/* Hints */}
