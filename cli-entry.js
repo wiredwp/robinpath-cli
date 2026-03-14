@@ -14,7 +14,7 @@ import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErr
 import { nativeModules } from './modules/index.js';
 
 // Injected by esbuild at build time via --define, fallback for dev mode
-const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.55.0';
+const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.56.0';
 
 // ============================================================================
 // Global flags
@@ -7465,18 +7465,35 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
         }
 
         if (trimmed === '/model') {
-            // Interactive model picker
-            rl.pause();
-            const picked = await selectModelInteractive(readAiConfig().model || model);
-            if (picked) {
-                config.model = picked;
+            // Show numbered model list — no raw mode, uses readline (safe)
+            const hasKey = !!(readAiConfig().apiKey);
+            const models = hasKey ? AI_MODELS : AI_MODELS.filter(m => !m.requiresKey);
+            const currentModel = readAiConfig().model || model;
+            log('');
+            let lastGroup = '';
+            for (let i = 0; i < models.length; i++) {
+                const m = models[i];
+                if (m.group !== lastGroup) {
+                    log(color.dim(`  \u2500\u2500 ${m.group} \u2500\u2500`));
+                    lastGroup = m.group;
+                }
+                const cur = m.id === currentModel ? color.green(' \u2713') : '';
+                const num = color.cyan(`${i + 1}`);
+                log(`  ${num}. ${m.name} ${color.dim(`\u2014 ${m.desc}`)}${cur}`);
+            }
+            log('');
+            const answer = await new Promise(resolve => {
+                rl.question(color.dim('  Enter number (or press Enter to cancel): '), resolve);
+            });
+            const idx = parseInt(answer, 10) - 1;
+            if (idx >= 0 && idx < models.length) {
+                config.model = models[idx].id;
                 writeAiConfig(config);
-                log(color.green('Model changed:') + ` ${color.cyan(picked)}`);
+                log(color.green('Model changed:') + ` ${color.cyan(models[idx].id)}`);
                 log(color.dim('(takes effect on next message)'));
             } else {
-                log(`Current model: ${color.cyan(readAiConfig().model || model)}`);
+                log(`Current model: ${color.cyan(currentModel)}`);
             }
-            rl.resume();
             rl.prompt();
             return;
         }
@@ -7650,11 +7667,29 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
         if (trimmed === '/resume' || trimmed.startsWith('/resume ')) {
             let targetId = trimmed.slice(8).trim();
             if (!targetId) {
-                // Interactive session picker
-                rl.pause();
-                targetId = await selectSessionInteractive();
-                rl.resume();
-                if (!targetId) {
+                // Show numbered session list — no raw mode, uses readline (safe)
+                const sessions = listSessions();
+                if (sessions.length === 0) {
+                    log(color.dim('  No saved sessions.'));
+                    rl.prompt();
+                    return;
+                }
+                log('');
+                for (let i = 0; i < sessions.length; i++) {
+                    const s = sessions[i];
+                    const diff = Date.now() - new Date(s.updated || s.created).getTime();
+                    const mins = Math.floor(diff / 60000);
+                    const ago = mins < 60 ? `${mins}m ago` : mins < 1440 ? `${Math.floor(mins/60)}h ago` : `${Math.floor(mins/1440)}d ago`;
+                    log(`  ${color.cyan(String(i + 1))}. ${s.name}  ${color.dim(`${ago}, ${s.messages} msgs`)}`);
+                }
+                log('');
+                const answer = await new Promise(resolve => {
+                    rl.question(color.dim('  Enter number (or press Enter to cancel): '), resolve);
+                });
+                const idx = parseInt(answer, 10) - 1;
+                if (idx >= 0 && idx < sessions.length) {
+                    targetId = sessions[idx].id;
+                } else {
                     rl.prompt();
                     return;
                 }
