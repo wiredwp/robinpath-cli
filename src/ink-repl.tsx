@@ -537,28 +537,38 @@ class ReplEngine {
 
         for (let loop = 0; loop < 5; loop++) {
             let fullText = '';
+            let lastUpdate = 0;
 
             const result: BrainStreamResult | null = await fetchBrainStream(
                 loop === 0 ? expanded : this.conversationMessages[this.conversationMessages.length - 1].content as string,
                 {
                     onToken: (delta: string) => {
-                        if (delta === '\x1b[RETRY]') {fullText = ''; ui?.setStreaming(''); return;}
+                        if (delta === '\x1b[RETRY]') {fullText = ''; lastUpdate = 0; ui?.setStreaming(''); return;}
                         fullText += delta;
+                        // Throttle UI updates to every 100ms (like Claude Code)
+                        const now = Date.now();
+                        if (now - lastUpdate < 100) return;
+                        lastUpdate = now;
                         const clean = fullText
                             .replace(/<memory>[\s\S]*?<\/memory>/g, '')
                             .replace(/<cmd>[\s\S]*?<\/cmd>/g, '')
                             .replace(/\n{3,}/g, '\n\n').trim();
-                        // Show progress when AI is generating hidden <cmd> content
-                        const hasOpenCmd = fullText.includes('<cmd>') && !fullText.endsWith('</cmd>') &&
-                            (fullText.match(/<cmd>/g) || []).length > (fullText.match(/<\/cmd>/g) || []).length;
-                        const display = hasOpenCmd ? clean + '\n\nPreparing commands...' : clean;
-                        ui?.setStreaming(display);
+                        ui?.setStreaming(clean);
                     },
                     conversationHistory: this.conversationMessages.slice(0, -1),
                     provider: activeProvider, model: activeModel, apiKey: activeKey,
                     cliContext: this.cliContext,
                 },
             );
+
+            // Final flush of streaming text (throttle may have skipped last tokens)
+            if (fullText) {
+                const finalClean = fullText
+                    .replace(/<memory>[\s\S]*?<\/memory>/g, '')
+                    .replace(/<cmd>[\s\S]*?<\/cmd>/g, '')
+                    .replace(/\n{3,}/g, '\n\n').trim();
+                ui?.setStreaming(finalClean);
+            }
 
             if (!result) {finalResponse = '⚠ No internet connection. Check your network and try again.'; break;}
             if ((result as any).error) {finalResponse = `⚠ ${(result as any).error}`; break;}
@@ -586,11 +596,11 @@ class ReplEngine {
 
             if (commands.length === 0) {finalResponse = cleaned || fullText; break;}
 
-            // Clear streaming and yield to let React render before executing commands
+            // Move response text to Static, show "Running" state for commands
             ui?.setStreaming('');
-            await new Promise(r => setTimeout(r, 50));
-
             if (cleaned) ui?.addMessage(cleaned);
+            // Yield to React to flush the state change
+            await new Promise(r => setTimeout(r, 100));
 
             // Execute commands and collect results
             const cmdResults: {command: string; stdout: string; stderr: string; exitCode: number}[] = [];
