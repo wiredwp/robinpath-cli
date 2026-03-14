@@ -14,7 +14,25 @@ import { showMainHelp, showCommandHelp } from './help';
 import { handleStart, handleStatus, readStdin } from './server';
 import { fetchBrainStream, fetchBrainContext, buildEnrichedPrompt } from './brain';
 import { startAiREPL, welcomeWizard, handleAiConfig } from './repl';
-import { startInkREPL } from './ink-repl';
+
+// Ink REPL loaded dynamically — only works with Bun runtime (ESM + Ink v5)
+async function startInkOrFallback(
+    prompt: string | null,
+    resumeId: string | null,
+    opts: { autoAccept: boolean; devMode: boolean },
+): Promise<void> {
+    // Detect if we're running in Bun (supports Ink v5)
+    const isBun = typeof (globalThis as any).Bun !== 'undefined';
+    if (isBun) {
+        try {
+            const { startInkREPL } = await import('./ink-repl');
+            return startInkREPL(prompt, resumeId, opts);
+        } catch {
+            // Fall through to old REPL
+        }
+    }
+    return startAiREPL(prompt, resumeId, opts);
+}
 import {
     checkForUpdates,
     handleUpdate,
@@ -86,12 +104,12 @@ async function handleAi(args: string[]): Promise<void> {
             log('Usage: robinpath ai --resume <session-id>');
             return;
         }
-        await startInkREPL(null, resumeId, { autoAccept: FLAG_AUTO_ACCEPT, devMode: FLAG_DEV_MODE });
+        await startInkOrFallback(null, resumeId, { autoAccept: FLAG_AUTO_ACCEPT, devMode: FLAG_DEV_MODE });
         return;
     }
 
     const prompt = args.join(' ').trim();
-    await startInkREPL(prompt || null, null, { autoAccept: FLAG_AUTO_ACCEPT, devMode: FLAG_DEV_MODE });
+    await startInkOrFallback(prompt || null, null, { autoAccept: FLAG_AUTO_ACCEPT, devMode: FLAG_DEV_MODE });
 }
 
 // ============================================================================
@@ -486,7 +504,7 @@ async function main(): Promise<void> {
         await welcomeWizard();
     }
 
-    await startInkREPL(null, null, { autoAccept: FLAG_AUTO_ACCEPT, devMode: FLAG_DEV_MODE });
+    await startInkOrFallback(null, null, { autoAccept: FLAG_AUTO_ACCEPT, devMode: FLAG_DEV_MODE });
 }
 
 main().catch((err) => {
