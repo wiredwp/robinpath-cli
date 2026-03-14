@@ -585,6 +585,10 @@ class ReplEngine {
 
             if (commands.length === 0) {finalResponse = cleaned || fullText; break;}
 
+            // Clear streaming and yield to let React render before executing commands
+            ui?.setStreaming('');
+            await new Promise(r => setTimeout(r, 50));
+
             if (cleaned) ui?.addMessage(cleaned);
 
             // Execute commands and collect results
@@ -623,6 +627,8 @@ class ReplEngine {
             this.conversationMessages.push({role: 'user', content: `[Results]\n${summary}`});
             ui?.setStreaming('');
             finalResponse = '';
+            // Yield to let React flush state before next Brain call
+            await new Promise(r => setTimeout(r, 50));
         }
 
         } catch (err: any) {

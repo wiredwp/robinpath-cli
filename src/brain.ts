@@ -149,23 +149,35 @@ export async function fetchBrainStream(
         let metadata: { sources?: unknown[]; context?: Record<string, unknown> } | null = null;
         let doneData: { validation?: unknown; usage?: unknown } | null = null;
 
-        // Parse SSE stream with per-read timeout
+        // Parse SSE stream — abort controller handles ALL timeouts
         const reader = (response.body as ReadableStream<Uint8Array>).getReader();
         const decoder = new TextDecoder();
         let buffer = '';
-        const READ_TIMEOUT = 10000; // 10s per chunk — if no data for 10s, stream is dead
+        let readTimer: ReturnType<typeof setTimeout> | null = null;
+
+        // Reset the read timer on each chunk — if no data for 10s, abort
+        function resetReadTimer(): void {
+            if (readTimer) clearTimeout(readTimer);
+            readTimer = setTimeout(() => {
+                logVerbose('Stream read timeout — aborting');
+                controller.abort();
+            }, 10000);
+        }
+        resetReadTimer();
 
         while (true) {
-            // Race between read and timeout
-            const readPromise = reader.read();
-            const timeoutPromise = new Promise<{done: true; value: undefined}>((resolve) =>
-                setTimeout(() => resolve({done: true, value: undefined}), READ_TIMEOUT),
-            );
-            const { done, value } = await Promise.race([readPromise, timeoutPromise]);
-            if (done) {
-                try { reader.cancel(); } catch {}
+            let done: boolean;
+            let value: Uint8Array | undefined;
+            try {
+                const result = await reader.read();
+                done = result.done;
+                value = result.value;
+            } catch {
+                // Aborted by timeout or controller — normal exit
                 break;
             }
+            if (done) break;
+            resetReadTimer(); // Got data — reset timer
 
             buffer += decoder.decode(value, { stream: true });
 
@@ -204,11 +216,13 @@ export async function fetchBrainStream(
                         }
                     } else if (eventType === 'done') {
                         doneData = parsed;
+                        if (readTimer) clearTimeout(readTimer);
                         clearTimeout(timeout);
                     } else if (eventType === 'error') {
+                        if (readTimer) clearTimeout(readTimer);
                         clearTimeout(timeout);
                         logVerbose('Brain stream error:', parsed.message);
-                        // Brain error — return what we have with error info
+                        try { reader.cancel(); } catch {}
                         return {
                             code: fullText,
                             sources: metadata?.sources || [],
@@ -224,7 +238,9 @@ export async function fetchBrainStream(
             }
         }
 
+        if (readTimer) clearTimeout(readTimer);
         clearTimeout(timeout);
+        try { reader.cancel(); } catch {}
         return {
             code: fullText,
             sources: metadata?.sources || [],
