@@ -558,9 +558,16 @@ class ReplEngine {
                 },
             );
 
-            if (!result) {finalResponse = 'No internet connection. Check your network and try again.'; break;}
-            if ((result as any).error) {finalResponse = (result as any).error; break;}
-            if (!result.code) {finalResponse = fullText || 'No response. Try again.'; break;}
+            if (!result) {finalResponse = '⚠ No internet connection. Check your network and try again.'; break;}
+            if ((result as any).error) {finalResponse = `⚠ ${(result as any).error}`; break;}
+            if (!result.code) {
+                const model = readAiConfig().model || this.model;
+                const hint = model === 'robinpath-default'
+                    ? 'The free model may be temporarily unavailable. Try again or switch to a paid model with /model.'
+                    : 'The AI returned an empty response. Try rephrasing or check your API key with /usage.';
+                finalResponse = fullText || `⚠ ${hint}`;
+                break;
+            }
 
             if (result.usage) {
                 const pt = result.usage.prompt_tokens || 0;
