@@ -15,13 +15,10 @@ jobs:
         include:
           - os: windows-latest
             name: robinpath-windows-x64.exe
-            target: bun-windows-x64
           - os: ubuntu-latest
             name: robinpath-linux-x64
-            target: bun-linux-x64
           - os: macos-latest
             name: robinpath-macos-arm64
-            target: bun-darwin-arm64
 
     runs-on: ${{ matrix.os }}
 
@@ -36,7 +33,7 @@ jobs:
         run: bun install
 
       - name: Build standalone binary
-        run: bun build src/index.ts --compile --outfile=dist/${{ matrix.name }} --target=${{ matrix.target }}
+        run: bun build src/index.ts --compile --outfile=dist/${{ matrix.name }}
 
       - name: Verify binary
         shell: bash
