@@ -319,10 +319,8 @@ function ChatApp({engine}: {engine: ReplEngine}) {
                     <Box key={msg.id} paddingX={1} marginBottom={msg.text.startsWith('❯') ? 0 : 1} flexDirection="column">
                         {msg.text.startsWith('❯') ? (
                             <Text><Text color="cyan" bold>❯</Text><Text bold>{msg.text.slice(1)}</Text></Text>
-                        ) : msg.text.startsWith('✓') ? (
-                            <Text dimColor><Text color="green">✓</Text>{msg.text.slice(1)}</Text>
-                        ) : msg.text.startsWith('✗') ? (
-                            <Text><Text color="red">✗</Text>{msg.text.slice(1)}</Text>
+                        ) : msg.text.includes('⎿') ? (
+                            <Text dimColor wrap="wrap">{msg.text}</Text>
                         ) : msg.dim ? (
                             <Text dimColor wrap="wrap">{msg.text}</Text>
                         ) : (
@@ -597,24 +595,26 @@ class ReplEngine {
             // Execute commands and collect results
             const cmdResults: {command: string; stdout: string; stderr: string; exitCode: number}[] = [];
             for (const cmd of commands) {
-                const firstLine = cmd.split('\n')[0].slice(0, 60);
+                const firstLine = cmd.split('\n')[0].slice(0, 70);
+                const isMultiline = cmd.includes('\n');
                 const r = await executeShellCommand(cmd);
                 cmdResults.push({command: cmd, stdout: r.stdout || '', stderr: r.stderr || '', exitCode: r.exitCode});
 
-                // Clean, compact command display
+                // Claude Code-style tool result display
                 if (r.exitCode === 0) {
                     const output = (r.stdout || '').trim();
                     if (output) {
                         const lines = output.split('\n');
-                        const short = lines.length <= 3 ? output : lines.slice(0, 3).join('\n') + `\n(${lines.length - 3} more lines)`;
-                        ui?.addMessage(`✓ ${firstLine}\n${short}`, true);
+                        const preview = lines.length <= 4
+                            ? lines.map(l => `     ${l}`).join('\n')
+                            : lines.slice(0, 3).map(l => `     ${l}`).join('\n') + `\n     … ${lines.length - 3} more lines`;
+                        ui?.addMessage(`  ⎿  Execute(${firstLine}${isMultiline ? ' …' : ''})\n${preview}`, true);
                     } else {
-                        ui?.addMessage(`✓ ${firstLine}`, true);
+                        ui?.addMessage(`  ⎿  Execute(${firstLine}${isMultiline ? ' …' : ''})`, true);
                     }
                 } else {
-                    // Show error cleanly — just first line of stderr
-                    const errLine = (r.stderr || '').trim().split('\n')[0].slice(0, 80);
-                    ui?.addMessage(`✗ ${firstLine}\n  ${errLine}`, true);
+                    const errLine = (r.stderr || '').trim().split('\n')[0].slice(0, 70);
+                    ui?.addMessage(`  ⎿  Execute(${firstLine}${isMultiline ? ' …' : ''})\n     ✗ ${errLine}`, true);
                 }
             }
 
