@@ -6,7 +6,7 @@ import { createInterface } from 'node:readline';
 import { createServer } from 'node:http';
 import { readFileSync, existsSync, mkdirSync, copyFileSync, rmSync, writeFileSync, readdirSync, statSync, watch, appendFileSync, chmodSync, unlinkSync } from 'node:fs';
 import { resolve, extname, join, relative, dirname, basename } from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, spawn as spawnChild } from 'node:child_process';
 import { homedir, platform, tmpdir, hostname, userInfo } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { createHash, createHmac, randomUUID, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
@@ -6138,7 +6138,26 @@ async function autoCompact(conversationMessages) {
 
 // --- Token usage tracking ---
 function createUsageTracker() {
-    return { promptTokens: 0, completionTokens: 0, totalTokens: 0, requests: 0 };
+    return { promptTokens: 0, completionTokens: 0, totalTokens: 0, requests: 0, cost: 0 };
+}
+
+/** Estimate cost based on model and token counts. Prices per 1M tokens (USD). */
+const MODEL_PRICING = {
+    'anthropic/claude-sonnet-4.6': { input: 3.00, output: 15.00 },
+    'anthropic/claude-opus-4.6': { input: 15.00, output: 75.00 },
+    'anthropic/claude-haiku-4.5': { input: 0.80, output: 4.00 },
+    'openai/gpt-5.2': { input: 2.00, output: 8.00 },
+    'openai/gpt-5.2-pro': { input: 10.00, output: 40.00 },
+    'openai/gpt-5-mini': { input: 0.40, output: 1.60 },
+    'google/gemini-3-flash-preview': { input: 0.10, output: 0.40 },
+    'google/gemini-3.1-pro-preview': { input: 1.25, output: 5.00 },
+    'robinpath-default': { input: 0, output: 0 },
+};
+
+function estimateCost(model, promptTokens, completionTokens) {
+    const pricing = MODEL_PRICING[model] || MODEL_PRICING[model?.split(':')[0]];
+    if (!pricing) return 0;
+    return (promptTokens / 1_000_000) * pricing.input + (completionTokens / 1_000_000) * pricing.output;
 }
 
 // Derive a machine-specific encryption key from hostname + username + fixed salt
@@ -6664,27 +6683,111 @@ function getShellConfig() {
     return { shell: userShell, name: basename(userShell), isUnix: true };
 }
 
+/** Execute a shell command with live streaming output. Returns {stdout, stderr, exitCode}. */
 function executeShellCommand(command, timeout = 30000) {
-    const { shell, name: shellName, isUnix } = getShellConfig();
-    try {
-        const args = isUnix ? ['-c', command] : ['/c', command];
-        const result = execSync(command, {
+    const { shell } = getShellConfig();
+    return new Promise((resolve) => {
+        let stdout = '';
+        let stderr = '';
+        let settled = false;
+
+        const child = spawnChild(command, {
             shell,
             cwd: process.cwd(),
             timeout,
-            maxBuffer: 1024 * 1024,
-            encoding: 'utf-8',
-            stdio: ['pipe', 'pipe', 'pipe'],
             env: { ...process.env, LANG: 'en_US.UTF-8' },
+            stdio: ['pipe', 'pipe', 'pipe'],
         });
-        return { stdout: (result || '').slice(0, 50000), exitCode: 0 };
-    } catch (e) {
-        return {
-            stdout: (e.stdout || '').slice(0, 50000),
-            stderr: (e.stderr || '').slice(0, 10000),
-            exitCode: e.status || 1,
-            error: e.message.slice(0, 500),
-        };
+
+        child.stdout.on('data', (data) => {
+            const chunk = data.toString();
+            stdout += chunk;
+            // Stream output live (dim, indented)
+            const lines = chunk.replace(/\n$/, '').split('\n');
+            for (const line of lines) {
+                if (line.trim()) process.stdout.write(color.dim(`    ${line}\n`));
+            }
+        });
+
+        child.stderr.on('data', (data) => {
+            stderr += data.toString();
+        });
+
+        child.on('close', (code) => {
+            if (settled) return;
+            settled = true;
+            resolve({
+                stdout: stdout.slice(0, 50000),
+                stderr: stderr.slice(0, 10000),
+                exitCode: code || 0,
+            });
+        });
+
+        child.on('error', (err) => {
+            if (settled) return;
+            settled = true;
+            resolve({
+                stdout: stdout.slice(0, 50000),
+                stderr: stderr.slice(0, 10000),
+                exitCode: 1,
+                error: err.message.slice(0, 500),
+            });
+        });
+
+        // Timeout fallback
+        setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            try { child.kill('SIGTERM'); } catch {}
+            resolve({
+                stdout: stdout.slice(0, 50000),
+                stderr: 'Command timed out',
+                exitCode: 124,
+            });
+        }, timeout);
+    });
+}
+
+/** Detect if a command writes to a file (redirect or heredoc). Returns the target file path or null. */
+function detectFileWrite(cmd) {
+    // Match: echo/cat/printf ... > file.txt (but not >>)
+    const redirect = cmd.match(/(?<![>])>\s*([^\s|&;>]+)\s*$/);
+    if (redirect) return redirect[1];
+    // Match heredoc: cat << 'EOF' > file.txt
+    const heredoc = cmd.match(/>\s*([^\s|&;>]+)\s*$/);
+    if (heredoc) return heredoc[1];
+    return null;
+}
+
+/** Show a simple diff between old and new content. */
+function showFileDiff(filePath, oldContent, newContent) {
+    if (!oldContent && newContent) {
+        log(color.green(`  + New file: ${filePath} (${newContent.split('\n').length} lines)`));
+        return;
+    }
+    const oldLines = oldContent.split('\n');
+    const newLines = newContent.split('\n');
+    let changes = 0;
+    const maxShow = 10;
+    log(color.dim(`  Diff: ${filePath}`));
+    for (let i = 0; i < Math.max(oldLines.length, newLines.length); i++) {
+        if (oldLines[i] !== newLines[i]) {
+            changes++;
+            if (changes <= maxShow) {
+                if (i < oldLines.length && oldLines[i] !== undefined) {
+                    log(color.red(`  - ${oldLines[i]}`));
+                }
+                if (i < newLines.length && newLines[i] !== undefined) {
+                    log(color.green(`  + ${newLines[i]}`));
+                }
+            }
+        }
+    }
+    if (changes > maxShow) {
+        log(color.dim(`  ... and ${changes - maxShow} more changes`));
+    }
+    if (changes === 0) {
+        log(color.dim(`  (no changes)`));
     }
 }
 
@@ -6780,246 +6883,7 @@ function confirmCommand(cmd, autoAccept) {
     });
 }
 
-function buildRobinPathSystemPrompt() {
-    // Load installed (external) module info
-    const manifest = readModulesManifest();
-    const installedModuleNames = Object.keys(manifest);
-    const installedInfo = installedModuleNames.map(name => {
-        const mInfo = manifest[name];
-        let desc = '';
-        try {
-            const pkgPath = join(getModulePath(name), 'package.json');
-            if (existsSync(pkgPath)) {
-                const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-                desc = pkg.description || '';
-            }
-        } catch { /* ignore */ }
-        return `  ${name}@${mInfo.version}${desc ? ' \u2014 ' + desc : ''}`;
-    }).join('\n');
-
-    // Load native module info for context
-    const moduleInfo = nativeModules.map(m => {
-        const fns = Object.keys(m.functions);
-        const desc = m.moduleMetadata?.description || '';
-        // Include parameter info if available
-        const fnDetails = fns.map(fn => {
-            const meta = m.functionMetadata?.[fn];
-            if (meta?.params?.length) {
-                const params = meta.params.map(p => `${p.name}${p.required ? '' : '?'}: ${p.type}`).join(', ');
-                return `  ${fn}(${params})`;
-            }
-            return `  ${fn}`;
-        }).join('\n');
-        return `${m.name} \u2014 ${desc}\n${fnDetails}`;
-    }).join('\n\n');
-
-    return `You are RobinPath AI, an intelligent assistant built into the RobinPath CLI.
-You help users write, understand, debug, and modify RobinPath code.
-
-## CLI Commands Reference
-
-\`\`\`
-robinpath run <file.rp>       Run a .rp or .robin script
-robinpath <file.rp>           Shorthand: run a script directly
-robinpath repl                Start the language REPL
-robinpath add <pkg>           Install a module (e.g. robinpath add @robinpath/slack)
-robinpath remove <pkg>        Uninstall a module
-robinpath modules list        List installed modules
-robinpath modules upgrade     Upgrade all installed modules to latest
-robinpath search <query>      Search the module registry
-robinpath info                Show system/environment info
-robinpath info --json         Machine-readable system info
-robinpath init                Create a new robinpath.json project file
-robinpath publish             Publish your module to the registry
-robinpath audit               Check installed modules for issues
-robinpath doctor              Diagnose CLI installation issues
-robinpath start               Start an HTTP server (robinpath start -p 8080)
-robinpath test <file>         Run test files
-robinpath env set KEY=VALUE   Set a persistent environment variable
-robinpath env list            List environment variables
-robinpath ai config set-key   Set OpenRouter API key
-robinpath ai config set-model Set AI model
-robinpath ai config show      Show AI configuration
-robinpath -p "question"       Headless AI prompt (for scripting/app integration)
-\`\`\`
-
-File extensions: \`.rp\` and \`.robin\` are both recognized.
-
-## About RobinPath
-- RobinPath is a scripting language and CLI for automation, APIs, and data processing
-- Scripts run on Node.js — all scripts run server-side, NOT in the browser
-- RobinPath is synchronous by default but async operations (fetch, timers) are supported
-- Cannot use npm packages directly — use RobinPath modules from the registry
-- There is no hard file size limit — limited by available system memory
-- No TypeScript support — RobinPath is its own language with .rp/.robin files
-
-## RobinPath Language Syntax
-
-RobinPath is a scripting language for automation and data processing.
-
-\`\`\`
-# Variables
-set $x = 1
-$name = "Robin"
-
-# Output
-log "Hello " + $name
-
-# Module function calls
-set $result = math.add 1 2
-set $upper = string.upper "hello"
-
-# If/else
-if $x > 5
-  log "big"
-else
-  log "small"
-endif
-
-# For loops
-for $item in array.create 1 2 3
-  log $item
-endfor
-
-# Looping with do block
-set $i = 0
-do
-  log $i
-  $i = math.add $i 1
-enddo
-
-# Functions
-def greet $name
-  log "Hello " + $name
-enddef
-
-# Using functions
-greet "World"
-
-# External modules (auto-loaded when installed, no import needed)
-# Install with: robinpath add @robinpath/slack
-slack.send "#general" "Hello from RobinPath!"
-
-# Error handling (do/catch)
-do
-  set $data = file.read "missing.txt"
-catch $err
-  log "Error: " + $err
-enddo
-
-# Events
-on "myEvent" $data
-  log "Received: " + $data
-endon
-emit "myEvent" "hello"
-
-# Pipe operator
-set $result = "hello world" |> string.upper |> string.split " "
-
-# String interpolation
-log "Result: {$result}"
-
-# Comments
-# This is a comment
-\`\`\`
-
-## File Extensions
-.rp and .robin are both recognized.
-
-## Available Native Modules
-
-${moduleInfo}
-
-## External Modules
-Users can install modules from the registry:
-  robinpath add @robinpath/slack
-  robinpath add @robinpath/csv
-
-Then import and use:
-  import "@robinpath/slack"
-  slack.send "#channel" "message"
-
-## Installed External Modules
-${installedModuleNames.length > 0 ? `The user has ${installedModuleNames.length} external module(s) installed locally:\n${installedInfo}` : 'The user has no external modules installed yet.'}
-
-IMPORTANT: If the user asks about a module that is NOT in the native modules list above AND NOT in the installed list, they need to install it first. Tell them:
-  robinpath add @robinpath/<module-name>
-For example, if they ask about Slack but @robinpath/slack is not installed, say:
-  "First install it: robinpath add @robinpath/slack"
-
-## Your Capabilities — Shell Commands
-You can execute shell commands on the user's machine to perform file operations, run scripts, and explore the filesystem.
-To execute a command, wrap it in <cmd> tags in your response:
-
-<cmd>cat myfile.txt</cmd>         — read a file
-<cmd>ls -la</cmd>                  — list files
-<cmd>echo 'content' > file.txt</cmd>  — create/write a file
-<cmd>mkdir -p mydir</cmd>         — create directories
-<cmd>cat file.txt | sed 's/old/new/g' > file.tmp && mv file.tmp file.txt</cmd>  — edit a file
-<cmd>rm file.txt</cmd>            — delete a file
-<cmd>robinpath run script.rp</cmd> — run a RobinPath script
-
-The commands are executed in the system shell (${getShellConfig().name} on ${platform()}).
-You can use multiple <cmd> tags in a single response — they execute sequentially.
-After execution, you receive the output (stdout/stderr) and can use it to continue.
-
-### Writing files with heredoc
-To create files with multi-line content:
-<cmd>cat << 'RPEOF' > myfile.rp
-@desc "My script"
-do
-  log "Hello!"
-enddo
-RPEOF</cmd>
-
-### Editing files with sed
-For simple replacements:
-<cmd>sed -i 's/old text/new text/g' myfile.rp</cmd>
-
-For multi-line edits, read the file first, then write the modified version.
-
-## User Environment
-- Working directory: ${process.cwd()}
-- Platform: ${platform()}
-- Shell: ${getShellConfig().name}
-- RobinPath CLI version: ${CLI_VERSION}
-
-## Guidelines
-- When asked to create code, write idiomatic RobinPath using the available modules
-- When modifying files, always read them first (cat) to understand the current content
-- Show diffs or explain what you changed
-- Keep responses concise and focused
-- When showing code, use \`\`\`robinpath code blocks
-- If the user asks something unrelated to RobinPath, you can still help but focus on being useful
-- If the user needs a module that is not installed, tell them to install it with: robinpath add @robinpath/<name>
-- Never assume a module is available if it's not in the native or installed modules list
-- Run code when appropriate to verify it works
-- IMPORTANT: Only use <cmd> tags when you need to actually execute a command. Do NOT use <cmd> tags in examples or explanations — use regular code blocks instead.
-
-## Persistent Memory
-You can save important facts about the user across sessions using memory tags.
-When the user shares something worth remembering (their name, preferences, project details, workflow habits, corrections, explicit "remember this" requests), wrap the fact in a <memory> tag in your response. Examples:
-
-User: "my name is Alex"
-Response: Nice to meet you, Alex! <memory>User's name is Alex</memory>
-
-User: "I always use tabs not spaces"
-Response: Got it, I'll use tabs. <memory>User prefers tabs over spaces</memory>
-
-User: "remember that our API runs on port 3001"
-Response: Noted! <memory>Project API runs on port 3001</memory>
-
-User: "I work at Acme Corp"
-Response: Cool! <memory>User works at Acme Corp</memory>
-
-Rules:
-- Only save facts that are genuinely useful across future sessions
-- Keep each memory short and factual (under 200 chars)
-- Don't save temporary things like "user asked about X" — save lasting preferences, identity, project info
-- If the user corrects a previous fact, save the correction (it replaces the old one)
-- Don't mention the <memory> tag to the user — it's invisible to them
-- Most messages need NO memory tags — only use them when something is clearly worth persisting`;
-}
+// (buildRobinPathSystemPrompt removed — Brain handles all system prompts server-side)
 
 // Spinner animation for "thinking" state
 function createSpinner(text) {
@@ -7512,6 +7376,50 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
     log(color.dim('  \u2570' + '\u2500'.repeat(50) + '\u256f'));
     log('');
 
+    // Auto-scan: lightweight project context on startup (like Cursor)
+    try {
+        const cwd = process.cwd();
+        const entries = readdirSync(cwd).filter(e => !e.startsWith('.'));
+        const dirs = [];
+        const rpFiles = [];
+        const keyFiles = [];
+        for (const entry of entries.slice(0, 100)) {
+            try {
+                const full = join(cwd, entry);
+                const s = statSync(full);
+                if (s.isDirectory() && !['node_modules', '__pycache__', 'dist', 'build', '.git'].includes(entry)) {
+                    dirs.push(entry);
+                } else if (entry.endsWith('.rp') || entry.endsWith('.robin')) {
+                    rpFiles.push(entry);
+                } else if (['robinpath.json', 'package.json', 'README.md'].includes(entry)) {
+                    keyFiles.push(entry);
+                }
+            } catch {}
+        }
+        if (rpFiles.length > 0 || dirs.length > 0 || keyFiles.length > 0) {
+            let scanCtx = `[Project context — ${cwd}]\n`;
+            if (dirs.length > 0) scanCtx += `Directories: ${dirs.join(', ')}\n`;
+            if (rpFiles.length > 0) {
+                scanCtx += `RobinPath files: ${rpFiles.join(', ')}\n`;
+                for (const f of rpFiles.slice(0, 5)) {
+                    try {
+                        const content = readFileSync(join(cwd, f), 'utf-8');
+                        if (content.length < 3000) scanCtx += `\n--- ${f} ---\n${content}\n`;
+                    } catch {}
+                }
+            }
+            if (keyFiles.length > 0) scanCtx += `Key files: ${keyFiles.join(', ')}\n`;
+            const rpJson = join(cwd, 'robinpath.json');
+            if (existsSync(rpJson)) {
+                try { scanCtx += `\nrobinpath.json:\n${readFileSync(rpJson, 'utf-8')}\n`; } catch {}
+            }
+            conversationMessages.push({ role: 'user', content: scanCtx });
+            conversationMessages.push({ role: 'assistant', content: 'Project context loaded.' });
+            log(color.dim(`  Project: ${rpFiles.length} .rp file(s), ${dirs.length} dir(s)`));
+            log('');
+        }
+    } catch {}
+
     const history = [];
     try {
         const histPath = join(getRobinPathHome(), 'ai-history');
@@ -7725,8 +7633,7 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
                 const added = addMemoryFact(fact);
                 if (added) {
                     log(color.green(`Remembered: "${fact}"`));
-                    // Also inject into current system prompt
-                    conversationMessages[0].content = buildRobinPathSystemPrompt() + buildMemoryContext();
+                    // Memory is sent to Brain via conversationHistory — no local system prompt needed
                 } else {
                     log(color.dim('Already remembered.'));
                 }
@@ -7740,7 +7647,6 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
             const removed = removeMemoryFact(idx);
             if (removed) {
                 log(color.green(`Forgot: "${removed}"`));
-                conversationMessages[0].content = buildRobinPathSystemPrompt() + buildMemoryContext();
             } else {
                 log(color.red('Invalid memory number. Use /memory to see the list.'));
             }
@@ -7798,9 +7704,8 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
             } else {
                 sessionId = session.id;
                 sessionName = session.name;
-                // Rebuild conversation
+                // Rebuild conversation — Brain handles system prompt server-side
                 conversationMessages.length = 0;
-                conversationMessages.push({ role: 'system', content: systemPrompt });
                 for (const msg of session.messages) {
                     conversationMessages.push(msg);
                 }
@@ -7837,6 +7742,11 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
             log(`  Total tokens:      ${color.cyan(usage.totalTokens.toLocaleString())}`);
             log(`  API requests:      ${usage.requests}`);
             log(`  Messages:          ${conversationMessages.length - 1}`);
+            if (usage.cost > 0) {
+                log(`  Est. cost:         ${color.yellow('$' + usage.cost.toFixed(4))}`);
+            } else {
+                log(`  Est. cost:         ${color.green('$0.00 (free tier)')}`);
+            }
             log('');
             rl.prompt();
             return;
@@ -8066,10 +7976,14 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
 
                 // Track usage
                 if (brainResult.usage) {
-                    usage.promptTokens += brainResult.usage.prompt_tokens || 0;
-                    usage.completionTokens += brainResult.usage.completion_tokens || 0;
-                    usage.totalTokens += (brainResult.usage.prompt_tokens || 0) + (brainResult.usage.completion_tokens || 0);
+                    const pt = brainResult.usage.prompt_tokens || 0;
+                    const ct = brainResult.usage.completion_tokens || 0;
+                    usage.promptTokens += pt;
+                    usage.completionTokens += ct;
+                    usage.totalTokens += pt + ct;
                     usage.requests++;
+                    const activeModel = readAiConfig().model || model;
+                    usage.cost += estimateCost(activeModel, pt, ct);
                 }
 
                 // Extract commands and clean the response
@@ -8122,6 +8036,18 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
                 for (let ci = 0; ci < commands.length; ci++) {
                     let cmd = commands[ci];
 
+                    // Diff preview: if command writes to an existing file, show what will change
+                    const writeTarget = detectFileWrite(cmd);
+                    if (writeTarget) {
+                        try {
+                            const targetPath = join(process.cwd(), writeTarget);
+                            if (existsSync(targetPath)) {
+                                const oldContent = readFileSync(targetPath, 'utf-8');
+                                log(color.dim(`  File exists: ${writeTarget} (${oldContent.split('\\n').length} lines)`));
+                            }
+                        } catch { /* skip — file might not be readable */ }
+                    }
+
                     // Permission check
                     const decision = await confirmCommand(cmd, autoAccept);
 
@@ -8158,8 +8084,17 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
                     }
 
                     if (decision !== 'yes' && decision !== 'auto' && decision !== 'edit') {
-                        // Shouldn't reach here, but safety fallback
                         continue;
+                    }
+
+                    // Snapshot file before execution for diff preview
+                    let preContent = null;
+                    const diffTarget = detectFileWrite(cmd);
+                    if (diffTarget) {
+                        try {
+                            const targetPath = join(process.cwd(), diffTarget);
+                            if (existsSync(targetPath)) preContent = readFileSync(targetPath, 'utf-8');
+                        } catch {}
                     }
 
                     const cmdPreview = cmd.length > 80 ? cmd.slice(0, 77) + '...' : cmd;
@@ -8167,14 +8102,19 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
                         log(color.dim(`  \u25b6 ${cmdPreview}`));
                     }
 
-                    const result = executeShellCommand(cmd);
+                    const result = await executeShellCommand(cmd);
 
-                    if (result.exitCode === 0) {
-                        const lines = (result.stdout || '').split('\n');
-                        const preview = lines.slice(0, 3).join('\n    ');
-                        if (preview.trim()) {
-                            log(color.dim(`    \u2514 ${preview}${lines.length > 3 ? '\n    ...' : ''}`));
-                        } else {
+                    // Show diff after file write
+                    if (diffTarget && result.exitCode === 0) {
+                        try {
+                            const targetPath = join(process.cwd(), diffTarget);
+                            if (existsSync(targetPath)) {
+                                const postContent = readFileSync(targetPath, 'utf-8');
+                                showFileDiff(diffTarget, preContent, postContent);
+                            }
+                        } catch {}
+                    } else if (result.exitCode === 0) {
+                        if (!(result.stdout || '').trim()) {
                             log(color.dim(`    \u2514 done`));
                         }
                     } else {
