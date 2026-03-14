@@ -15,21 +15,16 @@ import { handleStart, handleStatus, readStdin } from './server';
 import { fetchBrainStream, fetchBrainContext, buildEnrichedPrompt } from './brain';
 import { startAiREPL, welcomeWizard, handleAiConfig } from './repl';
 
-// Ink REPL loaded dynamically — only works with Bun runtime (ESM + Ink v5)
+import { startInkREPL } from './ink-repl';
+
+// Use Ink UI for TTY, fall back to old REPL for non-TTY
 async function startInkOrFallback(
     prompt: string | null,
     resumeId: string | null,
     opts: { autoAccept: boolean; devMode: boolean },
 ): Promise<void> {
-    // Detect if we're running in Bun (supports Ink v5)
-    const isBun = typeof (globalThis as any).Bun !== 'undefined';
-    if (isBun) {
-        try {
-            const { startInkREPL } = await import('./ink-repl');
-            return startInkREPL(prompt, resumeId, opts);
-        } catch {
-            // Fall through to old REPL
-        }
+    if (process.stdin.isTTY) {
+        return startInkREPL(prompt, resumeId, opts);
     }
     return startAiREPL(prompt, resumeId, opts);
 }
