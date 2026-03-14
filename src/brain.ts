@@ -127,11 +127,13 @@ export async function fetchBrainStream(
         if (conversationHistory && conversationHistory.length > 0) {
             body.conversationHistory = conversationHistory;
         }
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 30000); // 30s total max
         const response = await fetch(`${AI_BRAIN_URL}/docs/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
-            signal: AbortSignal.timeout(60000),
+            signal: controller.signal,
         });
 
         if (!response.ok) {
@@ -151,7 +153,7 @@ export async function fetchBrainStream(
         const reader = (response.body as ReadableStream<Uint8Array>).getReader();
         const decoder = new TextDecoder();
         let buffer = '';
-        const READ_TIMEOUT = 30000; // 30s per chunk — if no data for 30s, stream is dead
+        const READ_TIMEOUT = 10000; // 10s per chunk — if no data for 10s, stream is dead
 
         while (true) {
             // Race between read and timeout
@@ -202,7 +204,9 @@ export async function fetchBrainStream(
                         }
                     } else if (eventType === 'done') {
                         doneData = parsed;
+                        clearTimeout(timeout);
                     } else if (eventType === 'error') {
+                        clearTimeout(timeout);
                         logVerbose('Brain stream error:', parsed.message);
                         // Brain error — return what we have with error info
                         return {
@@ -220,6 +224,7 @@ export async function fetchBrainStream(
             }
         }
 
+        clearTimeout(timeout);
         return {
             code: fullText,
             sources: metadata?.sources || [],

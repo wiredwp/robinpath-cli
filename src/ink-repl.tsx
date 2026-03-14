@@ -538,7 +538,7 @@ class ReplEngine {
         const activeKey = (readAiConfig().apiKey as string) || this.apiKey;
         const activeProvider = this.resolveProvider(activeKey);
 
-        for (let loop = 0; loop < 15; loop++) {
+        for (let loop = 0; loop < 5; loop++) {
             let fullText = '';
 
             const result: BrainStreamResult | null = await fetchBrainStream(
