@@ -14,7 +14,7 @@ import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErr
 import { nativeModules } from './modules/index.js';
 
 // Injected by esbuild at build time via --define, fallback for dev mode
-const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.56.0';
+const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.57.0';
 
 // ============================================================================
 // Global flags
@@ -7905,10 +7905,11 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
                             pending += delta;
 
                             // Process buffer — hide <memory> and <cmd> tags from display
-                            while (pending.length > 0) {
+                            // Simple approach: flush everything except content inside tags
+                            while (true) {
                                 if (insideMemory) {
                                     const closeIdx = pending.indexOf('</memory>');
-                                    if (closeIdx === -1) return;
+                                    if (closeIdx === -1) break; // wait for closing tag
                                     const fact = pending.slice(0, closeIdx).trim();
                                     if (fact.length > 3 && fact.length < 300) {
                                         addMemoryFact(fact);
@@ -7916,39 +7917,48 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
                                     }
                                     pending = pending.slice(closeIdx + 9);
                                     insideMemory = false;
-                                } else if (insideCmd) {
+                                    continue;
+                                }
+                                if (insideCmd) {
                                     const closeIdx = pending.indexOf('</cmd>');
-                                    if (closeIdx === -1) return;
+                                    if (closeIdx === -1) break; // wait for closing tag
                                     pending = pending.slice(closeIdx + 6);
                                     insideCmd = false;
-                                } else {
-                                    // Look for any tag opening
-                                    const memIdx = pending.indexOf('<memory>');
-                                    const cmdIdx = pending.indexOf('<cmd>');
-                                    const firstTag = memIdx === -1 ? cmdIdx : cmdIdx === -1 ? memIdx : Math.min(memIdx, cmdIdx);
+                                    continue;
+                                }
 
-                                    if (firstTag === -1) {
-                                        // No tag found — flush safely (keep tail that could be partial tag)
-                                        const safe = pending.length - 8; // max tag length "<memory>"
-                                        if (safe > 0) {
-                                            process.stdout.write(pending.slice(0, safe));
-                                            pending = pending.slice(safe);
+                                // Look for tag openings
+                                const memIdx = pending.indexOf('<memory>');
+                                const cmdIdx = pending.indexOf('<cmd>');
+
+                                // No tags at all — check for partial tag at the end
+                                if (memIdx === -1 && cmdIdx === -1) {
+                                    const ltIdx = pending.lastIndexOf('<');
+                                    if (ltIdx !== -1 && ltIdx > pending.length - 9) {
+                                        // Possible partial tag at end — flush before it, keep the rest
+                                        if (ltIdx > 0) {
+                                            process.stdout.write(pending.slice(0, ltIdx));
+                                            pending = pending.slice(ltIdx);
                                         }
-                                        return;
-                                    }
-
-                                    // Flush text before the tag
-                                    if (firstTag > 0) {
-                                        process.stdout.write(pending.slice(0, firstTag));
-                                    }
-
-                                    if (firstTag === memIdx) {
-                                        pending = pending.slice(firstTag + 8);
-                                        insideMemory = true;
                                     } else {
-                                        pending = pending.slice(firstTag + 5);
-                                        insideCmd = true;
+                                        // No partial tag — flush everything
+                                        process.stdout.write(pending);
+                                        pending = '';
                                     }
+                                    break;
+                                }
+
+                                // Found a tag — flush text before it, then enter tag mode
+                                const firstTag = memIdx === -1 ? cmdIdx : cmdIdx === -1 ? memIdx : Math.min(memIdx, cmdIdx);
+                                if (firstTag > 0) {
+                                    process.stdout.write(pending.slice(0, firstTag));
+                                }
+                                if (firstTag === memIdx) {
+                                    pending = pending.slice(firstTag + 8);
+                                    insideMemory = true;
+                                } else {
+                                    pending = pending.slice(firstTag + 5);
+                                    insideCmd = true;
                                 }
                             }
                         },
