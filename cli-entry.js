@@ -14,7 +14,7 @@ import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErr
 import { nativeModules } from './modules/index.js';
 
 // Injected by esbuild at build time via --define, fallback for dev mode
-const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.57.0';
+const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.58.0';
 
 // ============================================================================
 // Global flags
@@ -6771,13 +6771,12 @@ const DANGEROUS_PATTERNS = [
     /\brm\s+/i, /\brmdir\s+/i, /\bdel\s+/i, /\brd\s+/i,
     /\bkill\s+/i, /\bpkill\s+/i, /\btaskkill\s+/i,
     /\bchmod\s+/i, /\bchown\s+/i,
-    /(?<![>])>[^>]/, // redirect overwrite (but not >>)
     /\bcurl\b.*-X\s*(DELETE|PUT|POST)/i,
     /\bgit\s+push\b/i, /\bgit\s+reset\s+--hard/i, /\bgit\s+clean\b/i,
     /\bgit\s+checkout\s+\.\s*$/i, /\bgit\s+restore\s+\.\s*$/i,
     /\bnpm\s+publish\b/i,
     /\bsudo\s+/i, /\bsu\s+/i,
-    /\bdd\s+/i, /\bmkfs\b/i, /\bformat\s+/i,
+    /\bdd\s+if=/i, /\bmkfs\b/i, /\bformat\s+[a-zA-Z]:/i,
     /\bshutdown\b/i, /\breboot\b/i,
 ];
 
@@ -6790,7 +6789,7 @@ function confirmCommand(cmd, autoAccept) {
     // Auto-accept safe commands
     if (autoAccept && !isDangerousCommand(cmd)) {
         const preview = cmd.length > 80 ? cmd.slice(0, 77) + '...' : cmd;
-        log(color.dim(`  \u25b6 ${preview}`));
+        log(color.dim(`  $ ${preview}`));
         return Promise.resolve('yes');
     }
 
@@ -6799,22 +6798,25 @@ function confirmCommand(cmd, autoAccept) {
     // Non-interactive — auto-accept safe, reject dangerous
     if (!process.stdin.isTTY) {
         const preview = cmd.length > 80 ? cmd.slice(0, 77) + '...' : cmd;
-        log(color.dim(`  \u25b6 ${preview}`));
+        log(color.dim(`  $ ${preview}`));
         return Promise.resolve(dangerous ? 'no' : 'yes');
     }
 
     return new Promise((resolve) => {
-        const preview = cmd.length > 120 ? cmd.slice(0, 117) + '...' : cmd;
+        // Show first line of command for readability
+        const firstLine = cmd.split('\n')[0];
+        const preview = firstLine.length > 100 ? firstLine.slice(0, 97) + '...' : firstLine;
+        const multiline = cmd.includes('\n') ? color.dim(` (+${cmd.split('\n').length - 1} lines)`) : '';
         let resolved = false;
 
         log('');
         if (dangerous) {
-            log(color.red('  \u26a0 DANGEROUS'));
+            log(color.red('  ! dangerous command'));
         }
-        log(`  ${color.yellow('\u26a1')} ${color.bold(preview)}`);
+        log(`  ${color.dim('$')} ${preview}${multiline}`);
         const opts = dangerous
-            ? `     ${color.green('[y]')} Run  ${color.red('[n]')} Skip  ${color.cyan('[e]')} Edit`
-            : `     ${color.green('[y]')} Run  ${color.red('[n]')} Skip  ${color.cyan('[a]')} Always  ${color.cyan('[e]')} Edit`;
+            ? `  ${color.green('[y]')} run  ${color.red('[n]')} skip  ${color.cyan('[e]')} edit  `
+            : `  ${color.green('[y]')} run  ${color.red('[n]')} skip  ${color.cyan('[a]')} always  ${color.cyan('[e]')} edit  `;
         process.stdout.write(opts);
 
         process.stdin.setRawMode(true);
@@ -6850,12 +6852,15 @@ function confirmCommand(cmd, autoAccept) {
 function createSpinner(text) {
     const frames = ['\u280b', '\u2819', '\u2839', '\u2838', '\u283c', '\u2834', '\u2826', '\u2827', '\u2807', '\u280f'];
     let i = 0;
+    let stopped = false;
     const interval = setInterval(() => {
         process.stdout.write(`\r${color.cyan(frames[i % frames.length])} ${color.dim(text)}`);
         i++;
     }, 80);
     return {
         stop(clearLine = true) {
+            if (stopped) return; // Only erase once — prevents cursor reset on every token
+            stopped = true;
             clearInterval(interval);
             if (clearLine) process.stdout.write('\r' + ' '.repeat(text.length + 4) + '\r');
         },
