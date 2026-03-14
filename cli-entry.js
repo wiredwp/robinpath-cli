@@ -14,7 +14,7 @@ import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErr
 import { nativeModules } from './modules/index.js';
 
 // Injected by esbuild at build time via --define, fallback for dev mode
-const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.60.0';
+const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.61.0';
 
 // ============================================================================
 // Global flags
@@ -7334,11 +7334,15 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
     log('');
     const modeStr = devMode ? 'dev (auto+verbose)' : autoAccept ? 'auto' : 'confirm';
     const modeColor = devMode ? color.yellow : autoAccept ? color.yellow : color.green;
+    // Shorten cwd for display
+    const cwdDisplay = process.cwd().replace(homedir(), '~');
+    const cwdShort = cwdDisplay.length > 40 ? '...' + cwdDisplay.slice(-37) : cwdDisplay;
+
     log(color.dim('  \u256d' + '\u2500'.repeat(50) + '\u256e'));
     log(color.dim('  \u2502') + color.bold('  RobinPath AI') + ' '.repeat(36) + color.dim('\u2502'));
     log(color.dim('  \u2502') + `  Model: ${color.cyan(modelShort)}` + ' '.repeat(Math.max(0, 41 - modelShort.length)) + color.dim('\u2502'));
     log(color.dim('  \u2502') + `  Mode:  ${modeColor(modeStr)}` + ' '.repeat(Math.max(0, 41 - modeStr.length)) + color.dim('\u2502'));
-    log(color.dim('  \u2502') + `  Type ${color.dim('exit')} to quit, ${color.dim('/help')} for commands` + ' '.repeat(12) + color.dim('\u2502'));
+    log(color.dim('  \u2502') + `  Dir:   ${color.dim(cwdShort)}` + ' '.repeat(Math.max(0, 41 - cwdShort.length)) + color.dim('\u2502'));
     log(color.dim('  \u2570' + '\u2500'.repeat(50) + '\u256f'));
     log('');
 
@@ -7395,12 +7399,28 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
         }
     } catch { /* ignore */ }
 
+    // Slash command tab completion
+    const slashCommands = [
+        '/help', '/model', '/auto', '/clear', '/compact',
+        '/save', '/sessions', '/resume', '/delete',
+        '/memory', '/remember', '/forget',
+        '/tools', '/modules', '/context', '/usage', '/scan',
+    ];
+    function completer(line) {
+        if (line.startsWith('/')) {
+            const hits = slashCommands.filter(c => c.startsWith(line));
+            return [hits.length ? hits : slashCommands, line];
+        }
+        return [[], line];
+    }
+
     const rl = createInterface({
         input: process.stdin,
         output: process.stdout,
-        prompt: color.cyan('> '),
+        prompt: color.cyan('\u276f '),
         history,
         historySize: 500,
+        completer,
     });
 
     function saveHistory(line) {
@@ -7413,6 +7433,8 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
     // If initial prompt was provided (rp ai "question"), simulate input
     if (initialPrompt) {
         setTimeout(() => rl.write(initialPrompt + '\n'), 50);
+    } else if (!resumeSessionId) {
+        log(color.dim('  Type a message, /help for commands, Tab to complete'));
     }
 
     rl.prompt();
