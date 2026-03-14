@@ -380,7 +380,11 @@ function ChatApp({engine}: {engine: ReplEngine}) {
                         ) : msg.text.includes('⎿') && msg.text.includes('Write') ? (
                             <Box flexDirection="column">
                                 <Text dimColor>{msg.text.split('\n')[0]}</Text>
-                                {msg.text.includes('+ ') ? <Text backgroundColor="green" color="white">{msg.text.split('\n').slice(1).join('\n')}</Text> : null}
+                                {msg.text.split('\n').slice(1).map((line, li) => (
+                                    <Text key={li} backgroundColor={line.includes('+') ? 'green' : undefined} color={line.includes('+') ? 'white' : undefined} dimColor={!line.includes('+')}>
+                                        {line}
+                                    </Text>
+                                ))}
                             </Box>
                         ) : msg.text.includes('⎿') && msg.text.includes('✗') ? (
                             <Box flexDirection="column">
@@ -675,10 +679,15 @@ class ReplEngine {
 
                 if (r.exitCode === 0) {
                     if (isWrite && lineCount > 0) {
-                        // File write — show like Claude Code: "Write(file) + N lines"
+                        // File write — Claude Code style with line numbers
                         const fileMatch = firstLine.match(/["']([^"']+\.\w+)["']/);
                         const fileName = fileMatch ? fileMatch[1] : firstLine.slice(0, 30);
-                        ui?.addMessage(`  ⎿  Write(${fileName})\n     + ${lineCount} lines`, true);
+                        const contentLines = cmdLines.slice(1).filter(l => l.trim() && !l.match(/^(RPEOF|EOF|'@)$/));
+                        const preview = contentLines.slice(0, 8).map((l, i) =>
+                            `     ${String(i + 1).padStart(3)} +  ${l}`
+                        ).join('\n');
+                        const extra = contentLines.length > 8 ? `\n     … ${contentLines.length - 8} more lines` : '';
+                        ui?.addMessage(`  ⎿  Write(${fileName})\n     + Added ${contentLines.length} lines\n${preview}${extra}`, true);
                     } else if (r.stdout?.trim()) {
                         const lines = r.stdout.trim().split('\n');
                         const preview = lines.length <= 4
