@@ -408,9 +408,9 @@ function ChatApp({engine}: {engine: ReplEngine}) {
 
             {/* Messages — regular Box so /clear actually clears the screen */}
             {messages.map(msg => (
-                <Box key={msg.id} paddingX={1} marginBottom={msg.text.startsWith('❯') ? 0 : 1} flexDirection="column">
+                <Box key={msg.id} paddingX={1} marginBottom={1} flexDirection="column">
                     {msg.text.startsWith('❯') ? (
-                        <Text><Text color="cyan" bold>❯</Text><Text bold>{msg.text.slice(1)}</Text></Text>
+                        <Text backgroundColor="gray" color="white" bold>{' '}{msg.text}{' '}</Text>
                     ) : msg.text.includes('⎿') && msg.text.includes('Write') ? (
                         <Box flexDirection="column">
                             <Text dimColor>{msg.text.split('\n')[0]}</Text>
