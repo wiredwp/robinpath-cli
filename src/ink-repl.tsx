@@ -27,7 +27,7 @@ import {readModulesManifest} from './commands-core';
 import {getNativeModules} from './runtime';
 import {homedir, platform} from 'node:os';
 import {randomUUID} from 'node:crypto';
-import {existsSync, readdirSync, statSync} from 'node:fs';
+import {existsSync, readdirSync, statSync, readFileSync, writeFileSync, mkdirSync} from 'node:fs';
 import {join} from 'node:path';
 
 // ── Types ──
@@ -127,8 +127,69 @@ function InputArea({onSubmit, placeholder}: {onSubmit: (v: string) => void; plac
     );
 }
 
+// ── Trust Prompt ──
+function TrustPrompt({cwd, onAccept, onReject}: {cwd: string; onAccept: () => void; onReject: () => void}) {
+    const [selected, setSelected] = useState(0);
+
+    useInput((ch, key) => {
+        if (key.upArrow) setSelected(0);
+        if (key.downArrow) setSelected(1);
+        if (key.return) {
+            if (selected === 0) onAccept();
+            else onReject();
+        }
+        if (key.escape) onReject();
+        if (ch === '1') { setSelected(0); onAccept(); }
+        if (ch === '2') { setSelected(1); onReject(); }
+    });
+
+    return (
+        <Box flexDirection="column" paddingY={1}>
+            <Box marginBottom={1} paddingX={1}>
+                <Text><Text color="cyan" bold>◆</Text> <Text bold>RobinPath</Text> <Text dimColor>v{CLI_VERSION}</Text></Text>
+            </Box>
+
+            <Text dimColor>{'─'.repeat(Math.max(process.stdout.columns || 80, 40))}</Text>
+
+            <Box flexDirection="column" paddingX={2} paddingY={1}>
+                <Text bold>Workspace:</Text>
+                <Text> </Text>
+                <Text color="cyan">{cwd}</Text>
+                <Text> </Text>
+                <Text wrap="wrap" dimColor>
+                    RobinPath can read, edit, and execute files in this folder.
+                    Make sure this is a project you created or trust.
+                </Text>
+                <Text> </Text>
+                <Text>
+                    {selected === 0 ? <Text color="cyan" bold>❯ </Text> : <Text>  </Text>}
+                    <Text bold={selected === 0}>Yes, I trust this folder</Text>
+                </Text>
+                <Text>
+                    {selected === 1 ? <Text color="cyan" bold>❯ </Text> : <Text>  </Text>}
+                    <Text bold={selected === 1}>No, exit</Text>
+                </Text>
+            </Box>
+
+            <Text dimColor>{'─'.repeat(Math.max(process.stdout.columns || 80, 40))}</Text>
+            <Box paddingX={2}><Text dimColor>↑↓ select · enter confirm · esc cancel</Text></Box>
+        </Box>
+    );
+}
+
 // ── Main App ──
 function ChatApp({engine}: {engine: ReplEngine}) {
+    const [trusted, setTrusted] = useState(() => {
+        // Check if this directory was previously trusted
+        try {
+            const trustFile = join(getRobinPathHome(), 'trusted-dirs.json');
+            if (existsSync(trustFile)) {
+                const dirs: string[] = JSON.parse(readFileSync(trustFile, 'utf-8'));
+                return dirs.includes(process.cwd());
+            }
+        } catch {}
+        return false;
+    });
     const [messages, setMessages] = useState<ChatMsg[]>([]);
     const [streaming, setStreaming] = useState('');
     const [loading, setLoading] = useState(false);
@@ -168,9 +229,30 @@ function ChatApp({engine}: {engine: ReplEngine}) {
 
     const isFirst = messages.length === 0;
 
+    // Trust prompt
+    if (!trusted) {
+        return (
+            <TrustPrompt
+                cwd={process.cwd()}
+                onAccept={() => {
+                    setTrusted(true);
+                    // Save trust
+                    try {
+                        const trustFile = join(getRobinPathHome(), 'trusted-dirs.json');
+                        let dirs: string[] = [];
+                        if (existsSync(trustFile)) dirs = JSON.parse(readFileSync(trustFile, 'utf-8'));
+                        if (!dirs.includes(process.cwd())) dirs.push(process.cwd());
+                        writeFileSync(trustFile, JSON.stringify(dirs, null, 2));
+                    } catch {}
+                }}
+                onReject={() => process.exit(0)}
+            />
+        );
+    }
+
     return (
         <Box flexDirection="column" paddingY={1}>
-            <Box marginBottom={1}>
+            <Box marginBottom={1} paddingX={1}>
                 <Text><Text color="cyan" bold>◆</Text> <Text bold>RobinPath</Text> <Text dimColor>v{CLI_VERSION}</Text></Text>
             </Box>
 
