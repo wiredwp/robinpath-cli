@@ -14,7 +14,7 @@ import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErr
 import { nativeModules } from './modules/index.js';
 
 // Injected by esbuild at build time via --define, fallback for dev mode
-const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.59.0';
+const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.60.0';
 
 // ============================================================================
 // Global flags
@@ -7525,7 +7525,7 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
             log(`  ${color.cyan('sed -i')}               Edit files in-place`);
             log(`  ${color.cyan('ls / find')}             List/search files`);
             log(`  ${color.cyan('mkdir / rm / mv / cp')}  File operations`);
-            log(`  ${color.cyan('robinpath run')}         Run .rp scripts`);
+            log(`  ${color.cyan('robinpath <file.rp>')}    Run .rp scripts`);
             log('');
             rl.prompt();
             return;
@@ -7940,14 +7940,12 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
                                 if (memIdx === -1 && cmdIdx === -1) {
                                     const ltIdx = pending.lastIndexOf('<');
                                     if (ltIdx !== -1 && ltIdx > pending.length - 9) {
-                                        // Possible partial tag at end — flush before it, keep the rest
                                         if (ltIdx > 0) {
-                                            process.stdout.write(pending.slice(0, ltIdx));
+                                            process.stdout.write(pending.slice(0, ltIdx).replace(/\n{3,}/g, '\n\n'));
                                             pending = pending.slice(ltIdx);
                                         }
                                     } else {
-                                        // No partial tag — flush everything
-                                        process.stdout.write(pending);
+                                        process.stdout.write(pending.replace(/\n{3,}/g, '\n\n'));
                                         pending = '';
                                     }
                                     break;
@@ -7956,7 +7954,7 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
                                 // Found a tag — flush text before it, then enter tag mode
                                 const firstTag = memIdx === -1 ? cmdIdx : cmdIdx === -1 ? memIdx : Math.min(memIdx, cmdIdx);
                                 if (firstTag > 0) {
-                                    process.stdout.write(pending.slice(0, firstTag));
+                                    process.stdout.write(pending.slice(0, firstTag).replace(/\n{3,}/g, '\n\n'));
                                 }
                                 if (firstTag === memIdx) {
                                     pending = pending.slice(firstTag + 8);
@@ -8002,6 +8000,8 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
                 const commands = extractCommands(brainResult.code);
                 const { cleaned } = extractMemoryTags(stripCommandTags(brainResult.code));
 
+                // Clean up trailing blank lines from streaming
+                process.stdout.write('\x1b[0G'); // move cursor to column 0
                 process.stdout.write('\n');
 
                 // Warn if code validation failed
