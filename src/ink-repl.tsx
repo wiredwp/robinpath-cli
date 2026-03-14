@@ -65,6 +65,25 @@ function InputArea({onSubmit, placeholder, statusText}: {onSubmit: (v: string) =
 
     const showHints = value.startsWith('/') && matchingCommands.length > 0;
 
+    // File picker — show files when @ is typed (like Claude Code)
+    const showFiles = useMemo(() => {
+        const atMatch = value.match(/@(\S*)$/);
+        if (!atMatch) return [];
+        const prefix = atMatch[1] || '';
+        try {
+            const entries = readdirSync(process.cwd());
+            return entries
+                .filter(e => !e.startsWith('.') && (!prefix || e.toLowerCase().startsWith(prefix.toLowerCase())))
+                .slice(0, 10)
+                .map(e => {
+                    try {
+                        const s = statSync(join(process.cwd(), e));
+                        return { name: e, isDir: s.isDirectory() };
+                    } catch { return { name: e, isDir: false }; }
+                });
+        } catch { return []; }
+    }, [value]);
+
     useInput((ch, key) => {
         if (key.return) {
             if (value.endsWith('\\')) {setValue(p => p.slice(0, -1) + '\n'); return;}
@@ -77,7 +96,15 @@ function InputArea({onSubmit, placeholder, statusText}: {onSubmit: (v: string) =
         if (ch === '\x03') {if (!value) exit(); else setValue(''); return;}
         if (key.backspace || key.delete) {setValue(p => p.slice(0, -1)); return;}
         if (key.tab) {
-            if (matchingCommands.length === 1) setValue(matchingCommands[0][0]);
+            if (matchingCommands.length === 1) { setValue(matchingCommands[0][0]); return; }
+            if (showFiles.length === 1) {
+                // Complete the file name after @
+                const atMatch = value.match(/@(\S*)$/);
+                if (atMatch) {
+                    const before = value.slice(0, value.length - atMatch[0].length);
+                    setValue(before + '@' + showFiles[0].name + ' ');
+                }
+            }
             return;
         }
         if (ch === '\x15') {setValue(''); return;}
@@ -120,8 +147,21 @@ function InputArea({onSubmit, placeholder, statusText}: {onSubmit: (v: string) =
                 <Text dimColor>{'─'.repeat(Math.max(process.stdout.columns || 80, 40))}</Text>
             </Box>
 
+            {/* File picker — shows when @ is typed */}
+            {showFiles.length > 0 && (
+                <Box flexDirection="column" paddingX={2} marginTop={1}>
+                    {showFiles.map(f => (
+                        <Text key={f.name}>
+                            <Text color="cyan">+ </Text>
+                            <Text bold={f.name.endsWith('.rp') || f.name.endsWith('.robin')}>{f.name}</Text>
+                            {f.isDir ? <Text dimColor>/</Text> : null}
+                        </Text>
+                    ))}
+                </Box>
+            )}
+
             <Box paddingX={2} justifyContent="space-between">
-                <Text dimColor>/ for commands</Text>
+                <Text dimColor>/ for commands · @ for files</Text>
                 <Text dimColor>{statusText || ''}</Text>
             </Box>
         </Box>

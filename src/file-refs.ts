@@ -1,13 +1,13 @@
 /**
- * File reference resolver — expands @/path references in prompts.
+ * File reference resolver — expands @filename references in prompts.
  *
  * Syntax:
- *   @/filename.txt     — include file contents inline
- *   @/path/to/file     — relative to cwd
- *   @/*.rp             — include all matching files (glob)
+ *   @filename.txt      — include file contents inline
+ *   @path/to/file      — relative to cwd
+ *   @*.rp              — include all matching files (glob)
  *
  * Example:
- *   "explain @/hello.rp and fix the bug"
+ *   "explain @hello.rp and fix the bug"
  *   → "explain\n--- hello.rp ---\nlog \"hello world\"\n---\nand fix the bug"
  */
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
@@ -23,11 +23,11 @@ const MAX_FILE_SIZE = 50_000; // 50KB max per file
 const MAX_TOTAL_SIZE = 200_000; // 200KB total max
 
 /**
- * Find all @/path references in a prompt string.
+ * Find all @path references in a prompt string.
  */
 export function findFileRefs(prompt: string): string[] {
     const refs: string[] = [];
-    const regex = /@\/([\w.\-\/\\*]+)/g;
+    const regex = /@([\w.\-\/\\*]+)/g;
     let match;
     while ((match = regex.exec(prompt)) !== null) {
         refs.push(match[1]);
@@ -43,7 +43,7 @@ function resolvePattern(pattern: string, cwd: string): { path: string; content: 
     const results: { path: string; content: string; size: number }[] = [];
 
     if (pattern.includes('*')) {
-        // Simple glob: @/*.rp or @/src/*.ts
+        // Simple glob: @*.rp or @src/*.ts
         const dir = pattern.includes('/') ? join(cwd, pattern.split('*')[0].replace(/\/[^/]*$/, '')) : cwd;
         const ext = pattern.split('*').pop() || '';
         try {
@@ -90,7 +90,7 @@ function resolvePattern(pattern: string, cwd: string): { path: string; content: 
 }
 
 /**
- * Expand all @/path references in a prompt.
+ * Expand all @path references in a prompt.
  * Returns the expanded prompt with file contents inlined.
  */
 export function expandFileRefs(prompt: string, cwd?: string): { expanded: string; refs: FileRef[] } {
@@ -119,10 +119,10 @@ export function expandFileRefs(prompt: string, cwd?: string): { expanded: string
         }
     }
 
-    // Remove @/references from the prompt text
+    // Remove @references from the prompt text
     let cleaned = prompt;
     for (const pattern of patterns) {
-        cleaned = cleaned.replace(`@/${pattern}`, '').trim();
+        cleaned = cleaned.replace(`@${pattern}`, '').trim();
     }
 
     // Build expanded prompt: file contents first, then the user's message
@@ -134,7 +134,7 @@ export function expandFileRefs(prompt: string, cwd?: string): { expanded: string
 }
 
 /**
- * List files that can be referenced with @/ in the current directory.
+ * List files that can be referenced with @ in the current directory.
  * Used for tab completion.
  */
 export function listReferenceableFiles(cwd?: string, prefix?: string): string[] {
@@ -147,7 +147,7 @@ export function listReferenceableFiles(cwd?: string, prefix?: string): string[] 
             try {
                 const stat = statSync(join(workDir, entry));
                 if (stat.isFile() && stat.size <= MAX_FILE_SIZE) {
-                    const ref = `@/${entry}`;
+                    const ref = `@${entry}`;
                     if (!prefix || ref.startsWith(prefix)) {
                         results.push(ref);
                     }
