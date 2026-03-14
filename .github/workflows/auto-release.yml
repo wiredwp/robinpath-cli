@@ -74,51 +74,28 @@ jobs:
         include:
           - os: windows-latest
             name: robinpath-windows-x64.exe
+            target: bun-windows-x64
           - os: ubuntu-latest
             name: robinpath-linux-x64
+            target: bun-linux-x64
           - os: macos-latest
             name: robinpath-macos-arm64
+            target: bun-darwin-arm64
 
     runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          node-version: '22'
+          bun-version: latest
 
       - name: Install dependencies
-        run: npm install
+        run: bun install
 
-      - name: Bundle CLI
-        run: npm run build:bundle
-
-      - name: Generate SEA blob
-        run: node --experimental-sea-config sea-config.json
-
-      - name: Create binary (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Copy-Item (Get-Command node).Source -Destination "dist/${{ matrix.name }}"
-          npx postject "dist/${{ matrix.name }}" NODE_SEA_BLOB dist/sea-prep.blob --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
-
-      - name: Create binary (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          cp "$(which node)" "dist/${{ matrix.name }}"
-          npx postject "dist/${{ matrix.name }}" NODE_SEA_BLOB dist/sea-prep.blob --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2
-          chmod +x "dist/${{ matrix.name }}"
-
-      - name: Create binary (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          cp "$(which node)" "dist/${{ matrix.name }}"
-          codesign --remove-signature "dist/${{ matrix.name }}"
-          npx postject "dist/${{ matrix.name }}" NODE_SEA_BLOB dist/sea-prep.blob --sentinel-fuse NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2 --macho-segment-name NODE_SEA
-          codesign -s - "dist/${{ matrix.name }}"
-          chmod +x "dist/${{ matrix.name }}"
+      - name: Build standalone binary
+        run: bun build src/index.ts --compile --outfile=dist/${{ matrix.name }} --target=${{ matrix.target }}
 
       - name: Verify binary
         shell: bash
