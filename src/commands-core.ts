@@ -182,38 +182,77 @@ export function handleInstall(): void {
     log('  robinpath --version');
 }
 
-/** Uninstall: remove ~/.robinpath and clean PATH */
-export function handleUninstall(): void {
-    const installDir: string = getInstallDir();
+/** Uninstall: confirmation prompt → remove everything cleanly */
+export async function handleUninstall(): Promise<void> {
     const robinpathHome: string = getRobinPathHome();
-    const isWindows: boolean = platform() === 'win32';
 
-    // Remove the directory
+    log('');
+    log(color.bold('  Uninstall RobinPath'));
+    log('');
+    log('  This will remove:');
     if (existsSync(robinpathHome)) {
-        rmSync(robinpathHome, { recursive: true, force: true });
-        log(`Removed ${robinpathHome}`);
-    } else {
-        log('Nothing to remove.');
+        log(`  ${color.dim('•')} ${robinpathHome} (config, sessions, modules, memory)`);
     }
+    log(`  ${color.dim('•')} @robinpath/cli npm package`);
+    log('');
 
-    // Clean PATH
-    if (isWindows) {
-        try {
-            execSync(
-                `powershell -NoProfile -Command "$p = [Environment]::GetEnvironmentVariable('Path','User'); $clean = ($p -split ';' | Where-Object { $_ -notlike '*\\.robinpath\\bin*' }) -join ';'; [Environment]::SetEnvironmentVariable('Path',$clean,'User')"`,
-                { encoding: 'utf-8' },
-            );
-            log('Removed from PATH');
-        } catch {
-            log(`Could not update PATH automatically.`);
-            log(`Remove "${installDir}" from your PATH manually.`);
+    // Confirmation prompt
+    if (process.stdin.isTTY) {
+        const answer: string = await new Promise((resolve) => {
+            process.stdout.write(`  ${color.red('Are you sure?')} [y/N] `);
+            process.stdin.setRawMode(true);
+            process.stdin.resume();
+            const onKey = (buf: Buffer): void => {
+                const key = buf.toString().toLowerCase();
+                process.stdin.removeListener('data', onKey);
+                try { process.stdin.setRawMode(false); } catch {}
+                process.stdin.pause();
+                process.stdout.write(key === 'y' ? 'yes\n' : 'no\n');
+                resolve(key);
+            };
+            process.stdin.on('data', onKey);
+        });
+
+        if (answer !== 'y') {
+            log(color.dim('  Cancelled.'));
+            return;
         }
-    } else {
-        log(`Remove the robinpath PATH line from your shell profile.`);
     }
 
     log('');
-    log('RobinPath uninstalled. Restart your terminal.');
+
+    // Remove ~/.robinpath
+    if (existsSync(robinpathHome)) {
+        try {
+            rmSync(robinpathHome, { recursive: true, force: true });
+            log(color.green('  ✓') + ` Removed ${robinpathHome}`);
+        } catch (err: unknown) {
+            log(color.red('  ✗') + ` Could not remove ${robinpathHome}: ${(err as Error).message}`);
+        }
+    }
+
+    // Remove old binary from PATH if exists
+    const oldBin = getInstallDir();
+    if (existsSync(oldBin)) {
+        try {
+            rmSync(oldBin, { recursive: true, force: true });
+            log(color.green('  ✓') + ' Removed old binary');
+        } catch {}
+    }
+
+    // Uninstall npm package
+    log(color.dim('  Removing npm package...'));
+    try {
+        execSync('npm uninstall -g @robinpath/cli', { stdio: 'pipe' });
+        log(color.green('  ✓') + ' Removed @robinpath/cli');
+    } catch {
+        log(color.dim('  npm uninstall skipped (may need manual: npm uninstall -g @robinpath/cli)'));
+    }
+
+    log('');
+    log(color.green('  RobinPath completely uninstalled.'));
+    log(color.dim('  To reinstall: npm install -g @robinpath/cli'));
+    log('');
 }
 
 // ---------------------------------------------------------------------------

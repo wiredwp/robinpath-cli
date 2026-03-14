@@ -332,7 +332,7 @@ async function main(): Promise<void> {
         return;
     }
     if (command === 'uninstall') {
-        handleUninstall();
+        await handleUninstall();
         return;
     }
     if (command === 'update') {
