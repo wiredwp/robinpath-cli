@@ -127,14 +127,30 @@ function CodeBlock({content, lang}: {content: string; lang?: string}) {
         ? [...allLines.slice(0, 20), `… ${allLines.length - 25} more lines`, ...allLines.slice(-5)]
         : allLines;
 
+    // Detect if this is a diff block (has +/- prefixed lines)
+    const isDiff = lang === 'diff' || lines.some(l => /^[+-]\s/.test(l) || /^@@/.test(l));
+
     return (
         <Box flexDirection="column" marginY={0} paddingLeft={2}>
-            {lines.map((line, i) => (
-                <Text key={i}>
-                    <Text>{'  '}</Text>
-                    <Text>{line}</Text>
-                </Text>
-            ))}
+            {lines.map((line, i) => {
+                if (isDiff) {
+                    if (line.startsWith('+') && !line.startsWith('+++')) {
+                        return <Text key={i} backgroundColor="green" color="white">{'  '}{line}</Text>;
+                    }
+                    if (line.startsWith('-') && !line.startsWith('---')) {
+                        return <Text key={i} backgroundColor="red" color="white">{'  '}{line}</Text>;
+                    }
+                    if (line.startsWith('@@')) {
+                        return <Text key={i} color="cyan">{'  '}{line}</Text>;
+                    }
+                }
+                return (
+                    <Text key={i}>
+                        <Text>{'  '}</Text>
+                        <Text>{line}</Text>
+                    </Text>
+                );
+            })}
         </Box>
     );
 }

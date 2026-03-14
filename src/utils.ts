@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs';
 
 // Injected by esbuild at build time via --define, fallback for dev mode
 declare const __CLI_VERSION__: string;
-export const CLI_VERSION: string = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '2.6.0';
+export const CLI_VERSION: string = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '2.7.0';
 
 // ============================================================================
 // Global flags

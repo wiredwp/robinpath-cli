@@ -377,6 +377,16 @@ function ChatApp({engine}: {engine: ReplEngine}) {
                     <Box key={msg.id} paddingX={1} marginBottom={msg.text.startsWith('❯') ? 0 : 1} flexDirection="column">
                         {msg.text.startsWith('❯') ? (
                             <Text><Text color="cyan" bold>❯</Text><Text bold>{msg.text.slice(1)}</Text></Text>
+                        ) : msg.text.includes('⎿') && msg.text.includes('Write') ? (
+                            <Box flexDirection="column">
+                                <Text dimColor>{msg.text.split('\n')[0]}</Text>
+                                {msg.text.includes('+ ') ? <Text backgroundColor="green" color="white">{msg.text.split('\n').slice(1).join('\n')}</Text> : null}
+                            </Box>
+                        ) : msg.text.includes('⎿') && msg.text.includes('✗') ? (
+                            <Box flexDirection="column">
+                                <Text dimColor>{msg.text.split('\n')[0]}</Text>
+                                <Text backgroundColor="red" color="white">{msg.text.split('\n').slice(1).join('\n')}</Text>
+                            </Box>
                         ) : msg.text.includes('⎿') ? (
                             <Text dimColor wrap="wrap">{msg.text}</Text>
                         ) : msg.dim ? (
@@ -653,26 +663,34 @@ class ReplEngine {
             // Execute commands and collect results
             const cmdResults: {command: string; stdout: string; stderr: string; exitCode: number}[] = [];
             for (const cmd of commands) {
-                const firstLine = cmd.split('\n')[0].slice(0, 70);
-                const isMultiline = cmd.includes('\n');
                 const r = await executeShellCommand(cmd);
                 cmdResults.push({command: cmd, stdout: r.stdout || '', stderr: r.stderr || '', exitCode: r.exitCode});
 
-                // Claude Code-style tool result display
+                // Detect command type for Claude Code-style display
+                const isWrite = cmd.includes('>') || cmd.includes('Set-Content') || cmd.includes('Out-File');
+                const isRun = cmd.startsWith('robinpath ') || cmd.includes('node ') || cmd.includes('npm ');
+                const cmdLines = cmd.split('\n');
+                const lineCount = isWrite ? cmdLines.length - 1 : 0;
+                const firstLine = cmdLines[0].slice(0, 70);
+
                 if (r.exitCode === 0) {
-                    const output = (r.stdout || '').trim();
-                    if (output) {
-                        const lines = output.split('\n');
+                    if (isWrite && lineCount > 0) {
+                        // File write — show like Claude Code: "Write(file) + N lines"
+                        const fileMatch = firstLine.match(/["']([^"']+\.\w+)["']/);
+                        const fileName = fileMatch ? fileMatch[1] : firstLine.slice(0, 30);
+                        ui?.addMessage(`  ⎿  Write(${fileName})\n     + ${lineCount} lines`, true);
+                    } else if (r.stdout?.trim()) {
+                        const lines = r.stdout.trim().split('\n');
                         const preview = lines.length <= 4
                             ? lines.map(l => `     ${l}`).join('\n')
                             : lines.slice(0, 3).map(l => `     ${l}`).join('\n') + `\n     … ${lines.length - 3} more lines`;
-                        ui?.addMessage(`  ⎿  Execute(${firstLine}${isMultiline ? ' …' : ''})\n${preview}`, true);
+                        ui?.addMessage(`  ⎿  Execute(${firstLine})\n${preview}`, true);
                     } else {
-                        ui?.addMessage(`  ⎿  Execute(${firstLine}${isMultiline ? ' …' : ''})`, true);
+                        ui?.addMessage(`  ⎿  Execute(${firstLine})`, true);
                     }
                 } else {
                     const errLine = (r.stderr || '').trim().split('\n')[0].slice(0, 70);
-                    ui?.addMessage(`  ⎿  Execute(${firstLine}${isMultiline ? ' …' : ''})\n     ✗ ${errLine}`, true);
+                    ui?.addMessage(`  ⎿  Execute(${firstLine})\n     ✗ ${errLine}`, true);
                 }
             }
 
