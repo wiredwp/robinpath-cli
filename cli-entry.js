@@ -6237,19 +6237,31 @@ async function welcomeWizard() {
     let cursor = 0;
 
     const picked = await new Promise((resolve) => {
+        let renderedLines = 0;
+
+        function clearRendered() {
+            for (let i = 0; i < renderedLines; i++) {
+                process.stdout.write('\x1b[1A\x1b[2K');
+            }
+            renderedLines = 0;
+        }
+
         function render() {
-            process.stdout.write('\x1b[2J\x1b[H');
-            log('');
-            log(color.bold('  Welcome to RobinPath AI!'));
-            log(color.dim('  Your AI-powered scripting assistant'));
-            log('');
+            clearRendered();
+            let count = 0;
+            const out = (text) => { process.stdout.write(text + '\n'); count++; };
+            out('');
+            out(color.bold('  Welcome to RobinPath AI!'));
+            out(color.dim('  Your AI-powered scripting assistant'));
+            out('');
             for (let i = 0; i < options.length; i++) {
                 const marker = i === cursor ? color.cyan('\u276f') : ' ';
                 const text = i === cursor ? color.cyan(color.bold(options[i].name)) : options[i].name;
-                log(`  ${marker} ${text}`);
+                out(`  ${marker} ${text}`);
             }
-            log('');
-            log(color.dim('  \u2191\u2193 navigate  Enter select'));
+            out('');
+            out(color.dim('  \u2191\u2193 navigate  Enter select'));
+            renderedLines = count;
         }
 
         render();
@@ -6269,7 +6281,7 @@ async function welcomeWizard() {
             process.stdin.removeListener('data', onKey);
             if (process.stdin.isTTY) process.stdin.setRawMode(false);
             process.stdin.pause();
-            process.stdout.write('\x1b[2J\x1b[H');
+            clearRendered();
         }
 
         process.stdin.on('data', onKey);
@@ -6529,26 +6541,37 @@ function selectModelInteractive(currentModelId) {
             return lines;
         }
 
+        let renderedLines = 0;
+
+        function clearRendered() {
+            for (let i = 0; i < renderedLines; i++) {
+                process.stdout.write('\x1b[1A\x1b[2K'); // move up + erase line
+            }
+            renderedLines = 0;
+        }
+
         function render() {
             const lines = buildLines();
-            // Clear previous render
-            process.stdout.write('\x1b[2J\x1b[H'); // clear screen, cursor to top
-            log('');
-            log(color.bold('  Select AI Model'));
+            clearRendered();
+            let count = 0;
+            const out = (text) => { process.stdout.write(text + '\n'); count++; };
+            out('');
+            out(color.bold('  Select AI Model'));
             if (!hasKey) {
-                log(color.dim('  Set an API key to unlock premium models:'));
-                log(color.dim(`  ${color.cyan('robinpath ai config set-key <key>')}`));
+                out(color.dim('  Set an API key to unlock premium models:'));
+                out(color.dim(`  ${color.cyan('robinpath ai config set-key <key>')}`));
             }
-            log(color.dim('  ↑↓ navigate  Enter select  Esc cancel'));
-            log('');
+            out(color.dim('  ↑↓ navigate  Enter select  Esc cancel'));
+            out('');
             for (const l of lines) {
                 if (l.type === 'header') {
-                    log(color.dim(`  ── ${l.text} ──`));
+                    out(color.dim(`  ── ${l.text} ──`));
                 } else {
-                    log(l.text);
+                    out(l.text);
                 }
             }
-            log('');
+            out('');
+            renderedLines = count;
         }
 
         render();
@@ -6558,29 +6581,17 @@ function selectModelInteractive(currentModelId) {
 
         const onKey = (buf) => {
             const key = buf.toString();
-            // Escape
             if (key === '\x1b' || key === '\x03') {
-                cleanup();
-                resolve(null);
-                return;
+                cleanup(); resolve(null); return;
             }
-            // Enter
             if (key === '\r' || key === '\n') {
-                cleanup();
-                resolve(models[cursor].id);
-                return;
+                cleanup(); resolve(models[cursor].id); return;
             }
-            // Arrow up
             if (key === '\x1b[A' || key === 'k') {
-                cursor = Math.max(0, cursor - 1);
-                render();
-                return;
+                cursor = Math.max(0, cursor - 1); render(); return;
             }
-            // Arrow down
             if (key === '\x1b[B' || key === 'j') {
-                cursor = Math.min(models.length - 1, cursor + 1);
-                render();
-                return;
+                cursor = Math.min(models.length - 1, cursor + 1); render(); return;
             }
         };
 
@@ -6588,8 +6599,7 @@ function selectModelInteractive(currentModelId) {
             process.stdin.removeListener('data', onKey);
             if (process.stdin.isTTY) process.stdin.setRawMode(false);
             process.stdin.pause();
-            // Clear the picker screen and restore
-            process.stdout.write('\x1b[2J\x1b[H');
+            clearRendered();
         }
 
         process.stdin.on('data', onKey);
@@ -6618,21 +6628,33 @@ function selectSessionInteractive() {
             return `${days}d ago`;
         }
 
+        let renderedLines = 0;
+
+        function clearRendered() {
+            for (let i = 0; i < renderedLines; i++) {
+                process.stdout.write('\x1b[1A\x1b[2K');
+            }
+            renderedLines = 0;
+        }
+
         function render() {
-            process.stdout.write('\x1b[2J\x1b[H');
-            log('');
-            log(color.bold('  Select Session'));
-            log(color.dim('  \u2191\u2193 navigate  Enter select  Esc cancel'));
-            log('');
+            clearRendered();
+            let count = 0;
+            const out = (text) => { process.stdout.write(text + '\n'); count++; };
+            out('');
+            out(color.bold('  Select Session'));
+            out(color.dim('  \u2191\u2193 navigate  Enter select  Esc cancel'));
+            out('');
             for (let i = 0; i < sessions.length; i++) {
                 const s = sessions[i];
                 const marker = i === cursor ? color.cyan('\u276f') : ' ';
                 const name = i === cursor ? color.cyan(color.bold(s.name)) : s.name;
                 const meta = color.dim(`${timeAgo(s.updated || s.created)}, ${s.messages} msgs`);
-                log(`  ${marker} ${name}  ${meta}`);
-                log(color.dim(`      id: ${s.id}`));
+                out(`  ${marker} ${name}  ${meta}`);
+                out(color.dim(`      id: ${s.id}`));
             }
-            log('');
+            out('');
+            renderedLines = count;
         }
 
         render();
@@ -6660,7 +6682,7 @@ function selectSessionInteractive() {
             process.stdin.removeListener('data', onKey);
             if (process.stdin.isTTY) process.stdin.setRawMode(false);
             process.stdin.pause();
-            process.stdout.write('\x1b[2J\x1b[H');
+            clearRendered();
         }
 
         process.stdin.on('data', onKey);
