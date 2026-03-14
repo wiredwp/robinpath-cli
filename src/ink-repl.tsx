@@ -202,7 +202,7 @@ function ChatApp({engine}: {engine: ReplEngine}) {
             ) : (
                 <InputArea
                     onSubmit={handleSubmit}
-                    placeholder={isFirst ? 'Anything to automate with RobinPath?' : 'Ask anything...'}
+                    placeholder="Message RobinPath..."
                 />
             )}
 
