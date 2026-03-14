@@ -314,13 +314,6 @@ function ChatApp({engine}: {engine: ReplEngine}) {
                 </Box>
             ) : null}
 
-            {/* Header after first message — compact */}
-            {!isFirst || loading ? (
-                <Box marginBottom={1} paddingX={1}>
-                    <Text><Text color="cyan" bold>◆</Text> <Text bold>RobinPath</Text> <Text dimColor>v{CLI_VERSION}</Text></Text>
-                </Box>
-            ) : null}
-
             <Static items={messages}>
                 {msg => (
                     <Box key={msg.id} paddingX={1} marginBottom={msg.text.startsWith('❯') ? 0 : 1} flexDirection="column">
