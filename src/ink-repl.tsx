@@ -169,7 +169,7 @@ function ChatApp({engine}: {engine: ReplEngine}) {
     const isFirst = messages.length === 0;
 
     return (
-        <Box flexDirection="column" padding={1}>
+        <Box flexDirection="column" paddingY={1}>
             <Box marginBottom={1}>
                 <Text><Text color="cyan" bold>◆</Text> <Text bold>RobinPath</Text> <Text dimColor>v{CLI_VERSION}</Text></Text>
             </Box>
