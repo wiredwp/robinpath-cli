@@ -74,30 +74,36 @@ export async function checkForUpdates(): Promise<void> {
         const latest: string = data.tag_name.replace('v', '');
         if (latest !== CLI_VERSION) {
             console.log(
-                `\n${color.yellow('⚡')} New version available: ${color.green('v' + latest)} (you have v${CLI_VERSION})`,
+                `\n${color.dim('Update available:')} ${color.green('v' + latest)} ${color.dim('(current: v' + CLI_VERSION + ')')}`,
             );
-            console.log(`   Run ${color.cyan('robinpath update')} to upgrade\n`);
+            console.log(`${color.dim('Run')} ${color.cyan('robinpath update')} ${color.dim('to upgrade')}\n`);
         }
     } catch {
         // silently ignore update check failures
     }
 }
 
-/** Update: re-run the install script for the current platform */
-export function handleUpdate(): void {
-    const isWindows: boolean = platform() === 'win32';
-    const env = { ...process.env, ROBINPATH_CURRENT_VERSION: CLI_VERSION };
+/** Update via npm — same as how users install */
+export async function handleUpdate(): Promise<void> {
     try {
-        if (isWindows) {
-            execSync('powershell -NoProfile -Command "irm https://dev.robinpath.com/install.ps1 | iex"', {
-                stdio: 'inherit',
-                env,
-            });
-        } else {
-            execSync('curl -fsSL https://dev.robinpath.com/install.sh | sh', { stdio: 'inherit', env });
+        // Check latest version on npm
+        log(color.dim('Checking for updates...'));
+        const res = await fetch('https://registry.npmjs.org/@robinpath/cli/latest');
+        const data = (await res.json()) as { version: string };
+        const latest = data.version;
+
+        if (latest === CLI_VERSION) {
+            log(color.green(`✓ Already on latest version (v${CLI_VERSION})`));
+            return;
         }
+
+        log(`Updating v${CLI_VERSION} → v${latest}...`);
+        execSync('npm install -g @robinpath/cli@latest', { stdio: 'inherit' });
+        log(color.green(`✓ Updated to v${latest}`));
+        log(color.dim('Restart robinpath to use the new version.'));
     } catch (err: unknown) {
         console.error(color.red('Update failed:') + ` ${(err as Error).message}`);
+        console.error(color.dim('Try manually: npm install -g @robinpath/cli'));
         process.exit(1);
     }
 }
