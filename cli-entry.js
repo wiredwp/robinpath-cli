@@ -14,7 +14,7 @@ import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErr
 import { nativeModules } from './modules/index.js';
 
 // Injected by esbuild at build time via --define, fallback for dev mode
-const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.54.0';
+const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.55.0';
 
 // ============================================================================
 // Global flags
@@ -6236,20 +6236,8 @@ async function welcomeWizard() {
 
     let cursor = 0;
 
-    const picked = await new Promise((resolve) => {
-        let renderedLines = 0;
-
-        function clearRendered() {
-            for (let i = 0; i < renderedLines; i++) {
-                process.stdout.write('\x1b[1A\x1b[2K');
-            }
-            renderedLines = 0;
-        }
-
-        function render() {
-            clearRendered();
-            let count = 0;
-            const out = (text) => { process.stdout.write(text + '\n'); count++; };
+    const picked = await createInteractivePicker({
+        renderFn: (out) => {
             out('');
             out(color.bold('  Welcome to RobinPath AI!'));
             out(color.dim('  Your AI-powered scripting assistant'));
@@ -6261,31 +6249,14 @@ async function welcomeWizard() {
             }
             out('');
             out(color.dim('  \u2191\u2193 navigate  Enter select'));
-            renderedLines = count;
-        }
-
-        render();
-
-        if (process.stdin.isTTY) process.stdin.setRawMode(true);
-        process.stdin.resume();
-
-        const onKey = (buf) => {
-            const key = buf.toString();
-            if (key === '\r' || key === '\n') { cleanup(); resolve(options[cursor].value); return; }
-            if (key === '\x1b' || key === '\x03') { cleanup(); resolve('free'); return; }
-            if (key === '\x1b[A' || key === 'k') { cursor = Math.max(0, cursor - 1); render(); return; }
-            if (key === '\x1b[B' || key === 'j') { cursor = Math.min(options.length - 1, cursor + 1); render(); return; }
-        };
-
-        function cleanup() {
-            process.stdin.removeListener('data', onKey);
-            if (process.stdin.isTTY) process.stdin.setRawMode(false);
-            process.stdin.pause();
-            clearRendered();
-        }
-
-        process.stdin.on('data', onKey);
-    });
+        },
+        onKeyFn: (key) => {
+            if (key === '\r' || key === '\n') return options[cursor].value;
+            if (key === '\x1b') return 'free';
+            if (key === '\x1b[A' || key === 'k') { cursor = Math.max(0, cursor - 1); return 'render'; }
+            if (key === '\x1b[B' || key === 'j') { cursor = Math.min(options.length - 1, cursor + 1); return 'render'; }
+        },
+    }) || 'free';
 
     if (picked === 'free') {
         writeAiConfig({ model: 'robinpath-default' });
@@ -6295,35 +6266,37 @@ async function welcomeWizard() {
         return;
     }
 
-    // Key setup flow
+    // Key setup flow — masked input (no readline, pure raw mode)
     log('');
     const key = await new Promise((resolve) => {
-        const rl2 = createInterface({ input: process.stdin, output: process.stdout });
         if (process.stdin.isTTY) {
             process.stdout.write(color.cyan('  Paste your API key: '));
             process.stdin.setRawMode(true);
+            process.stdin.resume();
             let input = '';
             const onData = (ch) => {
                 const c = ch.toString();
                 if (c === '\n' || c === '\r') {
-                    process.stdin.setRawMode(false);
                     process.stdin.removeListener('data', onData);
+                    try { process.stdin.setRawMode(false); } catch {}
+                    process.stdin.pause();
                     process.stdout.write('\n');
-                    rl2.close();
                     resolve(input);
                 } else if (c === '\u0003') {
-                    process.stdin.setRawMode(false);
-                    rl2.close();
+                    process.stdin.removeListener('data', onData);
+                    try { process.stdin.setRawMode(false); } catch {}
+                    process.stdin.pause();
                     resolve('');
                 } else if (c === '\u007f' || c === '\b') {
                     if (input.length > 0) { input = input.slice(0, -1); process.stdout.write('\b \b'); }
-                } else {
+                } else if (c.charCodeAt(0) >= 32) {
                     input += c;
                     process.stdout.write('*');
                 }
             };
             process.stdin.on('data', onData);
         } else {
+            const rl2 = createInterface({ input: process.stdin, output: process.stdout });
             rl2.question('  Paste your API key: ', (answer) => { rl2.close(); resolve(answer.trim()); });
         }
     });
@@ -6363,38 +6336,40 @@ async function handleAiConfig(args) {
     if (sub === 'set-key') {
         let key = args[1];
         if (!key) {
-            // Interactive input — key won't appear in shell history or process list
-            const rl = createInterface({ input: process.stdin, output: process.stdout });
+            // Interactive secure input — masked with * characters
             key = await new Promise((resolve) => {
-                // Disable echo for secure input
                 if (process.stdin.isTTY) {
                     process.stdout.write('Enter your API key (OpenRouter, OpenAI, or Anthropic): ');
                     process.stdin.setRawMode(true);
+                    process.stdin.resume();
                     let input = '';
                     const onData = (ch) => {
                         const c = ch.toString();
                         if (c === '\n' || c === '\r') {
-                            process.stdin.setRawMode(false);
                             process.stdin.removeListener('data', onData);
+                            try { process.stdin.setRawMode(false); } catch {}
+                            process.stdin.pause();
                             process.stdout.write('\n');
-                            rl.close();
                             resolve(input);
                         } else if (c === '\u0003') { // Ctrl+C
-                            process.stdin.setRawMode(false);
+                            process.stdin.removeListener('data', onData);
+                            try { process.stdin.setRawMode(false); } catch {}
+                            process.stdin.pause();
                             process.exit(0);
                         } else if (c === '\u007f' || c === '\b') { // Backspace
                             if (input.length > 0) {
                                 input = input.slice(0, -1);
                                 process.stdout.write('\b \b');
                             }
-                        } else {
+                        } else if (c.charCodeAt(0) >= 32) { // Printable chars only
                             input += c;
                             process.stdout.write('*');
                         }
                     };
                     process.stdin.on('data', onData);
                 } else {
-                    rl.question('Enter your API key (OpenRouter, OpenAI, or Anthropic): ', (answer) => {
+                    const rl = createInterface({ input: process.stdin, output: process.stdout });
+                    rl.question('Enter your API key: ', (answer) => {
                         rl.close();
                         resolve(answer.trim());
                     });
@@ -6498,6 +6473,57 @@ async function handleAiConfig(args) {
     }
 }
 
+// ── Interactive picker infrastructure ──
+// Single reusable raw-keypress handler that properly manages TTY state.
+// Prevents the bugs from mixing readline + raw mode on the same stdin.
+function createInteractivePicker({ renderFn, onKeyFn }) {
+    if (!process.stdin.isTTY) return Promise.resolve(null);
+
+    return new Promise((resolve) => {
+        let renderedLines = 0;
+        let resolved = false;
+
+        function clearRendered() {
+            for (let i = 0; i < renderedLines; i++) {
+                process.stdout.write('\x1b[1A\x1b[2K');
+            }
+            renderedLines = 0;
+        }
+
+        function render() {
+            clearRendered();
+            let count = 0;
+            const out = (text) => { process.stdout.write(text + '\n'); count++; };
+            renderFn(out);
+            renderedLines = count;
+        }
+
+        function done(value) {
+            if (resolved) return;
+            resolved = true;
+            process.stdin.removeListener('data', onKey);
+            try { process.stdin.setRawMode(false); } catch {}
+            process.stdin.pause();
+            clearRendered();
+            resolve(value);
+        }
+
+        function onKey(buf) {
+            const key = buf.toString();
+            // Always handle Ctrl+C
+            if (key === '\x03') { done(null); return; }
+            const result = onKeyFn(key);
+            if (result === 'render') { render(); }
+            else if (result !== undefined) { done(result); }
+        }
+
+        render();
+        process.stdin.setRawMode(true);
+        process.stdin.resume();
+        process.stdin.on('data', onKey);
+    });
+}
+
 // ── Available AI models (synced with Platform) ──
 const AI_MODELS = [
     { group: 'Free', id: 'robinpath-default', name: 'Gemini 2.0 Flash', desc: 'free, no key needed', requiresKey: false },
@@ -6513,134 +6539,69 @@ const AI_MODELS = [
 
 /** Interactive arrow-key model selector. Returns selected model ID or null if cancelled. */
 function selectModelInteractive(currentModelId) {
-    return new Promise((resolve) => {
-        const hasKey = !!(readAiConfig().apiKey);
-        const models = hasKey ? AI_MODELS : AI_MODELS.filter(m => !m.requiresKey);
-        let cursor = Math.max(0, models.findIndex(m => m.id === currentModelId));
+    const hasKey = !!(readAiConfig().apiKey);
+    const models = hasKey ? AI_MODELS : AI_MODELS.filter(m => !m.requiresKey);
+    let cursor = Math.max(0, models.findIndex(m => m.id === currentModelId));
 
-        // Build display lines with group headers
-        function buildLines() {
-            const lines = [];
-            let lastGroup = '';
-            let itemIdx = 0;
-            for (const m of models) {
-                if (m.group !== lastGroup) {
-                    lines.push({ type: 'header', text: m.group });
-                    lastGroup = m.group;
-                }
-                const selected = itemIdx === cursor;
-                const marker = selected ? color.cyan('❯') : ' ';
-                const name = selected ? color.cyan(color.bold(m.name)) : m.name;
-                const id = color.dim(m.id);
-                const desc = color.dim(`— ${m.desc}`);
-                const current = m.id === currentModelId ? color.green(' ✓') : '';
-                lines.push({ type: 'item', text: `  ${marker} ${name} ${desc}${current}`, idx: itemIdx });
-                lines.push({ type: 'sub', text: `      ${id}` });
-                itemIdx++;
-            }
-            return lines;
-        }
-
-        let renderedLines = 0;
-
-        function clearRendered() {
-            for (let i = 0; i < renderedLines; i++) {
-                process.stdout.write('\x1b[1A\x1b[2K'); // move up + erase line
-            }
-            renderedLines = 0;
-        }
-
-        function render() {
-            const lines = buildLines();
-            clearRendered();
-            let count = 0;
-            const out = (text) => { process.stdout.write(text + '\n'); count++; };
+    return createInteractivePicker({
+        renderFn: (out) => {
             out('');
             out(color.bold('  Select AI Model'));
             if (!hasKey) {
                 out(color.dim('  Set an API key to unlock premium models:'));
                 out(color.dim(`  ${color.cyan('robinpath ai config set-key <key>')}`));
             }
-            out(color.dim('  ↑↓ navigate  Enter select  Esc cancel'));
+            out(color.dim('  \u2191\u2193 navigate  Enter select  Esc cancel'));
             out('');
-            for (const l of lines) {
-                if (l.type === 'header') {
-                    out(color.dim(`  ── ${l.text} ──`));
-                } else {
-                    out(l.text);
+            let lastGroup = '';
+            let itemIdx = 0;
+            for (const m of models) {
+                if (m.group !== lastGroup) {
+                    out(color.dim(`  \u2500\u2500 ${m.group} \u2500\u2500`));
+                    lastGroup = m.group;
                 }
+                const sel = itemIdx === cursor;
+                const marker = sel ? color.cyan('\u276f') : ' ';
+                const name = sel ? color.cyan(color.bold(m.name)) : m.name;
+                const desc = color.dim(`\u2014 ${m.desc}`);
+                const cur = m.id === currentModelId ? color.green(' \u2713') : '';
+                out(`  ${marker} ${name} ${desc}${cur}`);
+                out(`      ${color.dim(m.id)}`);
+                itemIdx++;
             }
             out('');
-            renderedLines = count;
-        }
-
-        render();
-
-        if (process.stdin.isTTY) process.stdin.setRawMode(true);
-        process.stdin.resume();
-
-        const onKey = (buf) => {
-            const key = buf.toString();
-            if (key === '\x1b' || key === '\x03') {
-                cleanup(); resolve(null); return;
-            }
-            if (key === '\r' || key === '\n') {
-                cleanup(); resolve(models[cursor].id); return;
-            }
-            if (key === '\x1b[A' || key === 'k') {
-                cursor = Math.max(0, cursor - 1); render(); return;
-            }
-            if (key === '\x1b[B' || key === 'j') {
-                cursor = Math.min(models.length - 1, cursor + 1); render(); return;
-            }
-        };
-
-        function cleanup() {
-            process.stdin.removeListener('data', onKey);
-            if (process.stdin.isTTY) process.stdin.setRawMode(false);
-            process.stdin.pause();
-            clearRendered();
-        }
-
-        process.stdin.on('data', onKey);
+        },
+        onKeyFn: (key) => {
+            if (key === '\x1b') return null;
+            if (key === '\r' || key === '\n') return models[cursor].id;
+            if (key === '\x1b[A' || key === 'k') { cursor = Math.max(0, cursor - 1); return 'render'; }
+            if (key === '\x1b[B' || key === 'j') { cursor = Math.min(models.length - 1, cursor + 1); return 'render'; }
+        },
     });
 }
 
 /** Interactive arrow-key session picker. Returns session ID or null. */
 function selectSessionInteractive() {
-    return new Promise((resolve) => {
-        const sessions = listSessions();
-        if (sessions.length === 0) {
-            log(color.dim('  No saved sessions.'));
-            resolve(null);
-            return;
-        }
+    const sessions = listSessions();
+    if (sessions.length === 0) {
+        log(color.dim('  No saved sessions.'));
+        return Promise.resolve(null);
+    }
 
-        let cursor = 0;
+    let cursor = 0;
 
-        function timeAgo(dateStr) {
-            const diff = Date.now() - new Date(dateStr).getTime();
-            const mins = Math.floor(diff / 60000);
-            if (mins < 60) return `${mins}m ago`;
-            const hrs = Math.floor(mins / 60);
-            if (hrs < 24) return `${hrs}h ago`;
-            const days = Math.floor(hrs / 24);
-            return `${days}d ago`;
-        }
+    function timeAgo(dateStr) {
+        const diff = Date.now() - new Date(dateStr).getTime();
+        const mins = Math.floor(diff / 60000);
+        if (mins < 60) return `${mins}m ago`;
+        const hrs = Math.floor(mins / 60);
+        if (hrs < 24) return `${hrs}h ago`;
+        const days = Math.floor(hrs / 24);
+        return `${days}d ago`;
+    }
 
-        let renderedLines = 0;
-
-        function clearRendered() {
-            for (let i = 0; i < renderedLines; i++) {
-                process.stdout.write('\x1b[1A\x1b[2K');
-            }
-            renderedLines = 0;
-        }
-
-        function render() {
-            clearRendered();
-            let count = 0;
-            const out = (text) => { process.stdout.write(text + '\n'); count++; };
+    return createInteractivePicker({
+        renderFn: (out) => {
             out('');
             out(color.bold('  Select Session'));
             out(color.dim('  \u2191\u2193 navigate  Enter select  Esc cancel'));
@@ -6654,38 +6615,13 @@ function selectSessionInteractive() {
                 out(color.dim(`      id: ${s.id}`));
             }
             out('');
-            renderedLines = count;
-        }
-
-        render();
-
-        if (process.stdin.isTTY) process.stdin.setRawMode(true);
-        process.stdin.resume();
-
-        const onKey = (buf) => {
-            const key = buf.toString();
-            if (key === '\x1b' || key === '\x03') {
-                cleanup(); resolve(null); return;
-            }
-            if (key === '\r' || key === '\n') {
-                cleanup(); resolve(sessions[cursor].id); return;
-            }
-            if (key === '\x1b[A' || key === 'k') {
-                cursor = Math.max(0, cursor - 1); render(); return;
-            }
-            if (key === '\x1b[B' || key === 'j') {
-                cursor = Math.min(sessions.length - 1, cursor + 1); render(); return;
-            }
-        };
-
-        function cleanup() {
-            process.stdin.removeListener('data', onKey);
-            if (process.stdin.isTTY) process.stdin.setRawMode(false);
-            process.stdin.pause();
-            clearRendered();
-        }
-
-        process.stdin.on('data', onKey);
+        },
+        onKeyFn: (key) => {
+            if (key === '\x1b') return null;
+            if (key === '\r' || key === '\n') return sessions[cursor].id;
+            if (key === '\x1b[A' || key === 'k') { cursor = Math.max(0, cursor - 1); return 'render'; }
+            if (key === '\x1b[B' || key === 'j') { cursor = Math.min(sessions.length - 1, cursor + 1); return 'render'; }
+        },
     });
 }
 
@@ -6854,38 +6790,42 @@ function confirmCommand(cmd, autoAccept) {
     // Auto-accept safe commands
     if (autoAccept && !isDangerousCommand(cmd)) {
         const preview = cmd.length > 80 ? cmd.slice(0, 77) + '...' : cmd;
-        log(color.dim(`  ▶ ${preview}`));
+        log(color.dim(`  \u25b6 ${preview}`));
         return Promise.resolve('yes');
     }
 
+    const dangerous = isDangerousCommand(cmd);
+
+    // Non-interactive — auto-accept safe, reject dangerous
+    if (!process.stdin.isTTY) {
+        const preview = cmd.length > 80 ? cmd.slice(0, 77) + '...' : cmd;
+        log(color.dim(`  \u25b6 ${preview}`));
+        return Promise.resolve(dangerous ? 'no' : 'yes');
+    }
+
     return new Promise((resolve) => {
-        const dangerous = isDangerousCommand(cmd);
         const preview = cmd.length > 120 ? cmd.slice(0, 117) + '...' : cmd;
+        let resolved = false;
 
         log('');
         if (dangerous) {
-            log(color.red('  ⚠ DANGEROUS'));
+            log(color.red('  \u26a0 DANGEROUS'));
         }
-        log(`  ${color.yellow('⚡')} ${color.bold(preview)}`);
+        log(`  ${color.yellow('\u26a1')} ${color.bold(preview)}`);
         const opts = dangerous
             ? `     ${color.green('[y]')} Run  ${color.red('[n]')} Skip  ${color.cyan('[e]')} Edit`
             : `     ${color.green('[y]')} Run  ${color.red('[n]')} Skip  ${color.cyan('[a]')} Always  ${color.cyan('[e]')} Edit`;
         process.stdout.write(opts);
 
-        if (!process.stdin.isTTY) {
-            // Non-interactive — auto-accept safe, reject dangerous
-            log('');
-            resolve(dangerous ? 'no' : 'yes');
-            return;
-        }
-
         process.stdin.setRawMode(true);
         process.stdin.resume();
 
         const onKey = (buf) => {
+            if (resolved) return;
+            resolved = true;
             const key = buf.toString().toLowerCase();
             process.stdin.removeListener('data', onKey);
-            if (process.stdin.isTTY) process.stdin.setRawMode(false);
+            try { process.stdin.setRawMode(false); } catch {}
             process.stdin.pause();
             process.stdout.write('\n');
 
@@ -6896,7 +6836,6 @@ function confirmCommand(cmd, autoAccept) {
             } else if (key === 'e') {
                 resolve('edit');
             } else {
-                // n, Esc, Ctrl+C, or any other key → skip
                 resolve('no');
             }
         };
