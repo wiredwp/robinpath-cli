@@ -355,10 +355,7 @@ function ChatApp({engine}: {engine: ReplEngine}) {
             ) : loading ? (
                 <Box flexDirection="column" paddingX={1}>
                     {streaming ? (
-                        <Box flexDirection="column">
-                            <Markdown>{streaming}</Markdown>
-                            <Text color="cyan">▍</Text>
-                        </Box>
+                        <Text wrap="wrap">{streaming}</Text>
                     ) : (
                         <Text dimColor><InkSpinner type="dots" /> Thinking</Text>
                     )}
@@ -551,7 +548,11 @@ class ReplEngine {
                             .replace(/<memory>[\s\S]*?<\/memory>/g, '')
                             .replace(/<cmd>[\s\S]*?<\/cmd>/g, '')
                             .replace(/\n{3,}/g, '\n\n').trim();
-                        ui?.setStreaming(clean);
+                        // Show progress when AI is generating hidden <cmd> content
+                        const hasOpenCmd = fullText.includes('<cmd>') && !fullText.endsWith('</cmd>') &&
+                            (fullText.match(/<cmd>/g) || []).length > (fullText.match(/<\/cmd>/g) || []).length;
+                        const display = hasOpenCmd ? clean + '\n\nPreparing commands...' : clean;
+                        ui?.setStreaming(display);
                     },
                     conversationHistory: this.conversationMessages.slice(0, -1),
                     provider: activeProvider, model: activeModel, apiKey: activeKey,
