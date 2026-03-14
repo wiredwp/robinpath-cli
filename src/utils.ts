@@ -67,19 +67,86 @@ export interface ShellConfig {
     isUnix: boolean;
 }
 
+// Preferred shell order per platform
+const SHELL_SEARCH: Record<string, { path: string; name: string; isUnix: boolean }[]> = {
+    win32: [
+        { path: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', name: 'pwsh', isUnix: false },
+        { path: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', name: 'powershell', isUnix: false },
+        { path: 'C:\\Program Files\\Git\\bin\\bash.exe', name: 'bash', isUnix: true },
+        { path: 'cmd.exe', name: 'cmd', isUnix: false },
+    ],
+    darwin: [
+        { path: '/bin/zsh', name: 'zsh', isUnix: true },
+        { path: '/bin/bash', name: 'bash', isUnix: true },
+        { path: '/usr/local/bin/fish', name: 'fish', isUnix: true },
+    ],
+    linux: [
+        { path: '/bin/bash', name: 'bash', isUnix: true },
+        { path: '/usr/bin/zsh', name: 'zsh', isUnix: true },
+        { path: '/usr/bin/fish', name: 'fish', isUnix: true },
+        { path: '/bin/sh', name: 'sh', isUnix: true },
+    ],
+};
+
+// User override via config or env
+let _shellOverride: string | null = null;
+export function setShellOverride(name: string | null): void { _shellOverride = name; }
+
 export function getShellConfig(): ShellConfig {
     const p = platform();
-    if (p === 'win32') {
-        // Prefer Git Bash on Windows, fall back to cmd
-        const gitBash = 'C:\\Program Files\\Git\\bin\\bash.exe';
-        if (existsSync(gitBash)) {
-            return { shell: gitBash, name: 'bash', isUnix: true };
+
+    // User override: ROBINPATH_SHELL env or /shell command
+    if (_shellOverride) {
+        const candidates = SHELL_SEARCH[p] || SHELL_SEARCH.linux;
+        const match = candidates.find(c => c.name === _shellOverride);
+        if (match && (match.name === 'cmd' || existsSync(match.path))) {
+            return { shell: match.path, name: match.name, isUnix: match.isUnix };
         }
-        return { shell: 'cmd.exe', name: 'cmd', isUnix: false };
     }
-    // macOS / Linux — use user's shell or default to bash
-    const userShell = process.env.SHELL || '/bin/bash';
-    return { shell: userShell, name: basename(userShell), isUnix: true };
+
+    // Env override
+    const envShell = process.env.ROBINPATH_SHELL;
+    if (envShell) {
+        const candidates = SHELL_SEARCH[p] || SHELL_SEARCH.linux;
+        const match = candidates.find(c => c.name === envShell);
+        if (match && (match.name === 'cmd' || existsSync(match.path))) {
+            return { shell: match.path, name: match.name, isUnix: match.isUnix };
+        }
+    }
+
+    // On non-Windows, respect $SHELL
+    if (p !== 'win32') {
+        const userShell = process.env.SHELL;
+        if (userShell && existsSync(userShell)) {
+            const name = basename(userShell);
+            return { shell: userShell, name, isUnix: true };
+        }
+    }
+
+    // Auto-detect: try each shell in platform priority order
+    const candidates = SHELL_SEARCH[p] || SHELL_SEARCH.linux;
+    for (const c of candidates) {
+        if (c.name === 'cmd' || existsSync(c.path)) {
+            return { shell: c.path, name: c.name, isUnix: c.isUnix };
+        }
+    }
+
+    // Fallback
+    return p === 'win32'
+        ? { shell: 'cmd.exe', name: 'cmd', isUnix: false }
+        : { shell: '/bin/sh', name: 'sh', isUnix: true };
+}
+
+/** List all available shells on this platform */
+export function getAvailableShells(): { name: string; available: boolean; current: boolean }[] {
+    const p = platform();
+    const candidates = SHELL_SEARCH[p] || SHELL_SEARCH.linux;
+    const current = getShellConfig().name;
+    return candidates.map(c => ({
+        name: c.name,
+        available: c.name === 'cmd' || existsSync(c.path),
+        current: c.name === current,
+    }));
 }
 
 // Spinner animation for "thinking" state

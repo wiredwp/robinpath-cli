@@ -17,6 +17,8 @@ import {
     logVerbose,
     createSpinner,
     getShellConfig,
+    getAvailableShells,
+    setShellOverride,
     getRobinPathHome,
     CLI_VERSION,
     FLAG_AUTO_ACCEPT,
@@ -488,6 +490,13 @@ export async function startAiREPL(
             ' '.repeat(Math.max(0, 41 - cwdShort.length)) +
             color.dim('\u2502'),
     );
+    const shellName: string = getShellConfig().name;
+    log(
+        color.dim('  \u2502') +
+            `  Shell: ${color.dim(shellName)}` +
+            ' '.repeat(Math.max(0, 41 - shellName.length)) +
+            color.dim('\u2502'),
+    );
     log(color.dim('  \u2570' + '\u2500'.repeat(50) + '\u256f'));
     log('');
 
@@ -548,30 +557,38 @@ export async function startAiREPL(
         /* ignore */
     }
 
-    // Slash command tab completion
-    const slashCommands: string[] = [
-        '/help',
-        '/model',
-        '/auto',
-        '/clear',
-        '/compact',
-        '/save',
-        '/sessions',
-        '/resume',
-        '/delete',
-        '/memory',
-        '/remember',
-        '/forget',
-        '/tools',
-        '/modules',
-        '/context',
-        '/usage',
-        '/scan',
-    ];
+    // Slash commands with descriptions for inline hints
+    const SLASH_COMMANDS: Record<string, string> = {
+        '/help': 'Show all commands',
+        '/model': 'Switch AI model',
+        '/model <id>': 'Set model by ID',
+        '/shell': 'Switch shell (bash, pwsh, cmd, zsh)',
+        '/auto': 'Toggle auto-accept mode',
+        '/auto on': 'Enable auto-accept',
+        '/auto off': 'Disable auto-accept',
+        '/clear': 'Clear conversation history',
+        '/compact': 'Trim to last 10 messages',
+        '/save': 'Save current session',
+        '/save <name>': 'Save with a name',
+        '/sessions': 'List saved sessions',
+        '/resume': 'Resume a saved session',
+        '/resume <id>': 'Resume by session ID',
+        '/delete <id>': 'Delete a saved session',
+        '/memory': 'Show persistent memory',
+        '/remember <fact>': 'Save a fact across sessions',
+        '/forget <n>': 'Remove a memory by number',
+        '/tools': 'List available shell tools',
+        '/modules': 'Show installed modules',
+        '/context': 'Show AI context info',
+        '/usage': 'Show token usage & cost',
+        '/scan': 'Scan project files for context',
+    };
+    const slashCommandNames: string[] = Object.keys(SLASH_COMMANDS).filter(c => !c.includes('<'));
+
     function completer(line: string): [string[], string] {
         if (line.startsWith('/')) {
-            const hits = slashCommands.filter((c: string) => c.startsWith(line));
-            return [hits.length ? hits : slashCommands, line];
+            const hits = slashCommandNames.filter((c: string) => c.startsWith(line));
+            return [hits.length ? hits : slashCommandNames, line];
         }
         return [[], line];
     }
@@ -610,6 +627,19 @@ export async function startAiREPL(
             return;
         }
 
+        // Show command hints when user types just "/"
+        if (trimmed === '/') {
+            log('');
+            for (const [cmd, desc] of Object.entries(SLASH_COMMANDS)) {
+                if (!cmd.includes('<')) {
+                    log(`  ${color.cyan(cmd.padEnd(14))} ${color.dim(desc)}`);
+                }
+            }
+            log('');
+            rl.prompt();
+            return;
+        }
+
         if (trimmed === 'exit' || trimmed === 'quit' || trimmed === '.exit') {
             log(color.dim('\nGoodbye!'));
             process.exit(0);
@@ -633,9 +663,12 @@ export async function startAiREPL(
             log(color.dim('  \u2500\u2500 Permissions \u2500\u2500'));
             log('  /auto          Toggle auto-accept mode');
             log('  /auto on|off   Enable/disable auto-accept');
-            log(color.dim('  \u2500\u2500 Info \u2500\u2500'));
-            log('  /model         Switch model (interactive picker)');
+            log(color.dim('  \u2500\u2500 Config \u2500\u2500'));
+            log('  /model         Switch model (numbered list)');
             log('  /model <id>    Switch model by ID');
+            log('  /shell         List available shells');
+            log('  /shell <name>  Switch shell (bash, pwsh, cmd, zsh)');
+            log(color.dim('  \u2500\u2500 Info \u2500\u2500'));
             log('  /tools         List available tools');
             log('  /modules       Show installed modules');
             log('  /context       Show what the AI knows about your setup');
@@ -1073,6 +1106,30 @@ export async function startAiREPL(
             log(`  Auto-accept: ${status}`);
             if (autoAccept) {
                 log(color.dim('  Commands run automatically (dangerous commands still confirm)'));
+            }
+            rl.prompt();
+            return;
+        }
+
+        if (trimmed === '/shell' || trimmed.startsWith('/shell ')) {
+            const arg: string = trimmed.slice(6).trim().toLowerCase();
+            if (arg) {
+                setShellOverride(arg);
+                const cfg = getShellConfig();
+                log(`  Shell: ${color.cyan(cfg.name)}` + (cfg.isUnix ? '' : color.dim(' (Windows native)')));
+                // Update cliContext for brain
+                cliContext.shell = cfg.name;
+            } else {
+                const shells = getAvailableShells();
+                log('');
+                log(color.bold('  Available shells:'));
+                for (const s of shells) {
+                    const status = s.current ? color.green(' \u2713 current') : s.available ? '' : color.dim(' (not found)');
+                    const name = s.available ? color.cyan(s.name) : color.dim(s.name);
+                    log(`  ${name}${status}`);
+                }
+                log('');
+                log(color.dim('  Switch: /shell <name>'));
             }
             rl.prompt();
             return;
