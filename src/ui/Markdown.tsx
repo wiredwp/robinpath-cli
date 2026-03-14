@@ -120,30 +120,21 @@ function TextBlock({content}: {content: string}) {
 }
 
 function CodeBlock({content, lang}: {content: string; lang?: string}) {
-    const w = Math.min(process.stdout.columns - 6 || 72, 72);
     const allLines = content.split('\n');
     const MAX_CODE_LINES = 30;
     const truncated = allLines.length > MAX_CODE_LINES;
     const lines = truncated
-        ? [...allLines.slice(0, 20), `... (${allLines.length - 25} lines hidden)`, ...allLines.slice(-5)]
+        ? [...allLines.slice(0, 20), `… ${allLines.length - 25} more lines`, ...allLines.slice(-5)]
         : allLines;
 
     return (
-        <Box flexDirection="column" marginY={1} marginX={1}>
-            <Text>
-                <Text dimColor>{'  ┌'}</Text>
-                {lang ? <Text dimColor>{` ${lang} `}</Text> : null}
-                <Text dimColor>{'─'.repeat(Math.max(0, w - (lang ? lang.length + 5 : 3)))}</Text>
-            </Text>
-
+        <Box flexDirection="column" marginY={0} paddingLeft={2}>
             {lines.map((line, i) => (
                 <Text key={i}>
-                    <Text dimColor>{'  │ '}</Text>
-                    <Text color="white">{line.slice(0, w - 5)}</Text>
+                    <Text>{'  '}</Text>
+                    <Text>{line}</Text>
                 </Text>
             ))}
-
-            <Text dimColor>{'  └' + '─'.repeat(w - 3)}</Text>
         </Box>
     );
 }
