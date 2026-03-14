@@ -13,16 +13,15 @@ export function ChatMessage({ role, content, isStreaming = false }: ChatMessageP
     if (role === 'user') {
         return (
             <Box marginBottom={1}>
-                <Text bold color="cyan">❯ </Text>
+                <Text color="cyan" bold>{'❯ '}</Text>
                 <Text>{content}</Text>
             </Box>
         );
     }
 
-    // Assistant message
     return (
         <Box flexDirection="column" marginBottom={1} paddingLeft={2}>
-            <Text>{content}{isStreaming ? <Text color="cyan">▎</Text> : null}</Text>
+            <Text wrap="wrap">{content}{isStreaming ? <Text color="cyan">▎</Text> : null}</Text>
         </Box>
     );
 }

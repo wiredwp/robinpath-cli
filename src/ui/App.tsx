@@ -1,11 +1,12 @@
-import React, { useState, useCallback, useEffect } from 'react';
-import { Box, Text, useApp } from 'ink';
+import React, { useState, useCallback } from 'react';
+import { Box, Static, Text } from 'ink';
 import { Banner } from './Banner';
 import { InputBox } from './InputBox';
 import { ChatMessage } from './ChatMessage';
 import { Spinner } from './Spinner';
 
-export interface Message {
+export interface AppMessage {
+    id: number;
     role: 'user' | 'assistant' | 'system';
     content: string;
 }
@@ -16,70 +17,74 @@ interface AppProps {
     dir: string;
     shell: string;
     projectInfo?: string;
-    onMessage: (message: string) => Promise<void>;
-    initialPrompt?: string | null;
+    onSubmit: (text: string) => Promise<string | null>;
 }
 
-export function App({ model, mode, dir, shell, projectInfo, onMessage, initialPrompt }: AppProps) {
-    const [messages, setMessages] = useState<Message[]>([]);
-    const [isLoading, setIsLoading] = useState(false);
-    const [streamingContent, setStreamingContent] = useState('');
-    const { exit } = useApp();
+let msgId = 0;
 
-    // Expose state setters for the REPL engine to use
-    (global as any).__rpUI = {
-        addMessage: (msg: Message) => setMessages(prev => [...prev, msg]),
-        setLoading: (v: boolean) => setIsLoading(v),
-        setStreaming: (v: string) => setStreamingContent(v),
-        clearMessages: () => setMessages([]),
-        getMessages: () => messages,
-        exit: () => exit(),
+export function App({ model, mode, dir, shell, projectInfo, onSubmit }: AppProps) {
+    const [messages, setMessages] = useState<AppMessage[]>([]);
+    const [isLoading, setIsLoading] = useState(false);
+    const [streamText, setStreamText] = useState('');
+    const [spinnerLabel, setSpinnerLabel] = useState('Thinking...');
+
+    // Expose setters for external code to drive the UI
+    const ui = (global as any).__rpUI = (global as any).__rpUI || {};
+    ui.setStreamText = setStreamText;
+    ui.setSpinnerLabel = setSpinnerLabel;
+    ui.setLoading = setIsLoading;
+    ui.addMessage = (role: 'user' | 'assistant' | 'system', content: string) => {
+        setMessages(prev => [...prev, { id: ++msgId, role, content }]);
     };
 
-    const handleSubmit = useCallback(async (value: string) => {
-        setMessages(prev => [...prev, { role: 'user', content: value }]);
+    const handleSubmit = useCallback(async (text: string) => {
+        // Add user message
+        setMessages(prev => [...prev, { id: ++msgId, role: 'user', content: text }]);
         setIsLoading(true);
-        setStreamingContent('');
+        setStreamText('');
+        setSpinnerLabel('Thinking...');
 
         try {
-            await onMessage(value);
+            const response = await onSubmit(text);
+            if (response) {
+                setMessages(prev => [...prev, { id: ++msgId, role: 'assistant', content: response }]);
+            }
+        } catch (err: any) {
+            setMessages(prev => [...prev, { id: ++msgId, role: 'assistant', content: `Error: ${err.message}` }]);
         } finally {
             setIsLoading(false);
-            setStreamingContent('');
+            setStreamText('');
         }
-    }, [onMessage]);
-
-    // Handle initial prompt
-    useEffect(() => {
-        if (initialPrompt) {
-            handleSubmit(initialPrompt);
-        }
-    }, []);
+    }, [onSubmit]);
 
     return (
         <Box flexDirection="column">
             <Banner model={model} mode={mode} dir={dir} shell={shell} projectInfo={projectInfo} />
 
-            {/* Chat messages */}
-            {messages.map((msg, i) => (
-                <ChatMessage key={i} role={msg.role} content={msg.content} />
-            ))}
+            {/* Completed messages — Static prevents re-rendering */}
+            <Static items={messages}>
+                {(msg) => (
+                    <ChatMessage key={msg.id} role={msg.role} content={msg.content} />
+                )}
+            </Static>
 
             {/* Streaming response */}
-            {isLoading && streamingContent && (
-                <ChatMessage role="assistant" content={streamingContent} isStreaming />
-            )}
+            {isLoading && streamText ? (
+                <ChatMessage role="assistant" content={streamText} isStreaming />
+            ) : null}
 
             {/* Spinner */}
-            {isLoading && !streamingContent && (
-                <Spinner />
-            )}
+            {isLoading && !streamText ? (
+                <Box marginBottom={1}>
+                    <Spinner label={spinnerLabel} />
+                </Box>
+            ) : null}
 
-            {/* Input */}
+            {/* Input box */}
             <InputBox
-                placeholder="What do you want to automate today?"
                 onSubmit={handleSubmit}
-                isLoading={isLoading}
+                isActive={!isLoading}
+                placeholder={messages.length === 0 ? 'What do you want to automate today?' : 'Type a message...'}
             />
         </Box>
     );

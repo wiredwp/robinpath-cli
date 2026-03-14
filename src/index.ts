@@ -14,6 +14,7 @@ import { showMainHelp, showCommandHelp } from './help';
 import { handleStart, handleStatus, readStdin } from './server';
 import { fetchBrainStream, fetchBrainContext, buildEnrichedPrompt } from './brain';
 import { startAiREPL, welcomeWizard, handleAiConfig } from './repl';
+import { startInkREPL } from './ink-repl';
 import {
     checkForUpdates,
     handleUpdate,
@@ -85,12 +86,12 @@ async function handleAi(args: string[]): Promise<void> {
             log('Usage: robinpath ai --resume <session-id>');
             return;
         }
-        await startAiREPL(null, resumeId, { autoAccept: FLAG_AUTO_ACCEPT, devMode: FLAG_DEV_MODE });
+        await startInkREPL(null, resumeId, { autoAccept: FLAG_AUTO_ACCEPT, devMode: FLAG_DEV_MODE });
         return;
     }
 
     const prompt = args.join(' ').trim();
-    await startAiREPL(prompt || null, null, { autoAccept: FLAG_AUTO_ACCEPT, devMode: FLAG_DEV_MODE });
+    await startInkREPL(prompt || null, null, { autoAccept: FLAG_AUTO_ACCEPT, devMode: FLAG_DEV_MODE });
 }
 
 // ============================================================================
@@ -485,7 +486,7 @@ async function main(): Promise<void> {
         await welcomeWizard();
     }
 
-    await startAiREPL(null, null, { autoAccept: FLAG_AUTO_ACCEPT, devMode: FLAG_DEV_MODE });
+    await startInkREPL(null, null, { autoAccept: FLAG_AUTO_ACCEPT, devMode: FLAG_DEV_MODE });
 }
 
 main().catch((err) => {

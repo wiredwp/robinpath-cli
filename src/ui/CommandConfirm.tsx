@@ -10,7 +10,7 @@ interface CommandConfirmProps {
 export function CommandConfirm({ command, isDangerous, onDecision }: CommandConfirmProps) {
     const firstLine = command.split('\n')[0];
     const preview = firstLine.length > 100 ? firstLine.slice(0, 97) + '...' : firstLine;
-    const multiline = command.includes('\n') ? ` (+${command.split('\n').length - 1} lines)` : '';
+    const lineCount = command.split('\n').length;
 
     useInput((input, key) => {
         const k = input.toLowerCase();
@@ -21,23 +21,18 @@ export function CommandConfirm({ command, isDangerous, onDecision }: CommandConf
     });
 
     return (
-        <Box flexDirection="column" marginY={0}>
-            {isDangerous && (
-                <Text color="red">  ! dangerous command</Text>
-            )}
+        <Box flexDirection="column" marginY={0} paddingLeft={1}>
+            {isDangerous && <Text color="red">! dangerous command</Text>}
             <Text>
-                <Text dimColor>  $ </Text>
+                <Text dimColor>$ </Text>
                 <Text>{preview}</Text>
-                {multiline && <Text dimColor>{multiline}</Text>}
+                {lineCount > 1 && <Text dimColor> (+{lineCount - 1} lines)</Text>}
             </Text>
-            <Box>
-                <Text>  </Text>
-                <Text color="green">[y]</Text><Text> run  </Text>
-                <Text color="red">[n]</Text><Text> skip  </Text>
-                {!isDangerous && (
-                    <><Text color="cyan">[a]</Text><Text> always  </Text></>
-                )}
-                <Text color="cyan">[e]</Text><Text> edit</Text>
+            <Box gap={1}>
+                <Text><Text color="green">[y]</Text> run</Text>
+                <Text><Text color="red">[n]</Text> skip</Text>
+                {!isDangerous && <Text><Text color="cyan">[a]</Text> always</Text>}
+                <Text><Text color="cyan">[e]</Text> edit</Text>
             </Box>
         </Box>
     );

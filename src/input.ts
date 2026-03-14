@@ -79,32 +79,59 @@ export async function collectInput(opts: InputOptions = {}): Promise<string | nu
 
     function render(): void {
         clearRendered();
-        const isEmpty = state.lines.length === 1 && state.lines[0] === '';
+        const emptyInput = state.lines.length === 1 && state.lines[0] === '';
+        const boxWidth = Math.min(cols - 2, 76);
+        const innerWidth = boxWidth - 4; // 2 border + 2 padding
         let lineCount = 0;
 
-        for (let i = 0; i < state.lines.length; i++) {
-            const prefix = i === 0 ? prompt : continuation;
-            const lineText = state.lines[i];
-            // Show hint on empty first line
-            const display = (i === 0 && isEmpty && hint) ? color.dim(hint) : lineText;
-            process.stdout.write(prefix + display);
-            if (i < state.lines.length - 1) {
-                process.stdout.write('\n');
-            }
+        const write = (text: string): void => {
+            process.stdout.write(text + '\n');
             lineCount++;
+        };
+
+        // Top border
+        write(color.cyan('  \u256d' + '\u2500'.repeat(boxWidth - 2) + '\u256e'));
+
+        // Content lines
+        if (emptyInput && hint) {
+            // Placeholder
+            const padded = hint.slice(0, innerWidth).padEnd(innerWidth);
+            write(color.cyan('  \u2502') + ' ' + color.dim(padded) + ' ' + color.cyan('\u2502'));
+        } else {
+            for (let i = 0; i < state.lines.length; i++) {
+                const lineText = state.lines[i];
+                const display = lineText.slice(0, innerWidth);
+                const padded = display.padEnd(innerWidth);
+                write(color.cyan('  \u2502') + ' ' + padded + ' ' + color.cyan('\u2502'));
+            }
         }
 
-        // Position cursor correctly
-        // Move cursor to the right line
-        const linesFromBottom = state.lines.length - 1 - state.cursorRow;
-        if (linesFromBottom > 0) {
-            process.stdout.write(`\x1b[${linesFromBottom}A`);
+        // Ensure minimum height (at least 1 empty line if only 1 content line)
+        if (state.lines.length === 1 && !emptyInput) {
+            const emptyLine = ' '.repeat(innerWidth);
+            write(color.cyan('  \u2502') + ' ' + emptyLine + ' ' + color.cyan('\u2502'));
         }
-        // Move cursor to the right column
-        const prefixLen = state.cursorRow === 0 ? stripAnsi(prompt).length : stripAnsi(continuation).length;
-        process.stdout.write(`\r\x1b[${prefixLen + state.cursorCol}C`);
 
-        state.renderedLineCount = lineCount - 1; // lines below the first line
+        // Bottom border
+        write(color.cyan('  \u2570' + '\u2500'.repeat(boxWidth - 2) + '\u256f'));
+
+        // Hints bar
+        write(color.dim('  Enter send \u00b7 \\ new line \u00b7 /help \u00b7 Esc clear'));
+
+        // Position cursor inside the box
+        // Calculate how many lines from current position to the cursor's line
+        const totalRendered = lineCount;
+        // Cursor is in the content area, which starts at line 1 (after top border)
+        const contentStartFromBottom = totalRendered - 1 - state.cursorRow; // -1 for top border
+        // Move up from the bottom to the cursor's content line
+        const bottomLines = totalRendered - (1 + state.cursorRow); // lines below cursor line (including border + hints)
+        if (bottomLines > 0) {
+            process.stdout.write(`\x1b[${bottomLines}A`);
+        }
+        // Move cursor to the right column (4 = "  │ " prefix)
+        process.stdout.write(`\r\x1b[${4 + state.cursorCol}C`);
+
+        state.renderedLineCount = lineCount - 1;
     }
 
     function stripAnsi(s: string): string {

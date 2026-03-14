@@ -465,40 +465,19 @@ export async function startAiREPL(
     }
 
     // Welcome banner
-    log('');
     const modeStr: string = devMode ? 'dev (auto+verbose)' : autoAccept ? 'auto' : 'confirm';
     const modeColor: (s: string) => string = devMode ? color.yellow : autoAccept ? color.yellow : color.green;
-    // Shorten cwd for display
     const cwdDisplay: string = process.cwd().replace(homedir(), '~');
     const cwdShort: string = cwdDisplay.length > 40 ? '...' + cwdDisplay.slice(-37) : cwdDisplay;
+    const shellName: string = getShellConfig().name;
 
+    log('');
     log(color.dim('  \u256d' + '\u2500'.repeat(50) + '\u256e'));
     log(color.dim('  \u2502') + color.bold('  RobinPath AI') + ' '.repeat(36) + color.dim('\u2502'));
-    log(
-        color.dim('  \u2502') +
-            `  Model: ${color.cyan(modelShort)}` +
-            ' '.repeat(Math.max(0, 41 - modelShort.length)) +
-            color.dim('\u2502'),
-    );
-    log(
-        color.dim('  \u2502') +
-            `  Mode:  ${modeColor(modeStr)}` +
-            ' '.repeat(Math.max(0, 41 - modeStr.length)) +
-            color.dim('\u2502'),
-    );
-    log(
-        color.dim('  \u2502') +
-            `  Dir:   ${color.dim(cwdShort)}` +
-            ' '.repeat(Math.max(0, 41 - cwdShort.length)) +
-            color.dim('\u2502'),
-    );
-    const shellName: string = getShellConfig().name;
-    log(
-        color.dim('  \u2502') +
-            `  Shell: ${color.dim(shellName)}` +
-            ' '.repeat(Math.max(0, 41 - shellName.length)) +
-            color.dim('\u2502'),
-    );
+    log(color.dim('  \u2502') + `  Model: ${color.cyan(modelShort)}` + ' '.repeat(Math.max(0, 41 - modelShort.length)) + color.dim('\u2502'));
+    log(color.dim('  \u2502') + `  Mode:  ${modeColor(modeStr)}` + ' '.repeat(Math.max(0, 41 - modeStr.length)) + color.dim('\u2502'));
+    log(color.dim('  \u2502') + `  Dir:   ${color.dim(cwdShort)}` + ' '.repeat(Math.max(0, 41 - cwdShort.length)) + color.dim('\u2502'));
+    log(color.dim('  \u2502') + `  Shell: ${color.dim(shellName)}` + ' '.repeat(Math.max(0, 41 - shellName.length)) + color.dim('\u2502'));
     log(color.dim('  \u2570' + '\u2500'.repeat(50) + '\u256f'));
     log('');
 
@@ -626,7 +605,7 @@ export async function startAiREPL(
                 continuation: color.dim('\u00b7 '),
                 history,
                 completer,
-                hint: isFirstPrompt ? 'Type a message, /help for commands, Tab to complete' : '',
+                hint: isFirstPrompt ? 'What do you want to automate today?' : '',
             });
             isFirstPrompt = false;
             if (input === null) { exitWithSave(); break; }
