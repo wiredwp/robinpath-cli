@@ -49,6 +49,7 @@ const COMMANDS: Record<string, string> = {
     '/forget': 'Remove a memory',
     '/usage': 'Token usage & cost',
     '/shell': 'Switch shell',
+    '/init': 'Create ROBINPATH.md',
     '/help': 'All commands',
 };
 
@@ -57,6 +58,7 @@ function InputArea({onSubmit, placeholder, statusText, history}: {onSubmit: (v: 
     const [value, setValue] = useState('');
     const [historyIdx, setHistoryIdx] = useState(-1);
     const [savedInput, setSavedInput] = useState('');
+    const [tabIdx, setTabIdx] = useState(-1);  // Tab cycling index for @ files
     const {exit} = useApp();
 
     const matchingCommands = useMemo(() => {
@@ -100,11 +102,13 @@ function InputArea({onSubmit, placeholder, statusText, history}: {onSubmit: (v: 
         if (key.tab) {
             if (matchingCommands.length === 1) { setValue(matchingCommands[0][0]); return; }
             if (showFiles.length > 0) {
-                // Complete first matching file after @
+                // Cycle through files with each Tab press
+                const nextIdx = (tabIdx + 1) % showFiles.length;
+                setTabIdx(nextIdx);
                 const atMatch = value.match(/@(\S*)$/);
                 if (atMatch) {
                     const before = value.slice(0, value.length - atMatch[0].length);
-                    setValue(before + '@' + showFiles[0].name + ' ');
+                    setValue(before + '@' + showFiles[nextIdx].name);
                 }
             }
             return;
@@ -126,7 +130,7 @@ function InputArea({onSubmit, placeholder, statusText, history}: {onSubmit: (v: 
         }
         if (ch === '\x15') {setValue(''); return;}
         if (ch === '\x17') {setValue(p => p.replace(/\S+\s*$/, '')); return;}
-        if (ch && !key.ctrl && !key.meta) { setValue(p => p + ch); setHistoryIdx(-1); }
+        if (ch && !key.ctrl && !key.meta) { setValue(p => p + ch); setHistoryIdx(-1); setTabIdx(-1); }
     });
 
     const lines = value.split('\n');
@@ -185,10 +189,10 @@ function InputArea({onSubmit, placeholder, statusText, history}: {onSubmit: (v: 
             {/* File picker — shows when @ is typed */}
             {showFiles.length > 0 && (
                 <Box flexDirection="column" paddingX={2} marginTop={1}>
-                    {showFiles.map(f => (
+                    {showFiles.map((f, i) => (
                         <Text key={f.name}>
-                            <Text color="cyan">+ </Text>
-                            <Text bold={f.name.endsWith('.rp') || f.name.endsWith('.robin')}>{f.name}</Text>
+                            <Text color={i === tabIdx ? 'cyan' : 'gray'}>{i === tabIdx ? '❯ ' : '+ '}</Text>
+                            <Text bold={i === tabIdx} color={i === tabIdx ? 'cyan' : undefined}>{f.name}</Text>
                             {f.isDir ? <Text dimColor>/</Text> : null}
                         </Text>
                     ))}
@@ -399,9 +403,9 @@ function ChatApp({engine}: {engine: ReplEngine}) {
                         <Text>  <Text dimColor>{cwdShort}</Text></Text>
                     </Box>
                     <Box flexDirection="column" width="50%">
+                        <Text dimColor>Run <Text color="cyan">/init</Text> to create ROBINPATH.md</Text>
                         <Text dimColor>Type <Text color="cyan">/</Text> to see commands</Text>
-                        <Text dimColor>Use <Text color="cyan">@/file</Text> to include files</Text>
-                        <Text dimColor>Use <Text color="cyan">\</Text> for multiline</Text>
+                        <Text dimColor>Use <Text color="cyan">@</Text> to include files</Text>
                     </Box>
                 </Box>
             ) : null}
@@ -504,6 +508,21 @@ class ReplEngine {
             installedModules: Object.keys(readModulesManifest()),
         };
 
+        // Load ROBINPATH.md project instructions (like Claude Code's CLAUDE.md)
+        const projectFiles = ['ROBINPATH.md', 'robinpath.md', '.robinpath.md'];
+        for (const pf of projectFiles) {
+            try {
+                const projectPath = join(process.cwd(), pf);
+                if (existsSync(projectPath)) {
+                    const content = readFileSync(projectPath, 'utf-8').slice(0, 10000);
+                    this.conversationMessages.push({role: 'user', content: `[Project Instructions — ${pf}]\n${content}`});
+                    this.conversationMessages.push({role: 'assistant', content: 'Project instructions loaded.'});
+                    break;
+                }
+            } catch {}
+        }
+
+        // Load persistent memory
         const mem = buildMemoryContext();
         if (mem.trim()) {
             this.conversationMessages.push({role: 'user', content: `[Context] ${mem.trim()}`});
@@ -554,6 +573,12 @@ class ReplEngine {
             return Object.entries(COMMANDS).map(([cmd, desc]) => `${cmd.padEnd(14)} ${desc}`).join('\n');
         }
         if (text === '/clear') {this.conversationMessages.length = 0; this.ui?.clearMessages(); return '';}
+        if (text === '/init') {
+            const mdPath = join(process.cwd(), 'ROBINPATH.md');
+            if (existsSync(mdPath)) return 'ROBINPATH.md already exists. Edit it to update project instructions.';
+            writeFileSync(mdPath, `# Project Instructions\n\n## About\nDescribe your project here.\n\n## Rules\n- Use RobinPath scripting language for automation\n- Follow the project structure\n\n## Context\nAny context the AI should know about this project.\n`);
+            return '✓ Created ROBINPATH.md — edit it to customize AI behavior for this project.';
+        }
         if (text === '/compact') {
             if (this.conversationMessages.length > 12) {
                 this.conversationMessages.splice(1, this.conversationMessages.length - 11);
