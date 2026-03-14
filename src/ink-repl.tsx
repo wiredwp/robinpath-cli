@@ -97,8 +97,8 @@ function InputArea({onSubmit, placeholder, statusText}: {onSubmit: (v: string) =
         if (key.backspace || key.delete) {setValue(p => p.slice(0, -1)); return;}
         if (key.tab) {
             if (matchingCommands.length === 1) { setValue(matchingCommands[0][0]); return; }
-            if (showFiles.length === 1) {
-                // Complete the file name after @
+            if (showFiles.length > 0) {
+                // Complete first matching file after @
                 const atMatch = value.match(/@(\S*)$/);
                 if (atMatch) {
                     const before = value.slice(0, value.length - atMatch[0].length);
@@ -115,6 +115,24 @@ function InputArea({onSubmit, placeholder, statusText}: {onSubmit: (v: string) =
     const lines = value.split('\n');
     const empty = value === '';
     const w = Math.min(process.stdout.columns - 4 || 76, 76);
+
+    // Render @filename in cyan/bold if file exists, white if not
+    function renderLineWithFileRefs(line: string): React.ReactNode[] {
+        const parts: React.ReactNode[] = [];
+        const refRegex = /@([\w.\-]+)/g;
+        let lastIdx = 0;
+        let m;
+        let k = 0;
+        while ((m = refRegex.exec(line)) !== null) {
+            if (m.index > lastIdx) parts.push(<Text key={k++}>{line.slice(lastIdx, m.index)}</Text>);
+            const fileName = m[1];
+            const fileExists = existsSync(join(process.cwd(), fileName));
+            parts.push(<Text key={k++} color={fileExists ? 'cyan' : undefined} bold={fileExists}>@{fileName}</Text>);
+            lastIdx = m.index + m[0].length;
+        }
+        if (lastIdx < line.length) parts.push(<Text key={k++}>{line.slice(lastIdx)}</Text>);
+        return parts.length > 0 ? parts : [<Text key={0}>{line}</Text>];
+    }
 
     return (
         <Box flexDirection="column" marginTop={1}>
@@ -138,7 +156,7 @@ function InputArea({onSubmit, placeholder, statusText}: {onSubmit: (v: string) =
                         lines.map((line, i) => (
                             <Text key={i}>
                                 {i === 0 ? <Text color="cyan">{'> '}</Text> : <Text dimColor>{'  '}</Text>}
-                                {line}
+                                {renderLineWithFileRefs(line)}
                                 {i === lines.length - 1 ? <Text color="cyan">▎</Text> : null}
                             </Text>
                         ))
