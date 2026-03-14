@@ -1,6 +1,6 @@
 {
     "name": "@robinpath/cli",
-    "version": "1.92.0",
+    "version": "1.93.0",
     "description": "AI-powered scripting CLI — automate anything from your terminal",
     "type": "module",
     "license": "MIT",

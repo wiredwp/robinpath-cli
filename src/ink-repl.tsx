@@ -264,10 +264,11 @@ function ChatApp({engine}: {engine: ReplEngine}) {
             if (response) setMessages(p => [...p, {id: ++nextId, text: response}]);
         } catch (err: any) {
             setMessages(p => [...p, {id: ++nextId, text: `Error: ${err.message}`, dim: true}]);
+        } finally {
+            setLoading(false);
+            setStreaming('');
+            engine.updateStatus();
         }
-        setLoading(false);
-        setStreaming('');
-        engine.updateStatus();
     }, [engine]);
 
     // Trust prompt
@@ -527,6 +528,8 @@ class ReplEngine {
     // ── AI message ──
     async handleAIMessage(text: string): Promise<string> {
         const ui = this.ui;
+        let finalResponse = '';
+        try {
         const {expanded} = expandFileRefs(text);
         this.conversationMessages.push({role: 'user', content: expanded});
         await autoCompact(this.conversationMessages);
@@ -534,8 +537,6 @@ class ReplEngine {
         const activeModel = readAiConfig().model || this.model;
         const activeKey = (readAiConfig().apiKey as string) || this.apiKey;
         const activeProvider = this.resolveProvider(activeKey);
-
-        let finalResponse = '';
 
         for (let loop = 0; loop < 15; loop++) {
             let fullText = '';
@@ -624,6 +625,13 @@ class ReplEngine {
             finalResponse = '';
         }
 
+        } catch (err: any) {
+            finalResponse = `⚠ Error: ${err.message}`;
+        } finally {
+            // ALWAYS clear streaming state — prevents stuck cursor
+            ui?.setStreaming('');
+            ui?.setLoading(false);
+        }
         saveSession(this.sessionId, this.sessionName, this.conversationMessages, this.usage);
         return finalResponse;
     }
