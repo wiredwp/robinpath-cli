@@ -7,6 +7,7 @@
 import React, {useState, useCallback, useEffect, useMemo} from 'react';
 import {render, Box, Text, Static, useInput, useApp} from 'ink';
 import InkSpinner from 'ink-spinner';
+import {Markdown} from './ui/Markdown';
 import {getShellConfig, getAvailableShells, setShellOverride, getRobinPathHome, CLI_VERSION, setFlags, logVerbose} from './utils';
 import {readAiConfig, writeAiConfig} from './config';
 import type {AiConfig} from './config';
@@ -181,13 +182,13 @@ function ChatApp({engine}: {engine: ReplEngine}) {
 
             <Static items={messages}>
                 {msg => (
-                    <Box key={msg.id} paddingX={1} marginBottom={msg.text.startsWith('❯') ? 0 : 1}>
+                    <Box key={msg.id} paddingX={1} marginBottom={msg.text.startsWith('❯') ? 0 : 1} flexDirection="column">
                         {msg.text.startsWith('❯') ? (
                             <Text><Text color="cyan" bold>❯</Text><Text bold>{msg.text.slice(1)}</Text></Text>
                         ) : msg.dim ? (
                             <Text dimColor wrap="wrap">{msg.text}</Text>
                         ) : (
-                            <Text wrap="wrap">{msg.text}</Text>
+                            <Markdown>{msg.text}</Markdown>
                         )}
                     </Box>
                 )}
@@ -196,7 +197,10 @@ function ChatApp({engine}: {engine: ReplEngine}) {
             {loading ? (
                 <Box flexDirection="column" paddingX={1}>
                     {streaming ? (
-                        <Text wrap="wrap">{streaming}<Text color="cyan">▍</Text></Text>
+                        <Box flexDirection="column">
+                            <Markdown>{streaming}</Markdown>
+                            <Text color="cyan">▍</Text>
+                        </Box>
                     ) : (
                         <Text dimColor><InkSpinner type="dots" /> Thinking</Text>
                     )}
