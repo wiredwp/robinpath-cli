@@ -84,14 +84,30 @@ function collectInkInput(placeholder: string): Promise<string | null> {
     }
     return new Promise<string | null>((resolve) => {
         let resolved = false;
-        const { waitUntilExit } = render(
+        const instance = render(
             <InputPrompt
                 placeholder={placeholder}
-                onSubmit={(v) => { if (!resolved) { resolved = true; resolve(v); } }}
-                onExit={() => { if (!resolved) { resolved = true; resolve(null); } }}
+                onSubmit={(v) => {
+                    if (!resolved) {
+                        resolved = true;
+                        instance.clear();   // Clear Ink's rendered output
+                        instance.unmount(); // Unmount React tree
+                        resolve(v);
+                    }
+                }}
+                onExit={() => {
+                    if (!resolved) {
+                        resolved = true;
+                        instance.clear();
+                        instance.unmount();
+                        resolve(null);
+                    }
+                }}
             />,
         );
-        waitUntilExit().then(() => { if (!resolved) { resolved = true; resolve(null); } });
+        instance.waitUntilExit().then(() => {
+            if (!resolved) { resolved = true; resolve(null); }
+        });
     });
 }
 

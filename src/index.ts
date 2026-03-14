@@ -17,7 +17,6 @@ import { startAiREPL, welcomeWizard, handleAiConfig } from './repl';
 
 import { startInkREPL } from './ink-repl';
 
-// Use Ink UI for TTY, fall back to old REPL for non-TTY
 async function startInkOrFallback(
     prompt: string | null,
     resumeId: string | null,
