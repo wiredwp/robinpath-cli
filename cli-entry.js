@@ -14,7 +14,7 @@ import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErr
 import { nativeModules } from './modules/index.js';
 
 // Injected by esbuild at build time via --define, fallback for dev mode
-const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.58.0';
+const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.59.0';
 
 // ============================================================================
 // Global flags
@@ -7981,6 +7981,7 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
                 }
 
                 if (!brainResult || !brainResult.code) {
+                    spinner.stop();
                     log(color.red('\n  Brain returned no response. Check your connection or API key.'));
                     break;
                 }
