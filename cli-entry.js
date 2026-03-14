@@ -14,7 +14,7 @@ import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErr
 import { nativeModules } from './modules/index.js';
 
 // Injected by esbuild at build time via --define, fallback for dev mode
-const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.53.0';
+const CLI_VERSION = typeof __CLI_VERSION__ !== 'undefined' ? __CLI_VERSION__ : '1.54.0';
 
 // ============================================================================
 // Global flags
@@ -6772,12 +6772,12 @@ function executeShellCommand(command, timeout = 30000) {
 
 /** Detect if a command writes to a file (redirect or heredoc). Returns the target file path or null. */
 function detectFileWrite(cmd) {
-    // Match: echo/cat/printf ... > file.txt (but not >>)
+    // Match: ... > file.txt (but not >>)
     const redirect = cmd.match(/(?<![>])>\s*([^\s|&;>]+)\s*$/);
     if (redirect) return redirect[1];
-    // Match heredoc: cat << 'EOF' > file.txt
-    const heredoc = cmd.match(/>\s*([^\s|&;>]+)\s*$/);
-    if (heredoc) return heredoc[1];
+    // Match: cat << 'EOF' > file.txt (heredoc with redirect in the middle)
+    const heredoc = cmd.match(/>\s*([^\s|&;>]+)\s*$/m);
+    if (heredoc && cmd.includes('<<')) return heredoc[1];
     return null;
 }
 
@@ -8065,7 +8065,7 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
                             const targetPath = join(process.cwd(), writeTarget);
                             if (existsSync(targetPath)) {
                                 const oldContent = readFileSync(targetPath, 'utf-8');
-                                log(color.dim(`  File exists: ${writeTarget} (${oldContent.split('\\n').length} lines)`));
+                                log(color.dim(`  File exists: ${writeTarget} (${oldContent.split('\n').length} lines)`));
                             }
                         } catch { /* skip — file might not be readable */ }
                     }
@@ -8126,16 +8126,19 @@ async function startAiREPL(initialPrompt, resumeSessionId, opts = {}) {
 
                     const result = await executeShellCommand(cmd);
 
-                    // Show diff after file write
-                    if (diffTarget && result.exitCode === 0) {
-                        try {
-                            const targetPath = join(process.cwd(), diffTarget);
-                            if (existsSync(targetPath)) {
-                                const postContent = readFileSync(targetPath, 'utf-8');
-                                showFileDiff(diffTarget, preContent, postContent);
-                            }
-                        } catch {}
-                    } else if (result.exitCode === 0) {
+                    // Show result status
+                    if (result.exitCode === 0) {
+                        // Show diff after file write
+                        if (diffTarget) {
+                            try {
+                                const targetPath = join(process.cwd(), diffTarget);
+                                if (existsSync(targetPath)) {
+                                    const postContent = readFileSync(targetPath, 'utf-8');
+                                    showFileDiff(diffTarget, preContent, postContent);
+                                }
+                            } catch {}
+                        }
+                        // If no stdout was streamed, show "done"
                         if (!(result.stdout || '').trim()) {
                             log(color.dim(`    \u2514 done`));
                         }
