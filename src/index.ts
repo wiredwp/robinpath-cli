@@ -34,6 +34,7 @@ import {
     handleUninstall,
     resolveScriptPath,
     runScript,
+    readAuth,
 } from './commands-core';
 import {
     handleAdd,
@@ -493,6 +494,80 @@ async function main(): Promise<void> {
     // ── Default: AI interactive mode ──
     checkForUpdates();
 
+    // Check if logged in — AI mode requires authentication
+    const auth = readAuth();
+    if (!auth && process.stdin.isTTY) {
+        console.log('');
+        console.log(color.bold('  Welcome to RobinPath!'));
+        console.log('');
+        console.log('  To unlock AI assistant, deploy, snippets, and sync —');
+        console.log('  please login to your RobinPath account.');
+        console.log('');
+        console.log('  Without login you can still:');
+        console.log(`  ${color.dim('•')} Run scripts: ${color.cyan('robinpath script.rp')}`);
+        console.log(`  ${color.dim('•')} Format code: ${color.cyan('robinpath fmt file.rp')}`);
+        console.log(`  ${color.dim('•')} Run tests:   ${color.cyan('robinpath test')}`);
+        console.log(`  ${color.dim('•')} Install modules: ${color.cyan('robinpath add @robinpath/csv')}`);
+        console.log('');
+
+        // Ask: Login or Skip
+        const choice: string = await new Promise((resolve) => {
+            if (!process.stdin.isTTY) { resolve('skip'); return; }
+            let selected = 0;
+            const options = ['Login', 'Skip for now'];
+
+            function render() {
+                process.stdout.write('\x1b[2K\r');
+                for (let i = 0; i < options.length; i++) {
+                    if (i > 0) process.stdout.write('\n\x1b[2K');
+                    const marker = i === selected ? color.cyan('  ❯ ') : '    ';
+                    const text = i === selected ? color.bold(options[i]) : options[i];
+                    process.stdout.write(`${marker}${text}`);
+                }
+                // Move cursor back up
+                if (options.length > 1) process.stdout.write(`\x1b[${options.length - 1}A`);
+                process.stdout.write('\r');
+            }
+
+            render();
+            process.stdin.setRawMode(true);
+            process.stdin.resume();
+
+            const onKey = (buf: Buffer): void => {
+                const key = buf.toString();
+                if (key === '\x1b[A') { selected = 0; render(); return; } // up
+                if (key === '\x1b[B') { selected = 1; render(); return; } // down
+                if (key === '\r' || key === '\n') {
+                    process.stdin.removeListener('data', onKey);
+                    try { process.stdin.setRawMode(false); } catch {}
+                    process.stdin.pause();
+                    // Clear selector lines
+                    process.stdout.write('\n'.repeat(options.length));
+                    resolve(selected === 0 ? 'login' : 'skip');
+                    return;
+                }
+                if (key === '\x1b' || key === '\x03') {
+                    process.stdin.removeListener('data', onKey);
+                    try { process.stdin.setRawMode(false); } catch {}
+                    process.stdin.pause();
+                    process.stdout.write('\n'.repeat(options.length));
+                    resolve('skip');
+                    return;
+                }
+            };
+            process.stdin.on('data', onKey);
+        });
+
+        if (choice === 'login') {
+            await handleLogin();
+        } else {
+            console.log(color.dim('  Skipped. Run ') + color.cyan('robinpath login') + color.dim(' anytime to unlock AI features.'));
+            console.log('');
+            return;
+        }
+    }
+
+    // Check API key
     const existingConfig = readAiConfig();
     if (Object.keys(existingConfig).length === 0 && process.stdin.isTTY) {
         await welcomeWizard();
