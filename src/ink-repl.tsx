@@ -53,8 +53,10 @@ const COMMANDS: Record<string, string> = {
 };
 
 // ── Input Area ──
-function InputArea({onSubmit, placeholder, statusText}: {onSubmit: (v: string) => void; placeholder: string; statusText?: string}) {
+function InputArea({onSubmit, placeholder, statusText, history}: {onSubmit: (v: string) => void; placeholder: string; statusText?: string; history?: string[]}) {
     const [value, setValue] = useState('');
+    const [historyIdx, setHistoryIdx] = useState(-1);
+    const [savedInput, setSavedInput] = useState('');
     const {exit} = useApp();
 
     const matchingCommands = useMemo(() => {
@@ -107,9 +109,24 @@ function InputArea({onSubmit, placeholder, statusText}: {onSubmit: (v: string) =
             }
             return;
         }
+        // Up arrow — history navigation
+        if (key.upArrow && history && history.length > 0) {
+            if (historyIdx === -1) setSavedInput(value);
+            const newIdx = Math.min(historyIdx + 1, history.length - 1);
+            setHistoryIdx(newIdx);
+            setValue(history[history.length - 1 - newIdx]);
+            return;
+        }
+        // Down arrow — history navigation
+        if (key.downArrow && historyIdx >= 0) {
+            const newIdx = historyIdx - 1;
+            if (newIdx < 0) { setHistoryIdx(-1); setValue(savedInput); }
+            else { setHistoryIdx(newIdx); setValue(history![history!.length - 1 - newIdx]); }
+            return;
+        }
         if (ch === '\x15') {setValue(''); return;}
         if (ch === '\x17') {setValue(p => p.replace(/\S+\s*$/, '')); return;}
-        if (ch && !key.ctrl && !key.meta) setValue(p => p + ch);
+        if (ch && !key.ctrl && !key.meta) { setValue(p => p + ch); setHistoryIdx(-1); }
     });
 
     const lines = value.split('\n');
@@ -295,12 +312,22 @@ function ChatApp({engine}: {engine: ReplEngine}) {
     const [loading, setLoading] = useState(false);
     const [status, setStatus] = useState('');
     const [showModelPicker, setShowModelPicker] = useState(false);
+    const [inputHistory, setInputHistory] = useState<string[]>([]);
+    const [responseTime, setResponseTime] = useState('');
+
+    // Cancel handler — Esc or Ctrl+C during streaming
+    useInput((ch, key) => {
+        if (loading && (key.escape || ch === '\x03')) {
+            engine.cancel();
+        }
+    }, {isActive: loading});
 
     useEffect(() => {
         engine.ui = {
             setStreaming, setLoading, setStatus, setShowModelPicker,
             addMessage: (text: string, dim?: boolean) => setMessages(p => [...p, {id: ++nextId, text, dim}]),
             clearMessages: () => setMessages([]),
+            setResponseTime,
         };
         engine.updateStatus();
     }, []);
@@ -315,9 +342,12 @@ function ChatApp({engine}: {engine: ReplEngine}) {
             return;
         }
         // AI message
+        setInputHistory(p => [...p, text]);
         setMessages(p => [...p, {id: ++nextId, text: `❯ ${text}`}]);
         setLoading(true);
         setStreaming('');
+        setResponseTime('');
+        const startTime = Date.now();
         try {
             const response = await engine.handleAIMessage(text);
             if (response) setMessages(p => [...p, {id: ++nextId, text: response}]);
@@ -326,6 +356,9 @@ function ChatApp({engine}: {engine: ReplEngine}) {
         } finally {
             setLoading(false);
             setStreaming('');
+            const elapsed = Date.now() - startTime;
+            const timeStr = elapsed < 1000 ? `${elapsed}ms` : elapsed < 60000 ? `${(elapsed/1000).toFixed(1)}s` : `${Math.floor(elapsed/60000)}m ${Math.round((elapsed%60000)/1000)}s`;
+            setResponseTime(timeStr);
             engine.updateStatus();
         }
     }, [engine]);
@@ -419,16 +452,20 @@ function ChatApp({engine}: {engine: ReplEngine}) {
             ) : loading ? (
                 <Box flexDirection="column" paddingX={1}>
                     {streaming ? (
-                        <Text wrap="wrap">{streaming}</Text>
+                        <Box flexDirection="column">
+                            <Text wrap="wrap">{streaming}</Text>
+                            <Text dimColor>{'\n  esc to cancel'}</Text>
+                        </Box>
                     ) : (
-                        <Text dimColor><InkSpinner type="dots" /> Thinking</Text>
+                        <Text dimColor><InkSpinner type="dots" /> Thinking  <Text color="gray">esc to cancel</Text></Text>
                     )}
                 </Box>
             ) : (
                 <InputArea
                     onSubmit={handleSubmit}
                     placeholder="Message RobinPath..."
-                    statusText={status}
+                    statusText={responseTime ? `${status} · ${responseTime}` : status}
+                    history={inputHistory}
                 />
             )}
         </Box>
@@ -447,6 +484,7 @@ class ReplEngine {
     conversationMessages: Message[];
     cliContext: Record<string, unknown>;
     ui: any = null;
+    abortController: AbortController | null = null;
 
     constructor(resumeSessionId: string | null, opts: {autoAccept?: boolean; devMode?: boolean}) {
         this.config = readAiConfig();
@@ -496,6 +534,13 @@ class ReplEngine {
         if (this.usage.totalTokens > 0) parts.push(`${this.usage.totalTokens.toLocaleString()} tokens`);
         if (this.usage.cost > 0) parts.push(`$${this.usage.cost.toFixed(4)}`);
         this.ui?.setStatus(parts.join(' · '));
+    }
+
+    cancel() {
+        if (this.abortController) {
+            this.abortController.abort();
+            this.abortController = null;
+        }
     }
 
     exit() {
@@ -598,8 +643,10 @@ class ReplEngine {
         const activeModel = readAiConfig().model || this.model;
         const activeKey = (readAiConfig().apiKey as string) || this.apiKey;
         const activeProvider = this.resolveProvider(activeKey);
+        this.abortController = new AbortController();
 
         for (let loop = 0; loop < 5; loop++) {
+            if (this.abortController?.signal.aborted) {finalResponse = '(cancelled)'; break;}
             let fullText = '';
             let lastUpdate = 0;
 
