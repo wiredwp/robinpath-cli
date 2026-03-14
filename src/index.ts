@@ -5,15 +5,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve, extname, basename } from 'node:path';
 
-import {
-    RobinPath,
-    ROBINPATH_VERSION,
-    Parser,
-    Printer,
-    LineIndexImpl,
-    formatErrorWithContext,
-    nativeModules,
-} from './runtime';
+import { getROBINPATH_VERSION } from './runtime';
 
 import { CLI_VERSION, color, log, setFlags, FLAG_AUTO_ACCEPT, FLAG_DEV_MODE } from './utils';
 import { readAiConfig } from './config';
@@ -232,7 +224,7 @@ async function main(): Promise<void> {
     const cliName = invokedAs === 'rp' ? 'rp' : 'robinpath';
 
     if (args.includes('--version') || args.includes('-v')) {
-        console.log(`${cliName} v${CLI_VERSION} (lang v${ROBINPATH_VERSION})`);
+        console.log(`${cliName} v${CLI_VERSION} (lang v${getROBINPATH_VERSION()})`);
         return;
     }
 

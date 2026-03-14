@@ -19,7 +19,7 @@ import { CLI_VERSION, FLAG_VERBOSE, log, logVerbose, color, getRobinPathHome } f
 
 import { createRobinPath, resolveScriptPath, displayError } from './commands-core';
 
-import { RobinPath, ROBINPATH_VERSION, Parser, Printer, LineIndexImpl, formatErrorWithContext } from './runtime';
+import { getRobinPathClass, getROBINPATH_VERSION, getParser, getPrinter, getLineIndexImpl, getFormatErrorWithContext } from './runtime';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -67,7 +67,7 @@ interface ElseIfBranch {
 
 interface PrinterContext {
     indentLevel: number;
-    lineIndex: LineIndexImpl;
+    lineIndex: any;
 }
 
 // ============================================================================
@@ -100,7 +100,7 @@ export async function handleCheck(args: string[]): Promise<void> {
     const startTime: number = FLAG_VERBOSE ? performance.now() : 0;
 
     try {
-        const parser = new Parser(script);
+        const parser = new (getParser())(script);
         await parser.parse();
         if (FLAG_VERBOSE) {
             const elapsed: string = (performance.now() - startTime).toFixed(1);
@@ -129,7 +129,7 @@ export async function handleCheck(args: string[]): Promise<void> {
             );
         } else {
             try {
-                const formatted: string = formatErrorWithContext({ message: err.message, code: script });
+                const formatted: string = getFormatErrorWithContext()({ message: err.message, code: script });
                 console.error(color.red('Syntax error') + ` in ${fileArg}:\n${formatted}`);
             } catch {
                 console.error(color.red('Syntax error') + ` in ${fileArg}: ${err.message}`);
@@ -158,7 +158,7 @@ export async function handleAST(args: string[]): Promise<void> {
     }
 
     const script: string = readFileSync(filePath, 'utf-8');
-    const rp: RobinPath = await createRobinPath();
+    const rp: any = await createRobinPath();
     const startTime: number = FLAG_VERBOSE ? performance.now() : 0;
 
     try {
@@ -305,11 +305,11 @@ export function simpleDiff(filePath: string, original: string, formatted: string
  * Format a RobinPath script to canonical style (normalized, no flavor preservation)
  */
 export async function formatScript(script: string): Promise<string> {
-    const parser = new Parser(script);
+    const parser = new (getParser())(script);
     const statements: any[] = await parser.parse();
 
     // Create a dummy LineIndex (no original script = forces normalization)
-    const dummyLineIndex: LineIndexImpl = new LineIndexImpl('');
+    const dummyLineIndex: any = new (getLineIndexImpl())('');
 
     const ctx: PrinterContext = {
         indentLevel: 0,
@@ -322,7 +322,7 @@ export async function formatScript(script: string): Promise<string> {
 
     const parts: string[] = [];
     for (let i: number = 0; i < normalized.length; i++) {
-        const code: string = Printer.printNode(normalized[i] as any, ctx);
+        const code: string = getPrinter().printNode(normalized[i] as any, ctx);
         if (i > 0 && code.trim()) {
             // For normalized output, add blank line between blocks and other statements
             const prevType: string = normalized[i - 1].type;
@@ -472,7 +472,7 @@ export async function handleTest(args: string[]): Promise<void> {
     for (const filePath of testFiles) {
         const relPath: string = relative(process.cwd(), filePath);
         const script: string = readFileSync(filePath, 'utf-8');
-        const rp: RobinPath = await createRobinPath();
+        const rp: any = await createRobinPath();
 
         try {
             await rp.executeScript(script);
@@ -573,7 +573,7 @@ export async function runWatchIteration(filePath: string): Promise<void> {
     log(color.dim('\u2500'.repeat(50)));
 
     const script: string = readFileSync(filePath, 'utf-8');
-    const rp: RobinPath = await createRobinPath();
+    const rp: any = await createRobinPath();
     try {
         await rp.executeScript(script);
     } catch (error: unknown) {
@@ -642,7 +642,7 @@ export function appendHistory(line: string): void {
 }
 
 export async function startREPL(): Promise<void> {
-    const rp: RobinPath = await createRobinPath({ threadControl: true });
+    const rp: any = await createRobinPath({ threadControl: true });
     rp.createThread('default');
 
     const sessionLines: string[] = []; // Track session lines for .save

@@ -27,7 +27,7 @@ import {
     handleInstall,
 } from './commands-core';
 
-import { ROBINPATH_VERSION, nativeModules } from './runtime';
+import { getROBINPATH_VERSION, getNativeModules } from './runtime';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -242,7 +242,7 @@ export async function handleDoctor(): Promise<void> {
     let issues: number = 0;
 
     // CLI version
-    log(color.green('  \u2713') + ` CLI version ${CLI_VERSION} (lang ${ROBINPATH_VERSION})`);
+    log(color.green('  \u2713') + ` CLI version ${CLI_VERSION} (lang ${getROBINPATH_VERSION()})`);
 
     // Install location
     const installDir: string = getInstallDir();

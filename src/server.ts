@@ -8,7 +8,7 @@ import { resolve, extname, join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { createHmac, randomUUID } from 'node:crypto';
 import { color, log, logVerbose, CLI_VERSION, getRobinPathHome } from './utils';
-import { nativeModules, ROBINPATH_VERSION, RobinPath, Parser, Printer } from './runtime';
+import { getNativeModules, getROBINPATH_VERSION, getRobinPathClass, getParser, getPrinter } from './runtime';
 
 // External dependencies — declared so TypeScript knows their shapes
 import { createRobinPath, resolveScriptPath } from './commands-core';
@@ -196,7 +196,7 @@ export async function handleStart(args: string[]): Promise<void> {
 
     // Collect module info for /v1/modules endpoint
     const moduleList: ModuleListEntry[] = [];
-    for (const mod of nativeModules) {
+    for (const mod of getNativeModules()) {
         moduleList.push({
             name: mod.name,
             type: 'native',
@@ -800,7 +800,7 @@ export async function handleStart(args: string[]): Promise<void> {
                 const dryRun = url.searchParams.get('dry') === 'true' || body.dry === true;
                 if (dryRun) {
                     try {
-                        const parser = new Parser(script);
+                        const parser = new (getParser())(script);
                         await parser.parse();
                         json(res, 200, { ok: true, dry_run: true, source, message: 'Script is valid' }, requestId);
                     } catch (err: unknown) {
@@ -977,7 +977,7 @@ export async function handleStart(args: string[]): Promise<void> {
                     return;
                 }
                 try {
-                    const parser = new Parser(script);
+                    const parser = new (getParser())(script);
                     await parser.parse();
                     json(res, 200, { ok: true }, requestId);
                 } catch (err: unknown) {
@@ -1196,7 +1196,7 @@ export async function handleStart(args: string[]): Promise<void> {
                     {
                         ok: true,
                         version: CLI_VERSION,
-                        lang_version: ROBINPATH_VERSION,
+                        lang_version: getROBINPATH_VERSION(),
                         host,
                         port,
                         uptime_seconds: Math.round(process.uptime()),

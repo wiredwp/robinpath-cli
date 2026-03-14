@@ -53,7 +53,7 @@ import type { ConfirmResult } from './ui';
 import { fetchBrainStream, fetchBrainContext, buildEnrichedPrompt } from './brain';
 import type { BrainStreamResult } from './brain';
 
-import { nativeModules } from './runtime';
+import { getNativeModules } from './runtime';
 
 // ============================================================================
 // External declarations — these come from modules not yet extracted into src/
@@ -416,7 +416,7 @@ export async function startAiREPL(
         shell: getShellConfig().name,
         cwd: process.cwd(),
         cliVersion: CLI_VERSION,
-        nativeModules: nativeModules.map((m: NativeModule) => m.name),
+        nativeModules: getNativeModules().map((m: NativeModule) => m.name),
         installedModules: Object.keys(readModulesManifest()),
     };
 
@@ -721,8 +721,8 @@ export async function startAiREPL(
             const mf = readModulesManifest();
             const names: string[] = Object.keys(mf);
             log('');
-            log(color.bold(`  Native modules (${nativeModules.length}):`));
-            log('  ' + nativeModules.map((m: NativeModule) => color.cyan(m.name)).join(', '));
+            log(color.bold(`  Native modules (${getNativeModules().length}):`));
+            log('  ' + getNativeModules().map((m: NativeModule) => color.cyan(m.name)).join(', '));
             log('');
             if (names.length > 0) {
                 log(color.bold(`  Installed modules (${names.length}):`));
@@ -748,7 +748,7 @@ export async function startAiREPL(
             log(`  Working dir:        ${color.cyan(process.cwd())}`);
             log(`  Platform:           ${platform()}`);
             log(`  CLI version:        ${CLI_VERSION}`);
-            log(`  Native modules:     ${nativeModules.length}`);
+            log(`  Native modules:     ${getNativeModules().length}`);
             log(
                 `  Installed modules:  ${installedNames.length}${installedNames.length > 0 ? ' (' + installedNames.map((n: string) => n.replace('@robinpath/', '')).join(', ') + ')' : ''}`,
             );

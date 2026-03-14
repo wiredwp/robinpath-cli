@@ -39,7 +39,7 @@ import {
     getAuthPath,
 } from './commands-core';
 
-import { nativeModules, ROBINPATH_VERSION } from './runtime';
+import { getNativeModules, getROBINPATH_VERSION } from './runtime';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1102,7 +1102,7 @@ export async function handleInfo(args: string[]): Promise<void> {
             string,
             { functions: string[]; description: string | null; function_metadata: Record<string, unknown> | null }
         > = {};
-        for (const mod of nativeModules) {
+        for (const mod of getNativeModules()) {
             modulesInfo[mod.name] = {
                 functions: Object.keys(mod.functions),
                 description: mod.moduleMetadata?.description || null,
@@ -1140,7 +1140,7 @@ export async function handleInfo(args: string[]): Promise<void> {
         const info = {
             ok: true,
             version: CLI_VERSION,
-            lang_version: ROBINPATH_VERSION,
+            lang_version: getROBINPATH_VERSION(),
             platform: platform(),
             arch: process.arch,
             node_version: process.version,
@@ -1400,7 +1400,7 @@ export async function handleInfo(args: string[]): Promise<void> {
         if (jsonOutput || !isTTY) {
             console.log(JSON.stringify(info, null, 2));
         } else {
-            console.log(`RobinPath v${CLI_VERSION} (lang v${ROBINPATH_VERSION})`);
+            console.log(`RobinPath v${CLI_VERSION} (lang v${getROBINPATH_VERSION()})`);
             console.log('');
             console.log(`  Platform:     ${info.platform} (${info.arch})`);
             console.log(`  Node:         ${info.node_version}`);

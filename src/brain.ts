@@ -7,7 +7,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { logVerbose, color, getShellConfig, getRobinPathHome, CLI_VERSION } from './utils';
 import { AI_BRAIN_URL, readAiConfig } from './config';
 import type { Message } from './sessions';
-import { nativeModules } from './runtime';
+import { getNativeModules } from './runtime';
 
 // ============================================================================
 // Interfaces
@@ -278,7 +278,7 @@ export function buildLocalContext(): CLIContext {
     }));
 
     // Native modules (just names)
-    ctx.nativeModuleNames = nativeModules.map((m) => m.name);
+    ctx.nativeModuleNames = getNativeModules().map((m) => m.name);
 
     // Project config
     try {
@@ -352,7 +352,7 @@ export async function buildEnrichedPrompt(prompt: string): Promise<EnrichedPromp
     // Modules that overlap with built-in language features (not external deps)
     // Populated dynamically from native module list + core language keywords
     const coreOverlaps = new Set<string>(local.nativeModuleNames);
-    for (const mod of nativeModules) {
+    for (const mod of getNativeModules()) {
         // Any native function that shares a name with a resolved module
         for (const fn of Object.keys(mod.functions || {})) {
             coreOverlaps.add(fn);

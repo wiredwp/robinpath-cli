@@ -27,7 +27,7 @@ import {
     getInstallDir,
     getRobinPathHome,
 } from './utils';
-import { RobinPath, ROBINPATH_VERSION, nativeModules, formatErrorWithContext } from './runtime';
+import { getRobinPathClass, getROBINPATH_VERSION, getNativeModules, getFormatErrorWithContext } from './runtime';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -241,7 +241,7 @@ export function displayError(error: { message: string; __formattedMessage?: stri
     // Try to use formatErrorWithContext for rich error display
     if (script) {
         try {
-            const formatted: string = formatErrorWithContext({ message: error.message, code: script });
+            const formatted: string = getFormatErrorWithContext()({ message: error.message, code: script });
             if (formatted && formatted !== error.message) {
                 console.error(color.red('Error:') + ' ' + formatted);
                 return;
@@ -256,7 +256,7 @@ export function displayError(error: { message: string; __formattedMessage?: stri
 
 /** Execute a script and exit with proper code */
 export async function runScript(script: string, filePath?: string): Promise<void> {
-    const rp: RobinPath = await createRobinPath();
+    const rp: any = await createRobinPath();
     const startTime: number = FLAG_VERBOSE ? performance.now() : 0;
 
     try {
@@ -433,7 +433,7 @@ export function parsePackageSpec(spec: string): PackageSpec | null {
 }
 
 /** Load all installed modules from ~/.robinpath/modules/ into a RobinPath instance */
-export async function loadInstalledModules(rp: RobinPath): Promise<void> {
+export async function loadInstalledModules(rp: any): Promise<void> {
     const manifest: ModulesManifest = readModulesManifest();
     const entries: [string, { version: string; [key: string]: unknown }][] = Object.entries(manifest);
     if (entries.length === 0) return;
@@ -496,11 +496,11 @@ export async function loadInstalledModules(rp: RobinPath): Promise<void> {
 }
 
 /** Create a RobinPath instance with all installed modules loaded */
-export async function createRobinPath(opts?: Record<string, unknown>): Promise<RobinPath> {
-    const rp: RobinPath = new RobinPath(opts);
+export async function createRobinPath(opts?: Record<string, unknown>): Promise<any> {
+    const rp: any = new (getRobinPathClass())(opts);
 
     // Register native modules (bundled in binary, always available)
-    for (const mod of nativeModules) {
+    for (const mod of getNativeModules()) {
         rp.registerModule(mod.name, mod.functions);
         if (mod.functionMetadata) {
             rp.registerModuleMeta(mod.name, mod.functionMetadata);
