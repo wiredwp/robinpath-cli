@@ -225,7 +225,7 @@ export async function autoCompact(conversationMessages: Message[]): Promise<bool
             body: JSON.stringify({
                 prompt: `Summarize this conversation history in 3-5 bullet points. Focus on: user's name, what they asked for, key decisions made, and any code that was generated. Be concise.\n\n${summaryText}`,
                 topK: 0,
-                model: 'robinpath-default',
+                model: 'anthropic/claude-sonnet-4.6',
             }),
             signal: AbortSignal.timeout(10000),
         });

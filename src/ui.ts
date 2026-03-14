@@ -4,7 +4,6 @@
 import { color, log } from './utils';
 import { AI_MODELS } from './models';
 import type { ModelInfo } from './models';
-import { readAiConfig } from './config';
 import { listSessions } from './sessions';
 import type { SessionInfo } from './sessions';
 
@@ -92,8 +91,7 @@ export function createInteractivePicker({ renderFn, onKeyFn }: PickerOptions): P
 
 /** Interactive arrow-key model selector. Returns selected model ID or null if cancelled. */
 export function selectModelInteractive(currentModelId: string): Promise<string | null> {
-    const hasKey = !!readAiConfig().apiKey;
-    const models: ModelInfo[] = hasKey ? AI_MODELS : AI_MODELS.filter((m) => !m.requiresKey);
+    const models: ModelInfo[] = AI_MODELS;
     let cursor = Math.max(
         0,
         models.findIndex((m) => m.id === currentModelId),
@@ -103,10 +101,6 @@ export function selectModelInteractive(currentModelId: string): Promise<string |
         renderFn: (out) => {
             out('');
             out(color.bold('  Select AI Model'));
-            if (!hasKey) {
-                out(color.dim('  Set an API key to unlock premium models:'));
-                out(color.dim(`  ${color.cyan('robinpath ai config set-key <key>')}`));
-            }
             out(color.dim('  \u2191\u2193 navigate  Enter select  Esc cancel'));
             out('');
             let lastGroup = '';

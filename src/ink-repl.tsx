@@ -330,10 +330,7 @@ function ChatApp({engine}: {engine: ReplEngine}) {
 
             {showModelPicker ? (
                 <ModelSelector
-                    models={(() => {
-                        const hasKey = !!readAiConfig().apiKey;
-                        return hasKey ? AI_MODELS : AI_MODELS.filter(m => !m.requiresKey);
-                    })()}
+                    models={AI_MODELS}
                     currentId={readAiConfig().model || engine.model}
                     onSelect={(id) => {
                         engine.config.model = id;
@@ -383,7 +380,7 @@ class ReplEngine {
         if (opts.devMode) setFlags({verbose: true});
 
         this.apiKey = (this.config.apiKey as string) || null;
-        this.model = this.apiKey ? this.config.model || 'anthropic/claude-sonnet-4.6' : 'robinpath-default';
+        this.model = this.config.model || 'anthropic/claude-sonnet-4.6';
         this.sessionId = resumeSessionId || randomUUID().slice(0, 8);
         this.sessionName = `session-${new Date().toISOString().slice(0, 10)}`;
         this.usage = createUsageTracker();
@@ -412,11 +409,11 @@ class ReplEngine {
     }
 
     resolveProvider(key: string | null | undefined): string {
-        if (!key) return 'gemini';
+        if (!key) return 'openrouter';
         if (key.startsWith('sk-or-')) return 'openrouter';
         if (key.startsWith('sk-ant-')) return 'anthropic';
         if (key.startsWith('sk-')) return 'openai';
-        return (this.config.provider as string) || 'gemini';
+        return (this.config.provider as string) || 'openrouter';
     }
 
     updateStatus() {
@@ -567,9 +564,7 @@ class ReplEngine {
             if ((result as any).error) {finalResponse = `⚠ ${(result as any).error}`; break;}
             if (!result.code) {
                 const model = readAiConfig().model || this.model;
-                const hint = model === 'robinpath-default'
-                    ? 'The free model may be temporarily unavailable. Try again or switch to a paid model with /model.'
-                    : 'The AI returned an empty response. Try rephrasing or check your API key with /usage.';
+                const hint = 'The AI returned an empty response. Try rephrasing or check your API key with /usage.';
                 finalResponse = fullText || `⚠ ${hint}`;
                 break;
             }

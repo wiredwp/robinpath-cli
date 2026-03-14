@@ -80,7 +80,7 @@ export async function fetchBrainContext(prompt: string): Promise<BrainResult | n
             body: JSON.stringify({
                 prompt,
                 topK: 10,
-                model: 'robinpath-default',
+                model: 'anthropic/claude-sonnet-4.6',
             }),
             signal: AbortSignal.timeout(15000),
         });
@@ -118,7 +118,7 @@ export async function fetchBrainStream(
         const body: Record<string, unknown> = {
             prompt,
             topK: 10,
-            model: model || 'robinpath-default',
+            model: model || 'anthropic/claude-sonnet-4.6',
             stream: true,
         };
         if (provider) body.provider = provider;

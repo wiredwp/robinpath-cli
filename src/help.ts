@@ -806,7 +806,6 @@ HEADLESS MODE (-p):
   - Piping:         robinpath -p "explain this" | less
 
 AVAILABLE MODELS:
-  robinpath-default                     (free, no key needed)
   anthropic/claude-sonnet-4.6           (recommended)
   anthropic/claude-opus-4.6             (most capable)
   anthropic/claude-haiku-4.5            (fastest)

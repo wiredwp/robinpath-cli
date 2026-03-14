@@ -103,52 +103,13 @@ interface CommandResult {
 // ============================================================================
 
 export async function welcomeWizard(): Promise<void> {
-    const options: { name: string; value: string }[] = [
-        { name: 'Start with free tier (no key needed)', value: 'free' },
-        { name: 'I have an API key (OpenRouter, OpenAI, Anthropic)', value: 'key' },
-    ];
-
-    let cursor = 0;
-
-    const picked: string | null =
-        (await createInteractivePicker({
-            renderFn: (out: (text: string) => void) => {
-                out('');
-                out(color.bold('  Welcome to RobinPath AI!'));
-                out(color.dim('  Your AI-powered scripting assistant'));
-                out('');
-                for (let i = 0; i < options.length; i++) {
-                    const marker = i === cursor ? color.cyan('\u276f') : ' ';
-                    const text = i === cursor ? color.cyan(color.bold(options[i].name)) : options[i].name;
-                    out(`  ${marker} ${text}`);
-                }
-                out('');
-                out(color.dim('  \u2191\u2193 navigate  Enter select'));
-            },
-            onKeyFn: (key: string) => {
-                if (key === '\r' || key === '\n') return options[cursor].value;
-                if (key === '\x1b') return 'free';
-                if (key === '\x1b[A' || key === 'k') {
-                    cursor = Math.max(0, cursor - 1);
-                    return 'render';
-                }
-                if (key === '\x1b[B' || key === 'j') {
-                    cursor = Math.min(options.length - 1, cursor + 1);
-                    return 'render';
-                }
-                return undefined;
-            },
-        })) || 'free';
-
-    if (picked === 'free') {
-        writeAiConfig({ model: 'robinpath-default' });
-        log(color.green('  \u2713 Free tier activated \u2014 using Gemini 2.0 Flash'));
-        log(color.dim(`  Upgrade anytime: ${color.cyan('robinpath ai config set-key <api-key>')}`));
-        log('');
-        return;
-    }
-
     // Key setup flow — masked input (no readline, pure raw mode)
+    log('');
+    log(color.bold('  Welcome to RobinPath AI!'));
+    log(color.dim('  Your AI-powered scripting assistant'));
+    log('');
+    log(color.dim('  An OpenRouter API key is required.'));
+    log(color.dim('  Get one at: https://openrouter.ai/keys'));
     log('');
     const key: string = await new Promise((resolve) => {
         if (process.stdin.isTTY) {
@@ -194,8 +155,8 @@ export async function welcomeWizard(): Promise<void> {
     });
 
     if (!key || !key.trim()) {
-        writeAiConfig({ model: 'robinpath-default' });
-        log(color.dim('  No key provided \u2014 using free tier.'));
+        log(color.red('  An OpenRouter API key is required to use RobinPath AI.'));
+        log(color.dim(`  Set one with: ${color.cyan('robinpath ai config set-key <api-key>')}`));
         return;
     }
 
@@ -345,11 +306,11 @@ export async function handleAiConfig(args: string[]): Promise<void> {
         log(color.bold('  AI Configuration:'));
         log(color.dim('  ' + '\u2500'.repeat(40)));
         if (!config.apiKey) {
-            log(`  Provider:  ${color.cyan('gemini')} (free, no key needed)`);
-            log(`  Model:     ${color.cyan('gemini-2.0-flash')}`);
-            log(`  API Key:   ${color.dim('(none \u2014 using free tier)')}`);
+            log(`  Provider:  ${color.dim('(not configured)')}`);
+            log(`  Model:     ${color.cyan(config.model || 'anthropic/claude-sonnet-4.6')}`);
+            log(`  API Key:   ${color.red('(none — API key required)')}`);
             log('');
-            log(color.dim('  Optional: set a key for premium models:'));
+            log(color.dim('  Set an OpenRouter API key:'));
             log(color.dim(`  ${color.cyan('robinpath ai config set-key <api-key>')}`));
         } else {
             log(`  Provider:  ${color.cyan((config.provider as string) || 'openrouter')}`);
@@ -373,7 +334,7 @@ export async function handleAiConfig(args: string[]): Promise<void> {
     } else {
         console.error(color.red('Error:') + ' Usage: robinpath ai config <set-key|set-model|show|remove>');
         console.error('');
-        console.error('  robinpath ai config set-key <key>          Set API key (optional, free tier works without)');
+        console.error('  robinpath ai config set-key <key>          Set API key (required)');
         console.error('  robinpath ai config set-model <model>     Set model (e.g. openai/gpt-4o)');
         console.error('  robinpath ai config show                  Show current configuration');
         console.error('  robinpath ai config remove                Remove configuration');
@@ -397,22 +358,20 @@ export async function startAiREPL(
 
     // Resolve provider from API key prefix (if key is set)
     const resolveProvider = (key: string | null | undefined): string => {
-        if (!key) return 'gemini';
+        if (!key) return 'openrouter';
         if (key.startsWith('sk-or-')) return 'openrouter';
         if (key.startsWith('sk-ant-')) return 'anthropic';
         if (key.startsWith('sk-')) return 'openai';
-        return (config.provider as string) || 'gemini';
+        return (config.provider as string) || 'openrouter';
     };
 
     const apiKey: string | null = (config.apiKey as string) || null;
     const provider: string = resolveProvider(apiKey);
-    const model: string = apiKey ? config.model || 'anthropic/claude-sonnet-4.6' : 'robinpath-default';
+    const model: string = config.model || 'anthropic/claude-sonnet-4.6';
     const modelShort: string =
-        model === 'robinpath-default'
-            ? 'gemini-2.0-flash (free)'
-            : model.includes('/')
-              ? model.split('/').pop()!
-              : model;
+        model.includes('/')
+            ? model.split('/').pop()!
+            : model;
 
     // Build CLI context to send to brain
     const cliContext: Record<string, unknown> = {
@@ -673,8 +632,7 @@ export async function startAiREPL(
 
         if (trimmed === '/model') {
             // Show numbered model list — no raw mode, uses readline (safe)
-            const hasKey: boolean = !!readAiConfig().apiKey;
-            const models: ModelInfo[] = hasKey ? AI_MODELS : AI_MODELS.filter((m: ModelInfo) => !m.requiresKey);
+            const models: ModelInfo[] = AI_MODELS;
             const currentModel: string = readAiConfig().model || model;
             log('');
             let lastGroup = '';
@@ -945,7 +903,7 @@ export async function startAiREPL(
             if (usage.cost > 0) {
                 log(`  Est. cost:         ${color.yellow('$' + usage.cost.toFixed(4))}`);
             } else {
-                log(`  Est. cost:         ${color.green('$0.00 (free tier)')}`);
+                log(`  Est. cost:         ${color.green('$0.00')}`);
             }
             log('');
             continue;
