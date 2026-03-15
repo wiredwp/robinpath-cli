@@ -1,92 +1,76 @@
 # RobinPath CLI
 
-Scripting language for automation — with built-in AI that understands your code.
+AI-powered scripting CLI — automate anything from your terminal.
 
 ## Install
 
-**Windows** (PowerShell):
-```powershell
-irm https://dev.robinpath.com/install.ps1 | iex
+```
+npm install -g @robinpath/cli
 ```
 
-**macOS / Linux**:
-```sh
-curl -fsSL https://dev.robinpath.com/install.sh | bash
+Requires Node.js 18+.
+
+## Getting Started
+
 ```
-
-Then restart your terminal and verify:
-```
-robinpath --version
-```
-
-## Quick Start
-
-```sh
-# Run a script
-robinpath app.rp
-
-# Inline code
-robinpath -e 'log "Hello World"'
-
-# AI code generation (streaming)
-robinpath -p "read a csv and send email to each row"
-
-# AI + save to file
-robinpath -p "implement quicksort" --save
-
-# AI + save and run
-robinpath -p "fetch weather for London" --save --run
-
-# Interactive AI assistant
 robinpath
 ```
 
-## AI Mode
+First run guides you through:
+1. **Login** — authenticate with your RobinPath account
+2. **API key** — paste your OpenRouter key (get one at [openrouter.ai/keys](https://openrouter.ai/keys))
+3. **Ready** — start chatting with the AI
 
-RobinPath has a built-in AI assistant that knows the entire language and all 210+ modules.
-
-```
-robinpath -p "your question"     # Headless (streaming output)
-robinpath -p "..." --save        # Generate and save to .rp file
-robinpath -p "..." --run         # Generate, save, and run
-robinpath -p "..." -o app.rp     # Save to specific file
-robinpath                        # Interactive AI REPL
-```
-
-The AI works in any language — English, Russian, Romanian, Spanish, Chinese, etc.
-
-To use the interactive REPL with your own model:
-```
-robinpath ai config set-key <your-openrouter-key>
-robinpath ai config set-model anthropic/claude-sonnet-4-20250514
-```
-
-## Modules
-
-210+ built-in and installable modules for common tasks:
+## Usage
 
 ```sh
-robinpath add @robinpath/slack      # Install a module
-robinpath remove @robinpath/slack   # Remove a module
-robinpath search slack              # Search the registry
-robinpath info @robinpath/slack     # Module details
+# Interactive AI assistant
+robinpath
+
+# Headless AI prompt (for scripts/piping)
+robinpath -p "create a script that fetches weather data"
+
+# Run a script
+robinpath hello.rp
+
+# Inline code
+robinpath -e 'log "Hello World"'
 ```
 
-## Commands
+## AI Commands (inside the REPL)
 
 | Command | Description |
 |---------|-------------|
-| `<file.rp>` | Run a script |
-| `-p "prompt"` | AI code generation |
-| `-e "code"` | Execute inline code |
-| `add <pkg>` | Install a module |
-| `remove <pkg>` | Remove a module |
-| `search <query>` | Search modules |
-| `fmt <file>` | Format a script |
-| `check <file>` | Syntax check |
-| `test [dir]` | Run test files |
-| `update` | Update CLI to latest |
-| `install` / `uninstall` | System install/remove |
+| `/model` | Switch AI model (arrow-key selector) |
+| `/settings` | View API key, model, shell config |
+| `/clear` | Clear conversation |
+| `/save` | Save session |
+| `/sessions` | List saved sessions |
+| `/resume` | Resume a session |
+| `/memory` | Persistent memory across sessions |
+| `/init` | Create ROBINPATH.md project config |
+| `/auto` | Toggle auto-accept for commands |
+| `/shell` | Switch shell (bash, powershell, zsh) |
+| `/usage` | Token usage and cost |
+| `@filename` | Include file contents in prompt |
+| `exit` | Quit |
+
+## CLI Commands
+
+```sh
+robinpath <file.rp>          # Run a script
+robinpath -p "prompt"        # AI headless mode
+robinpath -e "code"          # Execute inline code
+robinpath fmt <file>         # Format code
+robinpath check <file>       # Syntax check
+robinpath test [dir]         # Run tests
+robinpath add <pkg>          # Install a module
+robinpath remove <pkg>       # Remove a module
+robinpath search <query>     # Search module registry
+robinpath login              # Authenticate
+robinpath update             # Self-update to latest
+robinpath uninstall          # Clean removal
+```
 
 ## Flags
 
@@ -95,17 +79,32 @@ robinpath info @robinpath/slack     # Module details
 | `-p "prompt"` | AI headless mode |
 | `--save` | Save generated code to .rp file |
 | `--run` | Save and run generated code |
-| `-o <file>` | Output filename for --save |
-| `-e` | Execute inline code |
-| `-v` | Show version |
-| `-h` | Show help |
+| `-o <file>` | Output filename |
+| `--auto` | Auto-accept commands |
+| `--dev` | Dev mode (auto + verbose) |
+| `-v` | Version |
+| `-h` | Help |
 
-## Platforms
+## ROBINPATH.md
 
-| Platform | Binary |
-|----------|--------|
-| Windows x64 | `robinpath-windows-x64.exe` |
-| macOS ARM64 | `robinpath-macos-arm64` |
-| Linux x64 | `robinpath-linux-x64` |
+Create a `ROBINPATH.md` file in your project to customize the AI's behavior — like Claude Code's `CLAUDE.md`. The AI reads it automatically on startup.
 
-Binaries install to `~/.robinpath/bin/`. Shorthand `rp` works everywhere.
+```
+robinpath
+> /init
+```
+
+## Configuration
+
+```sh
+robinpath ai config set-key ...       # Set API key
+robinpath ai config set-model <id>    # Set model
+robinpath ai config show              # View config
+robinpath ai config remove            # Remove config
+```
+
+## Links
+
+- Website: [dev.robinpath.com](https://dev.robinpath.com)
+- npm: [@robinpath/cli](https://www.npmjs.com/package/@robinpath/cli)
+- GitHub: [wiredwp/robinpath-cli](https://github.com/wiredwp/robinpath-cli)
