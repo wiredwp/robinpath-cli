@@ -574,12 +574,28 @@ async function main(): Promise<void> {
             console.log(color.bold('  3.') + ' Paste it below:');
             console.log('');
 
-            // Masked key input — right here, no separate command needed
+            // Key input — shows prefix so user knows paste worked
             const apiKey: string = await new Promise((resolve) => {
                 process.stdout.write(color.cyan('  API key: '));
                 process.stdin.setRawMode(true);
                 process.stdin.resume();
                 let input = '';
+
+                function redraw() {
+                    // Clear line and redraw with visible prefix + masked rest
+                    process.stdout.write('\r\x1b[2K');
+                    if (input.length === 0) {
+                        process.stdout.write(color.cyan('  API key: '));
+                    } else if (input.length <= 8) {
+                        process.stdout.write(color.cyan('  API key: ') + color.dim(input));
+                    } else {
+                        const prefix = input.slice(0, 8);
+                        const masked = '•'.repeat(Math.min(input.length - 8, 20));
+                        const suffix = input.length > 10 ? input.slice(-3) : '';
+                        process.stdout.write(color.cyan('  API key: ') + color.dim(prefix + masked + suffix));
+                    }
+                }
+
                 const onData = (ch: Buffer): void => {
                     const c = ch.toString();
                     if (c === '\r' || c === '\n') {
@@ -595,10 +611,13 @@ async function main(): Promise<void> {
                         process.stdout.write('\n');
                         resolve('');
                     } else if (c === '\x7f' || c === '\b') {
-                        if (input.length > 0) { input = input.slice(0, -1); process.stdout.write('\b \b'); }
-                    } else if (c.charCodeAt(0) >= 32) {
-                        input += c;
-                        process.stdout.write('*');
+                        if (input.length > 0) { input = input.slice(0, -1); redraw(); }
+                    } else {
+                        // Handle paste (multiple chars at once) and single chars
+                        for (const char of c) {
+                            if (char.charCodeAt(0) >= 32) input += char;
+                        }
+                        redraw();
                     }
                 };
                 process.stdin.on('data', onData);
