@@ -1,5 +1,0 @@
-{
-    "main": "dist/robinpath-cli.cjs",
-    "output": "dist/sea-prep.blob",
-    "disableExperimentalSEAWarning": true
-}
