@@ -48,6 +48,7 @@ const COMMANDS: Record<string, string> = {
     '/remember': 'Save a fact',
     '/forget': 'Remove a memory',
     '/usage': 'Token usage & cost',
+    '/settings': 'API key, model, shell',
     '/shell': 'Switch shell',
     '/init': 'Create ROBINPATH.md',
     '/help': 'All commands',
@@ -598,6 +599,29 @@ class ReplEngine {
         if (text === '/usage') {
             const c = this.usage.cost > 0 ? `$${this.usage.cost.toFixed(4)}` : '$0.00 (free)';
             return `${this.usage.totalTokens.toLocaleString()} tokens · ${this.usage.requests} requests · ${c}`;
+        }
+        if (text === '/settings') {
+            const cfg = readAiConfig();
+            const key = (cfg.apiKey as string) || '';
+            const masked = key.length > 10
+                ? key.slice(0, 8) + '•'.repeat(Math.min(key.length - 11, 15)) + key.slice(-3)
+                : key ? '(set)' : '(not set)';
+            const model = cfg.model || 'anthropic/claude-sonnet-4.6';
+            const provider = (cfg.provider as string) || 'openrouter';
+            const shell = getShellConfig().name;
+            return [
+                'Settings:',
+                `  API key:   ${masked}`,
+                `  Provider:  ${provider}`,
+                `  Model:     ${model.includes('/') ? model.split('/').pop() : model}`,
+                `  Shell:     ${shell}`,
+                '',
+                'Commands:',
+                '  /model              Switch model',
+                '  /shell <name>       Switch shell',
+                '  robinpath ai config set-key ...   Change API key',
+                '  robinpath ai config remove        Remove all config',
+            ].join('\n');
         }
         if (text === '/memory') {
             const m = loadMemory();
